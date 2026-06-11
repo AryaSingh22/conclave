@@ -1,0 +1,22 @@
+# binaries / build output
+build/
+dist/
+*.exe
+*.test
+
+# coverage & profiling
+*.out
+*.prof
+coverage.html
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# local env
+.env
