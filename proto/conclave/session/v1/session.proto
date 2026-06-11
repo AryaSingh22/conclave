@@ -1,0 +1,181 @@
+syntax = "proto3";
+package conclave.session.v1;
+
+import "amino/amino.proto";
+import "conclave/escrow/v1/escrow.proto";
+import "conclave/veil/v1/intent.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/session/types";
+
+// SessionState is the session lifecycle (SPEC §6.4).
+enum SessionState {
+  option (gogoproto.goproto_enum_prefix) = false;
+
+  // SESSION_STATE_UNSPECIFIED is the zero value and never stored.
+  SESSION_STATE_UNSPECIFIED = 0;
+  // SESSION_STATE_FORMING is collecting OPEN intents.
+  SESSION_STATE_FORMING = 1;
+  // SESSION_STATE_AUCTION: bonded solvers submit MsgProposeSolution.
+  SESSION_STATE_AUCTION = 2;
+  // SESSION_STATE_SCORING: deterministic winner selection in EndBlock.
+  SESSION_STATE_SCORING = 3;
+  // SESSION_STATE_CONCLUDING: the winner's graph executes via Conclude.
+  SESSION_STATE_CONCLUDING = 4;
+  // SESSION_STATE_FALLBACK: zero valid solutions; the in-protocol naive
+  // matcher runs in EndBlock (part of consensus).
+  SESSION_STATE_FALLBACK = 5;
+  // SESSION_STATE_CLOSED: receipts emitted, bonds settled, intents rolled.
+  SESSION_STATE_CLOSED = 6;
+}
+
+// Session is one batch-auction cycle (SPEC §6.4 session lifecycle).
+message Session {
+  // id is the monotonically increasing session number per chamber.
+  uint64 id = 1;
+  // chamber_id is fixed 0 until Phase 3.
+  uint32 chamber_id = 2;
+  // state is the current lifecycle state.
+  SessionState state = 3;
+  // start_height is the height the session started FORMING.
+  uint64 start_height = 4;
+  // auction_end_height is when the solution window closes.
+  uint64 auction_end_height = 5;
+  // intent_ids are the intents sealed into this session, in fixed order
+  // (the order-then-reveal invariant fixes this list before the Reveal).
+  repeated string intent_ids = 6;
+  // winning_solution_id is the id of the winning solution ("" until SCORING).
+  string winning_solution_id = 7;
+}
+
+// SolverStatus is the solver registry status (SPEC §6.4).
+enum SolverStatus {
+  option (gogoproto.goproto_enum_prefix) = false;
+
+  // SOLVER_STATUS_UNSPECIFIED is the zero value and never stored.
+  SOLVER_STATUS_UNSPECIFIED = 0;
+  // SOLVER_STATUS_ACTIVE may submit solutions.
+  SOLVER_STATUS_ACTIVE = 1;
+  // SOLVER_STATUS_UNBONDING is in the unbonding period (1 day of blocks).
+  SOLVER_STATUS_UNBONDING = 2;
+}
+
+// Solver is a bonded off-chain matcher (SPEC §6.4 solver registry).
+message Solver {
+  // addr is the solver's account address.
+  string addr = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  // bond is the posted solver bond.
+  repeated cosmos.base.v1beta1.Coin bond = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true,
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"
+  ];
+  // status is the registry status.
+  SolverStatus status = 3;
+  // slashed_count counts slashing events.
+  uint64 slashed_count = 4;
+  // lifetime_surplus is the cumulative delivered surplus in uusdc terms.
+  string lifetime_surplus = 5 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  // unbond_height is the height unbonding completes (0 if ACTIVE).
+  uint64 unbond_height = 6;
+}
+
+// PricePoint is a uniform clearing price for one asset pair within a match
+// (SPEC §6.4 validation rule 4).
+message PricePoint {
+  // base identifies the asset being priced (denom, or data/{schema},
+  // svc/{schema} for non-coin assets).
+  string base = 1;
+  // quote is the asset the price is quoted in (dev: uusdc).
+  string quote = 2;
+  // price is quote per base unit.
+  string price = 3 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// SettleLeg is one directed transfer in the settlement graph (SPEC §6.4).
+// Coin legs move via the module escrow account; DataGrant legs instantiate
+// x/escrow entries; ServiceVoucher legs mint svc/{schema} voucher tokens.
+message SettleLeg {
+  // from_sigil is the giving party.
+  string from_sigil = 1;
+  // to_sigil is the receiving party.
+  string to_sigil = 2;
+  // asset is what moves on this leg.
+  oneof asset {
+    cosmos.base.v1beta1.Coin coin = 3;
+    conclave.veil.v1.DataGrant data = 4;
+    conclave.veil.v1.ServiceVoucher svc = 5;
+  }
+  // condition optionally guards the leg (Phase 0: must be NONE —
+  // ErrConditionsNotEnabled otherwise, SPEC §6.5).
+  conclave.escrow.v1.DeliveryCondition condition = 6;
+}
+
+// Match is a set of intents cleared together at uniform prices (SPEC §6.4).
+message Match {
+  // intent_ids are the matched intents; no intent may appear in two matches.
+  repeated string intent_ids = 1;
+  // legs is the directed transfer graph for this match.
+  repeated SettleLeg legs = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // clearing_prices are the uniform prices used (one per asset pair).
+  repeated PricePoint clearing_prices = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+// Solution is a stored solver proposal for a session (SPEC §6.4).
+message Solution {
+  // id is the solution identifier (tx-hash derived; ties in scoring break by
+  // lower hash).
+  string id = 1;
+  // session_id is the target session.
+  uint64 session_id = 2;
+  // solver is the proposing solver address.
+  string solver = 3 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  // matches is the proposed clearing.
+  repeated Match matches = 4 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // score is the protocol-computed surplus score (set during SCORING).
+  string score = 5 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// Params are the governable x/session module parameters (SPEC §6.4, dev
+// defaults per §6.4 and decisions D1/D3).
+message Params {
+  // session_length_blocks is the session cadence (dev default 3).
+  uint64 session_length_blocks = 1;
+  // solution_window_blocks is the auction window (dev default 2).
+  uint64 solution_window_blocks = 2;
+  // solver_min_bond is the minimum solver bond in uclv.
+  cosmos.base.v1beta1.Coin solver_min_bond = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // solver_fee_bps is the solver fee in bps of settled surplus (D3: 500).
+  uint32 solver_fee_bps = 4;
+  // max_graph_legs caps the settlement graph size (default 256).
+  uint32 max_graph_legs = 5;
+  // max_solutions_per_session caps stored proposals (default 16).
+  uint32 max_solutions_per_session = 6;
+  // solver_unbond_blocks is the unbonding period (1 day of blocks).
+  uint64 solver_unbond_blocks = 7;
+  // invalid_solution_slash_bps is slashed on invalid solutions (5% = 500).
+  uint32 invalid_solution_slash_bps = 8;
+  // equivocation_slash_bps is slashed on two solutions for one session
+  // (20% = 2000).
+  uint32 equivocation_slash_bps = 9;
+  // surplus_skim_bps funds the protocol fee pool from settled value
+  // (SPEC §6.4 "small skim (param)").
+  uint32 surplus_skim_bps = 10;
+}

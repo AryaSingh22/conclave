@@ -1,0 +1,13 @@
+syntax = "proto3";
+package conclave.escrow.v1;
+
+import "amino/amino.proto";
+import "conclave/escrow/v1/escrow.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/escrow/types";
+
+// GenesisState defines the x/escrow genesis state (logic Phase 2).
+message GenesisState {
+  repeated Escrow escrows = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

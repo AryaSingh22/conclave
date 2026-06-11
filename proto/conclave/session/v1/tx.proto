@@ -1,0 +1,101 @@
+syntax = "proto3";
+package conclave.session.v1;
+
+import "amino/amino.proto";
+import "conclave/session/v1/session.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/session/types";
+
+// Msg defines the x/session Msg service (SPEC §6.4).
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // RegisterSolver registers and bonds a solver (bond >= solver_min_bond).
+  rpc RegisterSolver(MsgRegisterSolver) returns (MsgRegisterSolverResponse);
+
+  // UnbondSolver starts solver unbonding (period: 1 day of blocks).
+  rpc UnbondSolver(MsgUnbondSolver) returns (MsgUnbondSolverResponse);
+
+  // ProposeSolution submits a solution for a session in AUCTION. Invalid
+  // solutions slash 5% of bond; equivocation slashes 20% (SPEC §6.4).
+  rpc ProposeSolution(MsgProposeSolution) returns (MsgProposeSolutionResponse);
+
+  // Conclude executes a settlement graph atomically. Restricted to the
+  // module authority — normal settlement runs internally in EndBlock; this
+  // entry point exists for CVM bindings and testing (SPEC §6.4).
+  rpc Conclude(MsgConclude) returns (MsgConcludeResponse);
+
+  // UpdateParams updates the module parameters (governance authority only).
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+// MsgRegisterSolver registers the signer as a bonded solver.
+message MsgRegisterSolver {
+  option (cosmos.msg.v1.signer) = "solver";
+  option (amino.name) = "conclave/session/MsgRegisterSolver";
+
+  string solver = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  repeated cosmos.base.v1beta1.Coin bond = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true,
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"
+  ];
+}
+
+message MsgRegisterSolverResponse {}
+
+// MsgUnbondSolver starts unbonding the signer's solver bond.
+message MsgUnbondSolver {
+  option (cosmos.msg.v1.signer) = "solver";
+  option (amino.name) = "conclave/session/MsgUnbondSolver";
+
+  string solver = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+}
+
+message MsgUnbondSolverResponse {
+  // completion_height is when the bond releases.
+  uint64 completion_height = 1;
+}
+
+// MsgProposeSolution submits a clearing proposal for an open session.
+message MsgProposeSolution {
+  option (cosmos.msg.v1.signer) = "solver";
+  option (amino.name) = "conclave/session/MsgProposeSolution";
+
+  string solver = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 session_id = 2;
+  repeated Match matches = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgProposeSolutionResponse {
+  string solution_id = 1;
+}
+
+// MsgConclude applies a settlement graph atomically (all-or-nothing within
+// one cache-wrapped context — SPEC §6.4). authority must be the module
+// authority; CONCLAVE-TODO(phase-2): exposed to CVM via custom bindings.
+message MsgConclude {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "conclave/session/MsgConclude";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 session_id = 2;
+  repeated Match matches = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgConcludeResponse {}
+
+// MsgUpdateParams updates module params; authority is the gov module account.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "conclave/session/MsgUpdateParams";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  Params params = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgUpdateParamsResponse {}

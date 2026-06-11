@@ -1,0 +1,106 @@
+syntax = "proto3";
+package conclave.mandate.v1;
+
+import "amino/amino.proto";
+import "conclave/mandate/v1/mandate.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/mandate/types";
+
+// Msg defines the x/mandate Msg service (SPEC §6.2).
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // IssueMandate issues a mandate to a grantee key. The signer must be the
+  // sigil controller. Issuing to a key that already holds an active mandate
+  // replaces it (SPEC §6.2, D2: one active mandate per key).
+  rpc IssueMandate(MsgIssueMandate) returns (MsgIssueMandateResponse);
+
+  // RevokeMandate revokes a mandate immediately (effective next block).
+  rpc RevokeMandate(MsgRevokeMandate) returns (MsgRevokeMandateResponse);
+
+  // AmendMandate replaces a mandate in full — never in-place mutation of
+  // ceilings (SPEC §6.2).
+  rpc AmendMandate(MsgAmendMandate) returns (MsgAmendMandateResponse);
+
+  // UpdateParams updates the module parameters (governance authority only).
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+// MandateTerms are the controller-specified fields of a mandate, shared by
+// issue and amend. Runtime accounting fields (window_spent,
+// window_start_height, revoked) are keeper-managed and not part of terms.
+message MandateTerms {
+  string sigil_id = 1;
+  string grantee_addr = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  // allowed_msg_types must never include MsgIssueMandate/MsgRevokeMandate/
+  // MsgAmendMandate (privilege-escalation guard, SPEC §6.2 step 3).
+  repeated string allowed_msg_types = 3;
+  repeated cosmos.base.v1beta1.Coin spend_ceiling_per_tx = 4 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true,
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"
+  ];
+  repeated cosmos.base.v1beta1.Coin spend_ceiling_window = 5 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true,
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"
+  ];
+  uint64 window_blocks = 6;
+  string counterparty_class = 7;
+  string fee_sponsor = 8 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  repeated string fee_denoms = 9;
+  uint64 expiry_height = 10;
+  uint32 chamber_id = 11;
+}
+
+// MsgIssueMandate issues a new mandate; signer must be the sigil controller.
+message MsgIssueMandate {
+  option (cosmos.msg.v1.signer) = "controller";
+  option (amino.name) = "conclave/mandate/MsgIssueMandate";
+
+  string controller = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  MandateTerms terms = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgIssueMandateResponse {
+  string mandate_id = 1;
+}
+
+// MsgRevokeMandate revokes an active mandate; signer must be the controller.
+message MsgRevokeMandate {
+  option (cosmos.msg.v1.signer) = "controller";
+  option (amino.name) = "conclave/mandate/MsgRevokeMandate";
+
+  string controller = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string mandate_id = 2;
+}
+
+message MsgRevokeMandateResponse {}
+
+// MsgAmendMandate replaces the mandate identified by mandate_id with the
+// given terms (full replacement semantics).
+message MsgAmendMandate {
+  option (cosmos.msg.v1.signer) = "controller";
+  option (amino.name) = "conclave/mandate/MsgAmendMandate";
+
+  string controller = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string mandate_id = 2;
+  MandateTerms terms = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgAmendMandateResponse {}
+
+// MsgUpdateParams updates module params; authority is the gov module account.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "conclave/mandate/MsgUpdateParams";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  Params params = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgUpdateParamsResponse {}

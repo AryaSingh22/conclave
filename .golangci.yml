@@ -39,6 +39,9 @@ linters-settings:
         msg: "wall-clock time is non-deterministic; use ctx.BlockTime()/BlockHeight() (SPEC §11.6)"
 
 issues:
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.pb\\.gw\\.go$"
   exclude-rules:
     # tests and the CLI are not consensus code
     - path: _test\.go

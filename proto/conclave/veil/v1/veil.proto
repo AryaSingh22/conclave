@@ -1,0 +1,21 @@
+syntax = "proto3";
+package conclave.veil.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/veil/types";
+
+// Params are the governable x/veil module parameters (SPEC §6.3).
+message Params {
+  // min_bond is the minimum anti-spam bond
+  // (SPEC §6.3: bond = max(min_bond, bond_bps * face_value)).
+  cosmos.base.v1beta1.Coin min_bond = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // bond_bps is the bond as basis points of intent face value.
+  uint32 bond_bps = 2;
+  // invalid_slash_bps is the bond fraction slashed to the community pool on
+  // INVALID (SPEC §6.3: 50% = 5000 bps).
+  uint32 invalid_slash_bps = 3;
+}

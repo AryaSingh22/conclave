@@ -31,7 +31,11 @@ lint-fix:
 localnet:
 	./scripts/localnet.sh
 
-# CONCLAVE-TODO(phase-0): proto-gen target lands with task 0.2 (buf generate
-# via scripts/protocgen.sh; acceptance: `make proto-gen` idempotent).
+# proto-gen regenerates Go code from proto/ (idempotent — SPEC §10 row 0.2)
+proto-gen:
+	./scripts/protocgen.sh
 
-.PHONY: all install build test lint lint-fix localnet
+proto-lint:
+	cd proto && buf lint
+
+.PHONY: all install build test lint lint-fix localnet proto-gen proto-lint

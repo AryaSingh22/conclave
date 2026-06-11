@@ -1,0 +1,14 @@
+syntax = "proto3";
+package conclave.receipt.v1;
+
+import "amino/amino.proto";
+import "conclave/receipt/v1/receipt.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/receipt/types";
+
+// GenesisState defines the x/receipt genesis state (export/import of the
+// receipt archive).
+message GenesisState {
+  repeated Receipt receipts = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

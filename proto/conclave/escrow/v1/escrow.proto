@@ -1,0 +1,89 @@
+syntax = "proto3";
+package conclave.escrow.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/escrow/types";
+
+// DeliveryCondition is the enforceable delivery condition attached to a
+// CONCLUDE leg (SPEC §6.5). An unset condition oneof means NONE — in
+// Phase 0, legs carrying any condition other than NONE are rejected at
+// solution validation with ErrConditionsNotEnabled.
+message DeliveryCondition {
+  oneof condition {
+    HashlockCondition hashlock = 1;
+    OptimisticCondition optimistic = 2;
+    ZkDeliveryCondition zk_delivery = 3;
+  }
+}
+
+// HashlockCondition: buyer releases by presenting the preimage
+// receipt-of-access; auto-refund at timeout (SPEC §6.5 HASHLOCK).
+message HashlockCondition {
+  bytes payload_hash = 1;
+  uint64 timeout_blocks = 2;
+}
+
+// OptimisticCondition: funds release after the dispute window unless a
+// dispute is raised (SPEC §6.5 OPTIMISTIC). Phase-2 dispute resolution is
+// hash-mismatch challenge only, not subjective arbitration (D5).
+message OptimisticCondition {
+  uint64 dispute_window_blocks = 1;
+}
+
+// ZkDeliveryCondition: seller submits a groth16 proof that the delivered
+// ciphertext matches the committed schema/hash (SPEC §6.5 ZK_DELIVERY;
+// verifier lands Phase 2).
+message ZkDeliveryCondition {
+  bytes schema_commitment = 1;
+  string vk_id = 2;
+}
+
+// EscrowState is the lifecycle state of an escrow entry.
+enum EscrowState {
+  option (gogoproto.goproto_enum_prefix) = false;
+
+  // ESCROW_STATE_UNSPECIFIED is the zero value and never stored.
+  ESCROW_STATE_UNSPECIFIED = 0;
+  // ESCROW_STATE_ACTIVE holds funds pending condition resolution.
+  ESCROW_STATE_ACTIVE = 1;
+  // ESCROW_STATE_RELEASED paid out to the beneficiary.
+  ESCROW_STATE_RELEASED = 2;
+  // ESCROW_STATE_REFUNDED returned to the payer (timeout / resolved dispute).
+  ESCROW_STATE_REFUNDED = 3;
+  // ESCROW_STATE_DISPUTED is under an open dispute.
+  ESCROW_STATE_DISPUTED = 4;
+}
+
+// Escrow is a conditioned settlement leg instantiated by CONCLUDE
+// (SPEC §6.4 "DataGrant legs instantiate x/escrow entries"; logic Phase 2).
+message Escrow {
+  // id is the unique escrow identifier.
+  string id = 1;
+  // session_id is the session whose CONCLUDE created this escrow.
+  uint64 session_id = 2;
+  // intent_id is the intent the conditioned leg belongs to.
+  string intent_id = 3;
+  // payer_sigil funds the escrow.
+  string payer_sigil = 4;
+  // payee_sigil receives on release.
+  string payee_sigil = 5;
+  // amount is the escrowed value.
+  repeated cosmos.base.v1beta1.Coin amount = 6 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true,
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"
+  ];
+  // condition is the delivery condition guarding release.
+  DeliveryCondition condition = 7 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // state is the current lifecycle state.
+  EscrowState state = 8;
+  // created_height is the height the escrow was instantiated at.
+  uint64 created_height = 9;
+  // timeout_height is the derived auto-refund/release height.
+  uint64 timeout_height = 10;
+  // chamber_id scopes the escrow; fixed 0 until Phase 3 (SPEC §1.2).
+  uint32 chamber_id = 11;
+}

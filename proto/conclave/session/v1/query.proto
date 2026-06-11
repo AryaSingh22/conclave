@@ -1,0 +1,92 @@
+syntax = "proto3";
+package conclave.session.v1;
+
+import "amino/amino.proto";
+import "conclave/session/v1/session.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/session/types";
+
+// Query defines the x/session query service (SPEC §6.4). Solvers read open
+// sessions through this surface (SPEC §7).
+service Query {
+  // Session returns a session by id.
+  rpc Session(QuerySessionRequest) returns (QuerySessionResponse) {
+    option (google.api.http).get = "/conclave/session/v1/sessions/{id}";
+  }
+
+  // CurrentSession returns the active session of a chamber.
+  rpc CurrentSession(QueryCurrentSessionRequest) returns (QueryCurrentSessionResponse) {
+    option (google.api.http).get = "/conclave/session/v1/current/{chamber_id}";
+  }
+
+  // Solver returns a solver registry entry.
+  rpc Solver(QuerySolverRequest) returns (QuerySolverResponse) {
+    option (google.api.http).get = "/conclave/session/v1/solvers/{addr}";
+  }
+
+  // Solvers returns all registered solvers.
+  rpc Solvers(QuerySolversRequest) returns (QuerySolversResponse) {
+    option (google.api.http).get = "/conclave/session/v1/solvers";
+  }
+
+  // Solutions returns the stored solutions of a session.
+  rpc Solutions(QuerySolutionsRequest) returns (QuerySolutionsResponse) {
+    option (google.api.http).get = "/conclave/session/v1/sessions/{session_id}/solutions";
+  }
+
+  // Params returns the module parameters.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/conclave/session/v1/params";
+  }
+}
+
+message QuerySessionRequest {
+  uint64 id = 1;
+}
+
+message QuerySessionResponse {
+  Session session = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryCurrentSessionRequest {
+  uint32 chamber_id = 1;
+}
+
+message QueryCurrentSessionResponse {
+  Session session = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QuerySolverRequest {
+  string addr = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+}
+
+message QuerySolverResponse {
+  Solver solver = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QuerySolversRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+message QuerySolversResponse {
+  repeated Solver solvers = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QuerySolutionsRequest {
+  uint64 session_id = 1;
+}
+
+message QuerySolutionsResponse {
+  repeated Solution solutions = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryParamsRequest {}
+
+message QueryParamsResponse {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

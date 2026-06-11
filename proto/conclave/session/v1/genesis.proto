@@ -1,0 +1,18 @@
+syntax = "proto3";
+package conclave.session.v1;
+
+import "amino/amino.proto";
+import "conclave/session/v1/session.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/session/types";
+
+// GenesisState defines the x/session genesis state. Genesis solvers allow
+// SPEC §12's pre-registered solver1 (task 0.8).
+message GenesisState {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  repeated Solver solvers = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  repeated Session sessions = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // next_session_id is the id the next session will take.
+  uint64 next_session_id = 4;
+}

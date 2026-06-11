@@ -1,0 +1,126 @@
+syntax = "proto3";
+package conclave.veil.v1;
+
+import "amino/amino.proto";
+import "conclave/escrow/v1/escrow.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/veil/types";
+
+// SealedIntent is the atomic unit of the system (SPEC §5.1 — authoritative
+// field list, implemented exactly).
+message SealedIntent {
+  // id is hash(sender_sigil, nonce, chamber) hex.
+  string id = 1;
+  // chamber_id is fixed 0 until Phase 3.
+  uint32 chamber_id = 2;
+  // sender_sigil is the submitting agent's sigil ID, not a raw address.
+  string sender_sigil = 3;
+  // ciphertext carries the encrypted IntentPayload. Phase 0 stub: plaintext
+  // IntentPayload proto bytes (SPEC §6.3 STUB mode).
+  bytes ciphertext = 4;
+  // envelope is ALWAYS plaintext routing metadata (serialized IntentEnvelope).
+  bytes envelope = 5;
+  // bond is the anti-spam bond in uclv (SPEC §6.3 bond rules).
+  cosmos.base.v1beta1.Coin bond = 6 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // submit_height is the height the intent was accepted at.
+  uint64 submit_height = 7;
+}
+
+// IntentEnvelope is serialized into SealedIntent.envelope (SPEC §5.1).
+message IntentEnvelope {
+  // ttl_height is the expiry; the intent rolls over until then.
+  uint64 ttl_height = 1;
+  // fee_bid is the priority bid within the veil lane (decimal string).
+  string fee_bid = 2;
+  // allow_partial permits partial fills.
+  bool allow_partial = 3;
+  // chamber_id is fixed 0 until Phase 3.
+  uint32 chamber_id = 4;
+}
+
+// IntentPayload is the encrypted part (plaintext in Phase 0) — SPEC §5.1.
+message IntentPayload {
+  // give is what the agent offers.
+  repeated IntentLeg give = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // want is what the agent requires (limit terms).
+  repeated IntentLeg want = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // condition optionally guards data/service legs (Phase 0: must be NONE).
+  conclave.escrow.v1.DeliveryCondition condition = 3;
+  // counterparty_class is a CEL predicate, e.g. "reputation >= 50".
+  string counterparty_class = 4;
+}
+
+// IntentLeg is one side of an intent (SPEC §5.1).
+message IntentLeg {
+  oneof asset {
+    // coin is a fungible asset.
+    cosmos.base.v1beta1.Coin coin = 1;
+    // data is a content-hash + access URI commitment.
+    DataGrant data = 2;
+    // svc is a typed service voucher (e.g. CMPT units).
+    ServiceVoucher svc = 3;
+  }
+  // limit is max-give / min-want as a decimal string.
+  string limit = 4;
+}
+
+// DataGrant commits to a dataset: content hash plus an access-URI
+// commitment. Settlement of a DataGrant leg instantiates an x/escrow entry
+// rather than transferring (SPEC §6.4).
+message DataGrant {
+  // content_hash is the hash of the dataset contents.
+  bytes content_hash = 1;
+  // access_uri_commitment commits to the off-chain access URI.
+  bytes access_uri_commitment = 2;
+  // schema_id optionally identifies the dataset schema.
+  string schema_id = 3;
+}
+
+// ServiceVoucher is a typed voucher for metered services. Settling a voucher
+// leg mints voucher tokens denom svc/{schema} (SPEC §6.4).
+message ServiceVoucher {
+  // schema identifies the voucher type (e.g. "cmpt").
+  string schema = 1;
+  // units is the quantity of service units (integer string).
+  string units = 2 [
+    (gogoproto.customtype) = "cosmossdk.io/math.Int",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// IntentState is the intent lifecycle state (SPEC §5.2).
+enum IntentState {
+  option (gogoproto.goproto_enum_prefix) = false;
+
+  // INTENT_STATE_UNSPECIFIED is the zero value and never stored.
+  INTENT_STATE_UNSPECIFIED = 0;
+  // INTENT_STATE_SUBMITTED: accepted into the Veil, ordering not yet fixed.
+  INTENT_STATE_SUBMITTED = 1;
+  // INTENT_STATE_SEALED_IN_SESSION: ordering fixed at a session boundary.
+  INTENT_STATE_SEALED_IN_SESSION = 2;
+  // INTENT_STATE_OPEN: revealed; available for matching.
+  INTENT_STATE_OPEN = 3;
+  // INTENT_STATE_CONCLUDED: matched in the winning solution; bond refunded.
+  INTENT_STATE_CONCLUDED = 4;
+  // INTENT_STATE_ROLLED: unmatched, ttl not reached; rolls to next session.
+  INTENT_STATE_ROLLED = 5;
+  // INTENT_STATE_EXPIRED: unmatched, ttl reached; bond refunded.
+  INTENT_STATE_EXPIRED = 6;
+  // INTENT_STATE_INVALID: Reveal failed / malformed payload; bond 50% slashed.
+  INTENT_STATE_INVALID = 7;
+  // INTENT_STATE_CANCELLED: cancelled by owner pre-OPEN; bond refunded.
+  INTENT_STATE_CANCELLED = 8;
+}
+
+// IntentRecord is the stored form of an intent: the SealedIntent plus its
+// current lifecycle state (SPEC §5.2 "persist current state with the intent
+// record"). The SealedIntent field list itself stays exactly per §5.1.
+message IntentRecord {
+  SealedIntent intent = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  IntentState state = 2;
+  // session_id is the session the intent is sealed into (0 = none yet).
+  uint64 session_id = 3;
+}

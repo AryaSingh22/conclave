@@ -1,0 +1,15 @@
+syntax = "proto3";
+package conclave.veil.v1;
+
+import "amino/amino.proto";
+import "conclave/veil/v1/intent.proto";
+import "conclave/veil/v1/veil.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/veil/types";
+
+// GenesisState defines the x/veil genesis state.
+message GenesisState {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  repeated IntentRecord intents = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

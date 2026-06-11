@@ -1,0 +1,14 @@
+syntax = "proto3";
+package conclave.mandate.v1;
+
+import "amino/amino.proto";
+import "conclave/mandate/v1/mandate.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/mandate/types";
+
+// GenesisState defines the x/mandate genesis state.
+message GenesisState {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  repeated Mandate mandates = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

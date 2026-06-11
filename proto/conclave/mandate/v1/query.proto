@@ -1,0 +1,67 @@
+syntax = "proto3";
+package conclave.mandate.v1;
+
+import "amino/amino.proto";
+import "conclave/mandate/v1/mandate.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/mandate/types";
+
+// Query defines the x/mandate query service (SPEC §6.2).
+service Query {
+  // Mandate returns a mandate by id.
+  rpc Mandate(QueryMandateRequest) returns (QueryMandateResponse) {
+    option (google.api.http).get = "/conclave/mandate/v1/mandates/{id}";
+  }
+
+  // MandateByGrantee returns the single active mandate of a grantee key
+  // (SPEC §6.2 O(1) ante lookup index).
+  rpc MandateByGrantee(QueryMandateByGranteeRequest) returns (QueryMandateByGranteeResponse) {
+    option (google.api.http).get = "/conclave/mandate/v1/mandates/by-grantee/{grantee}";
+  }
+
+  // Mandates returns all mandates of a sigil.
+  rpc Mandates(QueryMandatesRequest) returns (QueryMandatesResponse) {
+    option (google.api.http).get = "/conclave/mandate/v1/sigils/{sigil_id}/mandates";
+  }
+
+  // Params returns the module parameters.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/conclave/mandate/v1/params";
+  }
+}
+
+message QueryMandateRequest {
+  string id = 1;
+}
+
+message QueryMandateResponse {
+  Mandate mandate = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryMandateByGranteeRequest {
+  string grantee = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+}
+
+message QueryMandateByGranteeResponse {
+  Mandate mandate = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryMandatesRequest {
+  string sigil_id = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+message QueryMandatesResponse {
+  repeated Mandate mandates = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryParamsRequest {}
+
+message QueryParamsResponse {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

@@ -1,0 +1,55 @@
+syntax = "proto3";
+package conclave.veil.v1;
+
+import "amino/amino.proto";
+import "conclave/veil/v1/intent.proto";
+import "conclave/veil/v1/veil.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/veil/types";
+
+// Query defines the x/veil query service (SPEC §6.3).
+service Query {
+  // Intent returns an intent record by id.
+  rpc Intent(QueryIntentRequest) returns (QueryIntentResponse) {
+    option (google.api.http).get = "/conclave/veil/v1/intents/{id}";
+  }
+
+  // Intents returns intent records filtered by state (solvers read OPEN
+  // intents of the current session through this).
+  rpc Intents(QueryIntentsRequest) returns (QueryIntentsResponse) {
+    option (google.api.http).get = "/conclave/veil/v1/intents";
+  }
+
+  // Params returns the module parameters.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/conclave/veil/v1/params";
+  }
+}
+
+message QueryIntentRequest {
+  string id = 1;
+}
+
+message QueryIntentResponse {
+  IntentRecord record = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryIntentsRequest {
+  // state filters by lifecycle state; INTENT_STATE_UNSPECIFIED returns all.
+  IntentState state = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+message QueryIntentsResponse {
+  repeated IntentRecord records = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryParamsRequest {}
+
+message QueryParamsResponse {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

@@ -1,0 +1,41 @@
+syntax = "proto3";
+package conclave.escrow.v1;
+
+import "amino/amino.proto";
+import "conclave/escrow/v1/escrow.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/escrow/types";
+
+// Query defines the x/escrow query service (SPEC §6.5; logic Phase 2).
+service Query {
+  // Escrow returns an escrow by id.
+  rpc Escrow(QueryEscrowRequest) returns (QueryEscrowResponse) {
+    option (google.api.http).get = "/conclave/escrow/v1/escrows/{id}";
+  }
+
+  // Escrows returns the escrows a sigil participates in.
+  rpc Escrows(QueryEscrowsRequest) returns (QueryEscrowsResponse) {
+    option (google.api.http).get = "/conclave/escrow/v1/sigils/{sigil_id}/escrows";
+  }
+}
+
+message QueryEscrowRequest {
+  string id = 1;
+}
+
+message QueryEscrowResponse {
+  Escrow escrow = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryEscrowsRequest {
+  string sigil_id = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+message QueryEscrowsResponse {
+  repeated Escrow escrows = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}

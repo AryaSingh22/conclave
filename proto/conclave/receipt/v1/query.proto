@@ -1,0 +1,60 @@
+syntax = "proto3";
+package conclave.receipt.v1;
+
+import "amino/amino.proto";
+import "conclave/receipt/v1/receipt.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/receipt/types";
+
+// Query defines the x/receipt query service (SPEC §6.6). x/receipt is the
+// query/proof surface over receipts written by x/session; it has no Msgs.
+service Query {
+  // Receipts returns a sigil's receipts in chronological order.
+  rpc Receipts(QueryReceiptsRequest) returns (QueryReceiptsResponse) {
+    option (google.api.http).get = "/conclave/receipt/v1/sigils/{sigil_id}/receipts";
+  }
+
+  // Receipt returns a receipt by id.
+  rpc Receipt(QueryReceiptRequest) returns (QueryReceiptResponse) {
+    option (google.api.http).get = "/conclave/receipt/v1/receipts/{id}";
+  }
+
+  // ReceiptProof returns the receipt with an ICS-23 existence proof against
+  // a Conclave consensus root, verifiable by any IBC counterparty.
+  rpc ReceiptProof(QueryReceiptProofRequest) returns (QueryReceiptProofResponse) {
+    option (google.api.http).get = "/conclave/receipt/v1/receipts/{id}/proof";
+  }
+}
+
+message QueryReceiptsRequest {
+  string sigil_id = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+message QueryReceiptsResponse {
+  repeated Receipt receipts = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryReceiptRequest {
+  string id = 1;
+}
+
+message QueryReceiptResponse {
+  Receipt receipt = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryReceiptProofRequest {
+  string id = 1;
+}
+
+message QueryReceiptProofResponse {
+  Receipt receipt = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // proof is the serialized ICS-23 existence proof (ProofOps).
+  bytes proof = 2;
+  // proof_height is the height the proof was generated at.
+  uint64 proof_height = 3;
+}

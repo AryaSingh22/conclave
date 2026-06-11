@@ -1,0 +1,73 @@
+syntax = "proto3";
+package conclave.veil.v1;
+
+import "amino/amino.proto";
+import "conclave/veil/v1/veil.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/veil/types";
+
+// Msg defines the x/veil Msg service (SPEC §6.3).
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // SubmitIntent validates the envelope, escrows the bond, assigns the
+  // intent id, and stores the intent as SUBMITTED.
+  rpc SubmitIntent(MsgSubmitIntent) returns (MsgSubmitIntentResponse);
+
+  // CancelIntent cancels an intent in any pre-OPEN state (owner only);
+  // the bond is refunded.
+  rpc CancelIntent(MsgCancelIntent) returns (MsgCancelIntentResponse);
+
+  // UpdateParams updates the module parameters (governance authority only).
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+// MsgSubmitIntent submits a SealedIntent into the Veil. The intent id and
+// submit_height are assigned by the keeper.
+message MsgSubmitIntent {
+  option (cosmos.msg.v1.signer) = "sender";
+  option (amino.name) = "conclave/veil/MsgSubmitIntent";
+
+  // sender is the submitting agent key (must resolve to sender_sigil and be
+  // mandate-checked in the ante handler).
+  string sender = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string sender_sigil = 2;
+  // ciphertext carries the (Phase 0: plaintext) IntentPayload bytes.
+  bytes ciphertext = 3;
+  // envelope is the serialized plaintext IntentEnvelope.
+  bytes envelope = 4;
+  // bond is the anti-spam bond; validated against params in the msg server.
+  cosmos.base.v1beta1.Coin bond = 5 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // chamber_id is fixed 0 until Phase 3.
+  uint32 chamber_id = 6;
+}
+
+message MsgSubmitIntentResponse {
+  string intent_id = 1;
+}
+
+// MsgCancelIntent cancels a pre-OPEN intent owned by the sender.
+message MsgCancelIntent {
+  option (cosmos.msg.v1.signer) = "sender";
+  option (amino.name) = "conclave/veil/MsgCancelIntent";
+
+  string sender = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string intent_id = 2;
+}
+
+message MsgCancelIntentResponse {}
+
+// MsgUpdateParams updates module params; authority is the gov module account.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "conclave/veil/MsgUpdateParams";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  Params params = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message MsgUpdateParamsResponse {}

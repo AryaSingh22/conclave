@@ -1,0 +1,54 @@
+syntax = "proto3";
+package conclave.receipt.v1;
+
+import "amino/amino.proto";
+import "conclave/session/v1/session.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/receipt/types";
+
+// ConditionOutcome records how a conditioned leg resolved (SPEC §6.6).
+enum ConditionOutcome {
+  option (gogoproto.goproto_enum_prefix) = false;
+
+  // CONDITION_OUTCOME_UNSPECIFIED is the zero value and never stored.
+  CONDITION_OUTCOME_UNSPECIFIED = 0;
+  // CONDITION_OUTCOME_NONE: the settlement carried no delivery condition
+  // (all Phase-0 receipts).
+  CONDITION_OUTCOME_NONE = 1;
+  // CONDITION_OUTCOME_RELEASED: the escrow released to the payee.
+  CONDITION_OUTCOME_RELEASED = 2;
+  // CONDITION_OUTCOME_REFUNDED: the escrow refunded to the payer.
+  CONDITION_OUTCOME_REFUNDED = 3;
+  // CONDITION_OUTCOME_DISPUTED: resolved via dispute.
+  CONDITION_OUTCOME_DISPUTED = 4;
+}
+
+// Receipt is a light-client-provable record of a settled intent, written by
+// x/session and queried via x/receipt (SPEC §6.6 — field list per spec).
+// Receipts live in IAVL state so ICS-23 existence proofs come free.
+message Receipt {
+  // id is the unique receipt identifier.
+  string id = 1;
+  // session_id is the session that settled the intent.
+  uint64 session_id = 2;
+  // intent_id is the settled intent.
+  string intent_id = 3;
+  // sigil_id is the receipt owner (one receipt per party — SPEC §6.4).
+  string sigil_id = 4;
+  // counterparty_sigils are the other parties in the match.
+  repeated string counterparty_sigils = 5;
+  // terms_hash commits to the full settled terms.
+  bytes terms_hash = 6;
+  // clearing_prices are the uniform prices the match cleared at.
+  repeated conclave.session.v1.PricePoint clearing_prices = 7 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  // condition_outcome records delivery-condition resolution.
+  ConditionOutcome condition_outcome = 8;
+  // height is the settlement height.
+  uint64 height = 9;
+  // chamber_id scopes the receipt; fixed 0 until Phase 3 (SPEC §1.2).
+  uint32 chamber_id = 10;
+}
