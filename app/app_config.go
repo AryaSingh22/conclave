@@ -63,6 +63,8 @@ import (
 	capabilitytypes "github.com/cosmos/ibc-go/modules/capability/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
+
+	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 )
 
 // Conclave chain identity (SPEC §0 Naming Canon).
@@ -182,6 +184,8 @@ var (
 						paramstypes.ModuleName,
 						upgradetypes.ModuleName,
 						vestingtypes.ModuleName,
+						// Conclave modules (manually registered, SPEC §10 order)
+						sigiltypes.ModuleName,
 					},
 				}),
 			},

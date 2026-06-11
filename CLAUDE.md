@@ -5,6 +5,10 @@ Build Specification v1.0). If code and spec conflict, fix the code or propose a
 spec PR — never silently diverge. If the spec seems wrong or ambiguous, stop
 and ask, citing the section.
 
+**Decisions log: [docs/DECISIONS.md](docs/DECISIONS.md).** Every field-level or
+behavioral decision the SPEC doesn't pin down gets an ADR-style entry there —
+appended in the same task that makes it.
+
 ## Naming canon (SPEC §0 — use everywhere: code, docs, protos, CLI)
 
 | Concept | Canonical name | Code identifier | NEVER use |

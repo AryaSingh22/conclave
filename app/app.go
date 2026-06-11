@@ -61,6 +61,10 @@ import (
 	ibckeeper "github.com/cosmos/ibc-go/v8/modules/core/keeper"
 	solomachine "github.com/cosmos/ibc-go/v8/modules/light-clients/06-solomachine"
 	ibctm "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
+
+	"github.com/AryaSingh22/conclave/x/sigil"
+	sigilkeeper "github.com/AryaSingh22/conclave/x/sigil/keeper"
+	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 )
 
 // DefaultNodeHome is the default home directory for the application daemon.
@@ -100,6 +104,10 @@ type ConclaveApp struct {
 	CapabilityKeeper *capabilitykeeper.Keeper
 	IBCKeeper        *ibckeeper.Keeper // must be a pointer so SetRouter works
 	TransferKeeper   ibctransferkeeper.Keeper
+
+	// Conclave keepers (wired manually, same pattern as IBC; modules land
+	// in SPEC §10 task order)
+	SigilKeeper sigilkeeper.Keeper
 
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
@@ -221,6 +229,22 @@ func NewConclaveApp(
 	}
 
 	// ---- end manual IBC wiring ----
+
+	// ---- Conclave modules (SPEC §10 build order) ----
+
+	sigilKey := storetypes.NewKVStoreKey(sigiltypes.StoreKey)
+	if err := app.RegisterStores(sigilKey); err != nil {
+		panic(err)
+	}
+	app.SigilKeeper = sigilkeeper.NewKeeper(app.appCodec, runtime.NewKVStoreService(sigilKey), govAuthority)
+
+	if err := app.RegisterModules(
+		sigil.NewAppModule(app.appCodec, app.SigilKeeper),
+	); err != nil {
+		panic(err)
+	}
+
+	// ---- end Conclave modules ----
 
 	// register streaming services
 	if err := app.RegisterStreamingServices(appOpts, app.kvStoreKeys()); err != nil {
