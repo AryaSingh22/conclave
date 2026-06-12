@@ -52,6 +52,8 @@ Threshold decryption at session open is called **the Reveal**.
 ## Working method
 
 1. One SPEC §10 task per session, in order. Do not start the next task.
+   One task per session — each task starts in a fresh session that
+   bootstraps from CLAUDE.md, docs/SPEC.md, and docs/DECISIONS.md.
 2. Before declaring any task complete: `make lint test` must be green; show
    the output. `scripts/demo_e2e.sh` before closing any Phase-0 milestone.
 3. Stop for review after each task.
