@@ -64,6 +64,7 @@ import (
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
 
+	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 )
@@ -158,6 +159,9 @@ var (
 						ibctransfertypes.ModuleName,
 						capabilitytypes.ModuleName,
 						feegrant.ModuleName,
+						// SPEC §6.7 unordered dedup-cache sweep (app-level
+						// shim, manually registered)
+						unorderedtypes.ModuleName,
 					},
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{
 						{

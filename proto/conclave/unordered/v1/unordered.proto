@@ -1,0 +1,23 @@
+syntax = "proto3";
+package conclave.unordered.v1;
+
+import "gogoproto/gogo.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/app/unordered/types";
+
+// UnorderedTxExtension marks a transaction as unordered (the ADR-070
+// pattern, SPEC §6.7) when present in TxBody.extension_options. Unordered
+// txs carry timeout_timestamp instead of relying on the account sequence;
+// replay protection is the app-level TTL'd dedup cache of tx hashes
+// (0x0F|expiry|txhash, swept in EndBlock). The TTL is capped at 10 minutes
+// (state-growth guard).
+//
+// SDK v0.50 TxBody has no native unordered/timeout_timestamp fields (they
+// land upstream in v0.53) — hence the extension-option encoding (D-026).
+message UnorderedTxExtension {
+  // timeout_timestamp is the expiry of the dedup entry; the tx is valid
+  // only while block time < timeout_timestamp.
+  google.protobuf.Timestamp timeout_timestamp = 1
+      [(gogoproto.stdtime) = true, (gogoproto.nullable) = false];
+}

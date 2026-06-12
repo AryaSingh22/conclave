@@ -20,9 +20,15 @@ echo "Generating gogo proto code..."
   buf generate --template buf.gen.gogo.yaml
 )
 
-# move generated code under x/ (go_package is github.com/AryaSingh22/conclave/x/...)
-mkdir -p x
-cp -r github.com/AryaSingh22/conclave/x/* x/
+# move generated code into the repo tree (go_package is
+# github.com/AryaSingh22/conclave/{x,app}/... — x/ for modules, app/ for
+# app-level types like the unordered tx extension, SPEC §6.7)
+for dir in x app; do
+  if [ -d "github.com/AryaSingh22/conclave/$dir" ]; then
+    mkdir -p "$dir"
+    cp -r "github.com/AryaSingh22/conclave/$dir/"* "$dir/"
+  fi
+done
 rm -rf github.com
 
 echo "proto-gen done"

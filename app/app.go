@@ -30,6 +30,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/mempool"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
@@ -62,6 +63,8 @@ import (
 	solomachine "github.com/cosmos/ibc-go/v8/modules/light-clients/06-solomachine"
 	ibctm "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
 
+	"github.com/AryaSingh22/conclave/app/unordered"
+	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	"github.com/AryaSingh22/conclave/x/mandate"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
@@ -112,6 +115,10 @@ type ConclaveApp struct {
 	// in SPEC §10 task order)
 	SigilKeeper   sigilkeeper.Keeper
 	MandateKeeper mandatekeeper.Keeper
+
+	// UnorderedManager owns the SPEC §6.7 dedup cache (app-level, not a
+	// module)
+	UnorderedManager unordered.Manager
 
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
@@ -183,6 +190,16 @@ func NewConclaveApp(
 		panic(err)
 	}
 
+	// The app-side mempool is explicitly the no-op mempool (D-031): block
+	// proposals fall through to CometBFT's FIFO mempool. The server's
+	// DefaultBaseappOptions would otherwise select SenderNonceMempool
+	// (mempool.max-txs >= 0 in the default app.toml), which orders and
+	// gates same-sender txs by sequence BEFORE the ante handler runs —
+	// serializing exactly the parallel unordered txs SPEC §6.7 requires.
+	// Appended last so it overrides any earlier option. Task 0.6 replaces
+	// this wholesale with the Block SDK laned mempool.
+	baseAppOptions = append(baseAppOptions, baseapp.SetMempool(mempool.NoOpMempool{}))
+
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
 
 	// ---- manual IBC wiring (no depinject support in ibc-go v8) ----
@@ -238,7 +255,8 @@ func NewConclaveApp(
 
 	sigilKey := storetypes.NewKVStoreKey(sigiltypes.StoreKey)
 	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
-	if err := app.RegisterStores(sigilKey, mandateKey); err != nil {
+	unorderedKey := storetypes.NewKVStoreKey(unorderedtypes.StoreKey)
+	if err := app.RegisterStores(sigilKey, mandateKey, unorderedKey); err != nil {
 		panic(err)
 	}
 	app.SigilKeeper = sigilkeeper.NewKeeper(app.appCodec, runtime.NewKVStoreService(sigilKey), govAuthority)
@@ -246,10 +264,12 @@ func NewConclaveApp(
 		app.appCodec, runtime.NewKVStoreService(mandateKey),
 		app.SigilKeeper, app.BankKeeper, app.AccountKeeper, govAuthority,
 	)
+	app.UnorderedManager = unordered.NewManager(runtime.NewKVStoreService(unorderedKey))
 
 	if err := app.RegisterModules(
 		sigil.NewAppModule(app.appCodec, app.SigilKeeper),
 		mandate.NewAppModule(app.appCodec, app.MandateKeeper),
+		unordered.NewAppModule(app.UnorderedManager),
 	); err != nil {
 		panic(err)
 	}
@@ -307,7 +327,8 @@ func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) {
 			// CONCLAVE-TODO(phase-0): task 0.8 swaps the face-value source
 			// for the x/session clearing-price implementation (SPEC §6.2
 			// step 4)
-			PriceSource: mandatetypes.FaceValuePriceSource{},
+			PriceSource:      mandatetypes.FaceValuePriceSource{},
+			UnorderedManager: app.UnorderedManager,
 		},
 	)
 	if err != nil {

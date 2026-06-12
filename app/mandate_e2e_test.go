@@ -199,9 +199,10 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 			FeegrantKeeper:  conclaveApp.FeeGrantKeeper,
 			SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 		},
-		IBCKeeper:     conclaveApp.IBCKeeper,
-		MandateKeeper: conclaveApp.MandateKeeper,
-		PriceSource:   mandatetypes.FaceValuePriceSource{},
+		IBCKeeper:        conclaveApp.IBCKeeper,
+		MandateKeeper:    conclaveApp.MandateKeeper,
+		PriceSource:      mandatetypes.FaceValuePriceSource{},
+		UnorderedManager: conclaveApp.UnorderedManager,
 	})
 	require.NoError(t, err)
 

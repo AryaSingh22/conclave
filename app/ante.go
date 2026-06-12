@@ -9,6 +9,8 @@ import (
 	ibcante "github.com/cosmos/ibc-go/v8/modules/core/ante"
 	ibckeeper "github.com/cosmos/ibc-go/v8/modules/core/keeper"
 
+	"github.com/AryaSingh22/conclave/app/unordered"
+	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandateante "github.com/AryaSingh22/conclave/x/mandate/ante"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
@@ -19,9 +21,10 @@ import (
 type HandlerOptions struct {
 	ante.HandlerOptions
 
-	IBCKeeper     *ibckeeper.Keeper
-	MandateKeeper mandatekeeper.Keeper
-	PriceSource   mandatetypes.PriceSource
+	IBCKeeper        *ibckeeper.Keeper
+	MandateKeeper    mandatekeeper.Keeper
+	PriceSource      mandatetypes.PriceSource
+	UnorderedManager unordered.Manager
 }
 
 // NewAnteHandler constructs the ordered Conclave ante decorator chain.
@@ -29,18 +32,27 @@ type HandlerOptions struct {
 // Pipeline per SPEC §2:
 //
 //	standard SDK decorators
-//	  → UnorderedTxDecorator   (ADR-070 pattern, SPEC §6.7)  — task 0.5
+//	  → UnorderedTxDecorator   (ADR-070 pattern, SPEC §6.7)  — dedup + TTL
 //	  → MandateDecorator       (SPEC §6.2)                   — the agent-safety chokepoint
 //	  → FeeAbstractionDecorator (SPEC §6.2)                  — pay gas in USDC via conversion
+//
+// Unordered-tx integration (SPEC §6.7, task 0.5):
+//   - ExtensionOptionsDecorator accepts exactly UnorderedTxExtension;
+//   - SigVerificationDecorator is the unordered-aware fork (provenance
+//     pin in app/unordered/sigverify.go) — sequence checks bypassed iff
+//     unordered, ordered txs byte-identical to upstream;
+//   - IncrementSequenceDecorator is skipped for unordered txs;
+//   - UnorderedTxDecorator runs after signature verification (dedup
+//     entries only for verified txs) and before MandateDecorator, so
+//     unordered txs hit window charging with zero special-casing.
 //
 // The standard DeductFeeDecorator is wrapped by
 // ConditionalDeductFeeDecorator: when the shared SPEC §6.2 predicate says
 // fee abstraction applies, fee handling defers to FeeAbstractionDecorator
 // after the mandate check, so exactly one fee path runs per tx.
 //
-// CONCLAVE-TODO(phase-0): task 0.5 inserts the hardened UnorderedTxDecorator
-// before MandateDecorator. Mandate enforcement MUST stay before any message
-// executes (SPEC §1.1 goal 3).
+// Mandate enforcement MUST stay before any message executes (SPEC §1.1
+// goal 3).
 func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 	if options.AccountKeeper == nil {
 		return nil, errors.New("account keeper is required for ante builder")
@@ -57,10 +69,15 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 	if options.PriceSource == nil {
 		return nil, errors.New("price source is required for ante builder")
 	}
+	if !options.UnorderedManager.Initialized() {
+		return nil, errors.New("unordered manager is required for ante builder")
+	}
 
 	anteDecorators := []sdk.AnteDecorator{
 		ante.NewSetUpContextDecorator(),
-		ante.NewExtensionOptionsDecorator(options.ExtensionOptionChecker),
+		// the only accepted TxBody extension option is UnorderedTxExtension
+		// (SPEC §6.7, D-026); everything else stays rejected
+		ante.NewExtensionOptionsDecorator(unorderedtypes.ExtensionOptionChecker),
 		ante.NewValidateBasicDecorator(),
 		ante.NewTxTimeoutHeightDecorator(),
 		ante.NewValidateMemoDecorator(options.AccountKeeper),
@@ -72,9 +89,10 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 		ante.NewSetPubKeyDecorator(options.AccountKeeper),
 		ante.NewValidateSigCountDecorator(options.AccountKeeper),
 		ante.NewSigGasConsumeDecorator(options.AccountKeeper, options.SigGasConsumer),
-		ante.NewSigVerificationDecorator(options.AccountKeeper, options.SignModeHandler),
-		ante.NewIncrementSequenceDecorator(options.AccountKeeper),
+		unordered.NewSigVerificationDecorator(options.AccountKeeper, options.SignModeHandler),
+		unordered.NewIncrementSequenceDecorator(ante.NewIncrementSequenceDecorator(options.AccountKeeper)),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
+		unordered.NewUnorderedTxDecorator(options.UnorderedManager),
 		mandateante.NewMandateDecorator(options.MandateKeeper, options.PriceSource),
 		mandateante.NewFeeAbstractionDecorator(options.MandateKeeper),
 	}

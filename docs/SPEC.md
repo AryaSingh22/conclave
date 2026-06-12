@@ -470,6 +470,7 @@ make install                      # builds conclaved into $GOPATH/bin
 | D5 | Optimistic dispute arbitration beyond hash-mismatch | hash-mismatch only; subjective disputes out of scope | 2 |
 | D6 | CLV tokenomics (inflation, bond sizes at real prices) | dev placeholders; needs economic modeling | pre-testnet |
 | D7 | Public naming: trademark/domain clearance for "Conclave" | required before any external publication | pre-announce |
+| D8 | SDK v0.53 bump to replace the sigverify fork (app/unordered/sigverify.go) with native ADR-070 unordered-tx support | keep the fork through Phase 0; evaluate the bump at the Phase-0→Phase-1 boundary | 1 |
 
 ---
 

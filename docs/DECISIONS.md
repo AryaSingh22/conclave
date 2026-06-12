@@ -322,3 +322,97 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   D-021 together without this left the burn bounded by nothing in the
   mandate. The same accounting carries into Phase 1, where ante binds
   `spend_commitment + bond` (SPEC §6.3 "Spend commitment", §8(e)).
+
+## D-026 — Unordered flag encoded as a TxBody extension option
+
+- **Date:** 2026-06-12 (task 0.5)
+- **SPEC:** §6.7
+- **Decision:** SDK v0.50's TxBody has no `unordered`/`timeout_timestamp`
+  fields (they land upstream in v0.53), so a tx is unordered iff
+  `TxBody.extension_options` carries
+  `conclave.unordered.v1.UnorderedTxExtension{timeout_timestamp}`. The
+  ExtensionOptionsDecorator accepts exactly this type URL and keeps
+  rejecting everything else; a present-but-malformed extension is a hard
+  error, never silently ordered.
+- **Rationale:** Extension options are signed and critical (unknown ones
+  reject), giving the ADR-070 semantics without forking tx encoding. The
+  generated type lives under `app/unordered/types` — protocgen.sh now
+  emits both `x/` and `app/` go_package trees.
+
+## D-027 — Forked SigVerificationDecorator for the sequence bypass
+
+- **Date:** 2026-06-12 (task 0.5)
+- **SPEC:** §6.7, §14 D8
+- **Decision:** `app/unordered/sigverify.go` forks SigVerificationDecorator
+  from cosmos-sdk v0.50.15 `x/auth/ante/sigverify.go` with a two-point
+  delta: the sequence-equality check is skipped iff the tx is unordered,
+  and AMINO/TEXTUAL signer data uses the tx's own claimed sequence.
+  Ordered txs are byte-identical to upstream. IncrementSequenceDecorator
+  is wrapped with the same predicate (skip iff unordered). The file header
+  is the provenance pin; the conformance suite is the behavioral pin; the
+  fork is retired via the SPEC §14 D8 SDK v0.53 evaluation at the
+  Phase-0→Phase-1 boundary (CONCLAVE-TODO(phase-1) at the fork site).
+- **Rationale:** v0.50 offers no hook to disable the sequence check; the
+  v0.53 bump is a larger dependency jump than task 0.5 warrants. Replay
+  safety for unordered txs never derives from sequences — it is the
+  dedup cache (D-028).
+
+## D-028 — Dedup cache: key reconstruction, dual-mode writes
+
+- **Date:** 2026-06-12 (task 0.5)
+- **SPEC:** §6.7
+- **Decision:** Dedup entries live at `0x0F|expiry_unix_nanos(8,BE)|`
+  `txhash(32)` exactly as §6.7 writes (no chamber component — tx hashes
+  are chain-global, app-level state). The expiry is the tx's own signed
+  `timeout_timestamp`, so existence checks reconstruct the key from the
+  tx and stay a single O(1) read — no secondary index. Entries are
+  written in BOTH CheckTx and DeliverTx, after signature verification.
+  The EndBlock sweep deletes `expiry <= block time`; it can never re-open
+  a replay because the decorator requires `timeout > block time` — exact
+  complements.
+- **Rationale:** Expiry-first keys make the sweep one time-ordered prefix
+  walk; the dual-mode write is the same optimistic pattern as the D-019
+  window charge and bounds mempool-level replays before a block is
+  proposed.
+
+## D-029 — TTL cap is time-based: 10 minutes of wall-clock block time
+
+- **Date:** 2026-06-12 (task 0.5)
+- **SPEC:** §6.7 "Cap unordered TTL at 10 minutes of blocks"
+- **Decision:** `MaxUnorderedTTL = 10 * time.Minute`, compared against
+  `ctx.BlockTime()`. At the §12 dev cadence (1s blocks) this is ≈600
+  blocks.
+- **Rationale:** `timeout_timestamp` is a timestamp; converting the cap to
+  a block count would re-introduce a blocks↔time assumption the spec's
+  own field shape avoids. Block time is consensus state (BFT time), so
+  the comparison is deterministic.
+
+## D-030 — Unordered codespace 16xx; EndBlock sweep via a module shim
+
+- **Date:** 2026-06-12 (task 0.5)
+- **SPEC:** §6.7, §13
+- **Decision:** Errors register under codespace `unordered` = 16xx,
+  extending the §13 ladder. The sweep runs through a minimal
+  EndBlocker-only AppModule shim (`app/unordered/module.go`) with no
+  msgs, queries, genesis, or proto service surface — the practical
+  reading of §6.7's "app-level, not a module" under the SDK's module
+  manager, which owns EndBlock dispatch.
+- **Rationale:** A shim keeps the sweep inside deterministic consensus
+  flow without inventing a parallel EndBlock path; the absent user
+  surface is what "not a module" protects.
+
+## D-031 — App-side mempool pinned to NoOpMempool until Block SDK (0.6)
+
+- **Date:** 2026-06-12 (task 0.5)
+- **SPEC:** §6.7, §10 rows 0.5–0.6
+- **Decision:** `NewConclaveApp` appends `baseapp.SetMempool(NoOpMempool)`
+  after all caller options, overriding the server default. Block
+  proposals therefore fall through to CometBFT's FIFO mempool.
+  Superseded at task 0.6 by the Block SDK laned mempool (SPEC §6.7
+  lanes), which replaces the app-side mempool wholesale.
+- **Rationale:** The server's DefaultBaseappOptions selects
+  SenderNonceMempool whenever `mempool.max-txs >= 0` — the default
+  app.toml value — and that mempool orders/gates same-sender txs by
+  sequence BEFORE ante runs, serializing exactly the ≥50 parallel
+  unordered txs §10 row 0.5 requires. NoOp is the honest interim choice;
+  the localnet blast demonstrates 50-in-one-block against it.
