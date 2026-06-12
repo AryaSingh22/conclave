@@ -30,7 +30,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/mempool"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
@@ -63,14 +62,20 @@ import (
 	solomachine "github.com/cosmos/ibc-go/v8/modules/light-clients/06-solomachine"
 	ibctm "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
 
+	blocksdkabci "github.com/skip-mev/block-sdk/v2/abci"
+	"github.com/skip-mev/block-sdk/v2/block"
+
 	"github.com/AryaSingh22/conclave/app/unordered"
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/mandate"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
+	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
 	"github.com/AryaSingh22/conclave/x/sigil"
 	sigilkeeper "github.com/AryaSingh22/conclave/x/sigil/keeper"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
+	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
 
 // DefaultNodeHome is the default home directory for the application daemon.
@@ -119,6 +124,11 @@ type ConclaveApp struct {
 	// UnorderedManager owns the SPEC §6.7 dedup cache (app-level, not a
 	// module)
 	UnorderedManager unordered.Manager
+
+	// LanedMempool is the Block SDK mempool behind block proposals
+	// (SPEC §6.7 lanes; D-032 supersedes D-031). Exported so tests can
+	// inspect the lane registry and per-lane contents.
+	LanedMempool *block.LanedMempool
 
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
@@ -189,16 +199,6 @@ func NewConclaveApp(
 	); err != nil {
 		panic(err)
 	}
-
-	// The app-side mempool is explicitly the no-op mempool (D-031): block
-	// proposals fall through to CometBFT's FIFO mempool. The server's
-	// DefaultBaseappOptions would otherwise select SenderNonceMempool
-	// (mempool.max-txs >= 0 in the default app.toml), which orders and
-	// gates same-sender txs by sequence BEFORE the ante handler runs —
-	// serializing exactly the parallel unordered txs SPEC §6.7 requires.
-	// Appended last so it overrides any earlier option. Task 0.6 replaces
-	// this wholesale with the Block SDK laned mempool.
-	baseAppOptions = append(baseAppOptions, baseapp.SetMempool(mempool.NoOpMempool{}))
 
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
 
@@ -274,6 +274,18 @@ func NewConclaveApp(
 		panic(err)
 	}
 
+	// Lane-class msg types whose modules land later (veil 0.7, session 0.8,
+	// escrow Phase 2) are registered now: the SPEC §6.7 lanes route on these
+	// TypeURLs, so the app's tx decoder must resolve them for lane
+	// verification in ProcessProposal (D-033). No msg server is routed, so
+	// baseapp keeps rejecting these msgs in execution (D-024 unchanged).
+	veiltypes.RegisterInterfaces(app.interfaceRegistry)
+	sessiontypes.RegisterInterfaces(app.interfaceRegistry)
+	escrowtypes.RegisterInterfaces(app.interfaceRegistry)
+	veiltypes.RegisterLegacyAminoCodec(app.legacyAmino)
+	sessiontypes.RegisterLegacyAminoCodec(app.legacyAmino)
+	escrowtypes.RegisterLegacyAminoCodec(app.legacyAmino)
+
 	// ---- end Conclave modules ----
 
 	// register streaming services
@@ -292,7 +304,16 @@ func NewConclaveApp(
 	app.sm = module.NewSimulationManagerFromAppModules(app.ModuleManager.Modules, overrideModules)
 	app.sm.RegisterStoreDecoders()
 
-	app.setAnteHandler(app.txConfig)
+	anteHandler := app.setAnteHandler(app.txConfig)
+
+	// The Block SDK laned mempool + proposal handlers replace the interim
+	// NoOpMempool wholesale (SPEC §6.7 lanes; D-032 supersedes D-031).
+	// Set AFTER Build so this overrides whatever mempool the server's
+	// DefaultBaseappOptions selected — the SenderNonceMempool it defaults
+	// to orders and gates same-sender txs by sequence BEFORE the ante
+	// handler runs, serializing exactly the parallel unordered txs
+	// SPEC §6.7 requires.
+	app.setBlockSDKLanes(logger, anteHandler)
 
 	// Modules registered outside depinject (the IBC stack) are unknown to the
 	// upgrade module's automatic version-map wiring, so the full version map
@@ -311,8 +332,11 @@ func NewConclaveApp(
 	return app
 }
 
-// setAnteHandler installs the Conclave ante pipeline (SPEC §2; see ante.go).
-func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) {
+// setAnteHandler installs the Conclave ante pipeline (SPEC §2; see ante.go)
+// and returns it for reuse by the lane definitions (SPEC §6.7): lanes verify
+// proposal txs with the production ante chain, so proposal-time checks are
+// exactly the CheckTx checks.
+func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) sdk.AnteHandler {
 	anteHandler, err := NewAnteHandler(
 		HandlerOptions{
 			HandlerOptions: ante.HandlerOptions{
@@ -336,6 +360,39 @@ func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) {
 	}
 
 	app.SetAnteHandler(anteHandler)
+	return anteHandler
+}
+
+// setBlockSDKLanes installs the SPEC §6.7 laned mempool and the Block SDK
+// PrepareProposal/ProcessProposal handlers (lane structure validation:
+// partition contiguity in priority order, intra-lane priority ordering,
+// per-lane space limits, per-tx ante verification — see docs/LANES.md).
+func (app *ConclaveApp) setBlockSDKLanes(logger log.Logger, anteHandler sdk.AnteHandler) {
+	lanes, err := NewLanes(logger, app.txConfig, anteHandler)
+	if err != nil {
+		panic(err)
+	}
+
+	lanedMempool, err := block.NewLanedMempool(logger, lanes)
+	if err != nil {
+		panic(err)
+	}
+
+	app.LanedMempool = lanedMempool
+	app.SetMempool(lanedMempool)
+
+	// useCustomProcessProposal=true: the Block SDK's default handler wires
+	// a NO-OP ProcessProposal; lane structure validation requires the
+	// custom path (D-032).
+	proposalHandler := blocksdkabci.New(
+		logger,
+		app.txConfig.TxDecoder(),
+		app.txConfig.TxEncoder(),
+		lanedMempool,
+		true,
+	)
+	app.SetPrepareProposal(proposalHandler.PrepareProposalHandler())
+	app.SetProcessProposal(proposalHandler.ProcessProposalHandler())
 }
 
 // LegacyAmino returns the app's amino codec.

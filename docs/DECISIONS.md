@@ -401,7 +401,7 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   flow without inventing a parallel EndBlock path; the absent user
   surface is what "not a module" protects.
 
-## D-031 — App-side mempool pinned to NoOpMempool until Block SDK (0.6)
+## D-031 — App-side mempool pinned to NoOpMempool until Block SDK (0.6) — SUPERSEDED by D-032
 
 - **Date:** 2026-06-12 (task 0.5)
 - **SPEC:** §6.7, §10 rows 0.5–0.6
@@ -416,3 +416,125 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   sequence BEFORE ante runs, serializing exactly the ≥50 parallel
   unordered txs §10 row 0.5 requires. NoOp is the honest interim choice;
   the localnet blast demonstrates 50-in-one-block against it.
+- **SUPERSEDED (task 0.6):** replaced wholesale by the Block SDK laned
+  mempool — see D-032. The SenderNonceMempool hazard is now avoided by
+  setting the laned mempool AFTER appBuilder.Build (last write wins) and
+  by D-034's synthetic nonces inside the lanes.
+
+## D-032 — Block SDK pinned at skip-mev/block-sdk/v2 v2.1.5; custom ProcessProposal mode
+
+- **Date:** 2026-06-12 (task 0.6)
+- **SPEC:** §3 (lanes row), §6.7, §10 row 0.6
+- **Decision:** Pin `github.com/skip-mev/block-sdk/v2 v2.1.5` (latest v2;
+  the v2 line targets SDK v0.50.x). MVS verified empirically: block-sdk
+  requires cosmos-sdk v0.50.3 / cometbft v0.38.5 / cosmossdk.io deps all
+  BELOW our pins, so the build keeps cosmos-sdk v0.50.15, cometbft
+  v0.38.23, ibc-go v8.8.0 (block-sdk has no ibc-go dependency) and the
+  goleveldb replace. The proposal handler is constructed with
+  `abci.New(..., useCustomProcessProposal=true)`: the library's
+  recommended default wires a NO-OP ProcessProposal; the custom path is
+  what validates lane structure (partition contiguity in priority order,
+  intra-lane priority ordering via the lane comparator, per-lane
+  byte/gas shares, per-tx ante verification with cache-accumulated
+  state). The laned mempool and both handlers are set after
+  appBuilder.Build, overriding the server's mempool selection.
+- **Rationale:** §6.7 requires ProcessProposal to enforce the lane
+  invariants; a no-op process handler would let a malicious proposer
+  ignore lanes entirely. Verified against vendored v2.1.5 source, not
+  docs.
+
+## D-033 — Exclusive min-class lane predicates; top-level TypeURLs only; types registered early
+
+- **Date:** 2026-06-12 (task 0.6)
+- **SPEC:** §6.7 "lowest-priority matching lane"
+- **Decision:** (a) Each msg classifies by its top-level TypeURL into
+  veil/session/commerce/ibc/general (ibc = `/ibc.` prefix; anything
+  unlisted, including every `MsgUpdateParams`, is general). A tx's lane is
+  the lowest-priority class among its msgs, and each lane's match(tx)
+  predicate is "tx class == this lane" — the five predicates therefore
+  PARTITION the tx universe (every tx matches exactly one lane), making
+  routing independent of lane registration order and making block-sdk's
+  first-match insertion implement the spec rule exactly. (b) Wrapper msgs
+  (authz MsgExec, gov) route as the wrapper, never their contents —
+  routing stays a pure function of the outer TypeURL. (c)
+  veil/session/escrow msg types (and their amino names) are registered in
+  the app codec at 0.6, before their modules exist: the lanes route on
+  these TypeURLs, so the tx decoder must resolve them for ProcessProposal
+  lane verification. No msg server is routed, so execution keeps
+  rejecting them (D-024 unchanged) and CheckTx still cannot admit them
+  from the network.
+- **Rationale:** Documented for client devs in docs/LANES.md (a §6.7
+  requirement). Exclusive predicates also kill the failure mode where a
+  reordered registry silently reroutes txs — pinned further by the
+  registration-order guard test.
+
+## D-034 — Unordered txs in lanes: synthetic hash-derived nonce + ctx.TxBytes injection
+
+- **Date:** 2026-06-12 (task 0.6)
+- **SPEC:** §6.7 (lanes × unordered txs), §10 row 0.5 regression gate
+- **Decision:** (a) Every lane's SignerExtractionAdapter wraps the
+  block-sdk default with one delta: a tx carrying the D-026 unordered
+  extension reports sequence = BE uint64 of sha256(txBytes)[:8] instead
+  of its claimed sequence (a malformed extension is a hard error,
+  mirroring the ante). Lane mempools index and REPLACE txs by (sender,
+  sequence), and the lane comparator hard-errors on equal same-sender
+  sequences (rejecting the whole proposal) — without the synthetic nonce,
+  two unordered txs claiming one sequence could never share a block.
+  Replay protection never derives from this value; it remains the dedup
+  cache (D-028). (b) The ante handler given to lanes is wrapped to inject
+  `ctx.WithTxBytes(encode(tx))` when TxBytes is empty: block-sdk invokes
+  the ante chain directly in PrepareProposal/ProcessProposal without
+  setting TxBytes (baseapp's runTx always does), which gave every
+  unordered tx in a proposal the sha256 of EMPTY bytes — the dedup cache
+  then rejected all but the first as replays. Decoded txs re-encode to
+  their original bytes, so the injected hash input equals what CheckTx
+  and FinalizeBlock hash.
+- **Rationale:** This was the predicted risk of 0.6 (unordered × lanes).
+  Both halves are pinned by tests: same-claimed-sequence survival through
+  CheckTx→lanes→Prepare→Process→FinalizeBlock, and the full 0.5
+  conformance suite + localnet blast as the regression gate.
+
+## D-035 — Veil lane priority: fee_bid as fixed-width Dec key; ties are NOT submit order
+
+- **Date:** 2026-06-12 (task 0.6)
+- **SPEC:** §6.3 "ordered by fee_bid then submit order", §11.6
+- **Decision:** The veil lane's TxPriority parses envelope `fee_bid` as a
+  LegacyDec (the proto calls it a decimal string) and encodes it as a
+  60-digit zero-padded decimal key (the Dec's 10^18-scaled integer), so
+  lexicographic order equals numeric order and the priority is a pure
+  function of tx bytes — consensus-verifiable in ProcessProposal. A
+  multi-msg tx takes the max bid across its MsgSubmitIntent envelopes;
+  MsgCancelIntent counts zero; unparseable/empty/negative bids count zero
+  (ordering metadata never rejects or panics; envelope validation is the
+  0.7 msg server's job); bids ≥10^42 uclv clamp to the max key. The
+  spec's "then submit order" tie-break is implemented as the priority
+  index's deterministic (sender address, sequence) order, NOT
+  proposer-local arrival order: arrival order is unobservable off the
+  proposer and unverifiable in ProcessProposal. Same-sender txs always
+  order by sequence (the lane comparator compares sequences before
+  priorities for one signer). The trust model — fee_bid is congestion
+  pricing, not a security boundary; uniform-price batch clearing (§6.4)
+  makes intra-lane position worthless; Phase 1 fixes ordering before
+  contents are readable (§6.3) — is documented in docs/LANES.md.
+- **Rationale:** Strict fee_bid ordering IS enforced across nodes (the
+  block-sdk lane comparator validates it in ProcessProposal); pretending
+  the tie-break is "submit order" would claim a property no node can
+  check. C must be a comparable map key in block-sdk's priority index, so
+  the fixed-width string encodes Dec order safely (no floats, §11.6).
+
+## D-036 — Lane over its share QUEUES; no cross-lane spill, no redistribution
+
+- **Date:** 2026-06-12 (task 0.6)
+- **SPEC:** §6.7, §10 row 0.6 ("spills correctly or queues — state which")
+- **Decision:** Block SDK v2.1.5 gives QUEUE semantics and we keep them:
+  PrepareProposal fills each lane up to `share × max_tx_bytes` (and gas);
+  txs that don't fit stay in the lane's mempool for later blocks. Excess
+  txs never spill into another lane's space, and space a lane leaves
+  unused is NOT redistributed (every share is a hard cap; the shares sum
+  to 1.0 with no zero-share unlimited lane). ProcessProposal rejects any
+  proposal whose lane partition exceeds its share, so queueing is also
+  consensus-enforced, not just proposer politeness.
+- **Rationale:** Verified from vendored source (DefaultPrepareLaneHandler
+  skips over-limit txs without removal; proposals.UpdateProposal errors
+  on over-share partitions in both prepare and process). Pinned by the
+  queue-then-drain integration test.
