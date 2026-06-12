@@ -78,6 +78,20 @@ jq '.app_state.bank.denom_metadata = [
 jq '.app_state.gov.params.voting_period = "30s"
   | .app_state.gov.params.expedited_voting_period = "15s"' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
 
+# fund the x/mandate fee-conversion pool (SPEC §6.2: "the module holds a CLV
+# float funded at genesis"). The balance is written directly into bank
+# genesis — never via add-genesis-account, which would create a BaseAccount
+# at the module address and break GetModuleAccount; x/mandate InitGenesis
+# materializes the proper module account before any fee abstraction runs.
+FEE_POOL_AMOUNT="1000000000" # 1000 CLV, matching x/mandate DefaultParams fee_pool
+MANDATE_ADDR_HEX=$(echo -n "mandate" | sha256sum | cut -c1-40)
+MANDATE_ADDR=$($BIN debug addr "$MANDATE_ADDR_HEX" | awk '/Bech32 Acc:/ {print $3}')
+jq --arg addr "$MANDATE_ADDR" --arg amt "$FEE_POOL_AMOUNT" --arg denom "$DENOM" '
+  .app_state.bank.balances += [{ "address": $addr, "coins": [{ "denom": $denom, "amount": $amt }] }]
+  | .app_state.bank.supply = (.app_state.bank.supply | map(
+      if .denom == $denom then .amount = ((.amount | tonumber) + ($amt | tonumber) | tostring) else . end
+    ))' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
+
 $BIN genesis validate --home "$HOME_DIR"
 
 APP_TOML="$HOME_DIR/config/app.toml"

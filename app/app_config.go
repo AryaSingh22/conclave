@@ -64,6 +64,7 @@ import (
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
 
+	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 )
 
@@ -96,6 +97,10 @@ var (
 		{Account: stakingtypes.NotBondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: govtypes.ModuleName, Permissions: []string{authtypes.Burner}},
 		{Account: ibctransfertypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
+		// the mandate module account is the SPEC §6.2 fee-conversion pool:
+		// a genesis-funded CLV float that accumulates converted fee denoms;
+		// it never mints or burns
+		{Account: mandatetypes.ModuleName},
 	}
 
 	// blocked account addresses (module accounts that must not receive user funds)
@@ -106,6 +111,7 @@ var (
 		stakingtypes.BondedPoolName,
 		stakingtypes.NotBondedPoolName,
 		ibctransfertypes.ModuleName,
+		mandatetypes.ModuleName,
 		// the gov module account is allowed to receive funds (deposits)
 	}
 
@@ -186,6 +192,7 @@ var (
 						vestingtypes.ModuleName,
 						// Conclave modules (manually registered, SPEC §10 order)
 						sigiltypes.ModuleName,
+						mandatetypes.ModuleName,
 					},
 				}),
 			},

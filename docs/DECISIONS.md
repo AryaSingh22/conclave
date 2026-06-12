@@ -166,3 +166,159 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
 - **Rationale:** The full statements reference modules that don't exist
   yet; these are the strongest checkable forms today and the accessor
   contract pins the integration point.
+
+## D-016 — Privilege-escalation guard extended beyond mandate msgs
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 step 3
+- **Decision:** `allowed_msg_types` may never contain, in addition to
+  `MsgIssueMandate`/`MsgRevokeMandate` named by the spec:
+  `MsgAmendMandate`, mandate `MsgUpdateParams`, authz `MsgGrant`, and
+  feegrant `MsgGrantAllowance`. Enforced at issuance and amendment
+  validation with `ErrPrivilegeEscalation`.
+- **Rationale:** A mandate-bound key permitted to `MsgGrant` authz over its
+  own account mints an unbound delegate key: that key's `MsgExec` txs are
+  signed by the unbound key, step 1 passes the signer as a root key, and
+  the inner msgs act as the grantee account — a full mandate bypass.
+  `MsgGrantAllowance` is the feegrant analogue for fees. Amend and
+  UpdateParams are mandate msgs in all but name.
+
+## D-017 — Grantee index lifecycle: REPLACE, retention, controller conflict
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 state, step 1; open decision D2
+- **Decision:** (a) Issuing to a grantee that holds a mandate deletes the
+  superseded record (REPLACE, one record per key). (b) The 0x02
+  grantee-index entry is NEVER deleted on revocation or expiry — revoked
+  and expired mandates are retained and keep rejecting in ante. (c) A key
+  that controls a sigil can never be a grantee (`ErrGranteeConflict`).
+  (d) Grantees enter x/sigil's 0x04 reverse index as delegate keys; a key
+  whose mandate is defunct can be re-bound (to any sigil) by a controller
+  reissue, which updates that index.
+- **Rationale:** Step 1 treats "no index entry" as root-key passthrough, so
+  deleting entries on revoke/expiry would silently re-promote session keys
+  to unbounded root keys. Controller-grantees would either break D-010's
+  single-valued index or brick the controller (D-016 forbids allowing
+  `MsgRevokeMandate`, so a self-mandated controller could never manage
+  mandates again).
+
+## D-018 — Amendment: stable id, full term replacement, window reset
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 Msgs
+- **Decision:** `MsgAmendMandate` keeps the mandate id, replaces every term
+  wholesale, and resets `window_spent`/`window_start_height`. Grantee,
+  sigil, and chamber are immutable under amendment (rebinding = revoke +
+  issue). Revoked mandates cannot be amended.
+- **Rationale:** "Full replacement semantics, never in-place mutation of
+  ceilings" at the record level; the controller could reach the same state
+  via revoke+reissue, so the reset creates no bypass. Immutable grantee
+  preserves D-017(b) retention for the old key.
+
+## D-019 — Spend ceilings are deny-by-default per denom
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 steps 4–5
+- **Decision:** Ceiling checks use `Coins.IsAllLTE`: a spend-intent denom
+  absent from `spend_ceiling_per_tx`/`spend_ceiling_window` has an implicit
+  ceiling of zero. A mandate only authorizes spending denoms it lists;
+  "unlimited" is expressed by an explicit large ceiling.
+- **Rationale:** §1.1 goal 3 — a leaked session key must be bounded; an
+  unlisted denom defaulting to unlimited would invert the safety posture.
+
+## D-020 — Non-coin give legs value at zero under face-value pricing
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 step 4
+- **Decision:** `FaceValuePriceSource` (Phase 0) values DataGrant and
+  ServiceVoucher give legs at zero: no clearing prices exist and they have
+  no denom a Coins ceiling could bound. This is a known, accepted Phase-0
+  exposure, marked CONCLAVE-TODO(phase-0) in code; task 0.8's session
+  PriceSource values `data/{schema}` / `svc/{schema}` assets (D-006) and
+  closes it.
+- **Rationale:** The only alternatives are rejecting all data/service
+  intents (kills the §1.3 demo economy) or inventing prices (violates
+  §11.6 determinism-by-spec). The exposure is bounded: non-coin legs move
+  escrowed grants/vouchers, not the grantee's coin balances.
+
+## D-021 — Malformed intent payloads carry zero spend intent
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 step 4, §6.3 bond rules, §11.6
+- **Decision:** A `MsgSubmitIntent` whose ciphertext fails to unmarshal as
+  `IntentPayload` is valued at zero in ante (behind recover — never
+  panics). The deterrent is §6.3's INVALID path: the Reveal slashes 50% of
+  its bond.
+- **Rationale:** A malformed intent can never match, so it can never spend;
+  the bond is the spec's anti-spam instrument for exactly this case.
+  Phase 1 makes payloads opaque to ante anyway —
+  CONCLAVE-TODO(phase-1): the encrypted Veil needs a spend commitment in
+  the plaintext envelope for step 4 to bound encrypted intents.
+
+## D-022 — Fee abstraction mechanics and fee-denom policing
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §6.2 fee abstraction
+- **Decision:** (a) One predicate (`FeeAbstractionMandate`: active mandate,
+  fee = exactly one coin, denom listed and non-native) is shared by a
+  skip-wrapper around the standard `DeductFeeDecorator` and by
+  `FeeAbstractionDecorator`, so exactly one fee path handles any tx.
+  (b) A mandate-bound fee payer may otherwise pay gas only in the native
+  denom; anything else → `ErrFeeDenomNotPermitted`. (c) The pool is the
+  `mandate` module account (blocked, no mint/burn perms), genesis-funded
+  in localnet.sh; conversion truncates in the pool's favor; an exhausted
+  pool rejects with `ErrFeePoolInsufficient`. (d) The native denom is read
+  from `Params.fee_pool.denom`, never hardcoded. (e) Additive events:
+  `mandate_revoked`, `mandate_amended`, `mandate_fee_converted`.
+- **Rationale:** The split DeductFee/FeeAbstraction placement (§2 pipeline
+  order) double-charges or leaks fees unless both sides share one
+  predicate. fee_denoms is a capability list; deny-by-default matches
+  D-019.
+
+## D-023 — x/mandate store layout and id derivation
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §5.3, §6.2 state
+- **Decision:** Keys: `0x01|chamber(4)|len(1)|grantee|mandate_id(32)`
+  record (grantee length-prefixed so addresses can never alias),
+  `0x02|chamber(4)|grantee` → mandate_id (chamber-first per D-011),
+  `0x03|chamber(4)|sigil_id(32)|mandate_id(32)` → grantee (serves the
+  per-sigil query), `0x04` params, `0x05` id sequence. Mandate ids use the
+  D-009 derivation with domain byte 0x03 and a module-local sequence.
+- **Rationale:** §5.3 conformance; the 0x03 index keeps `Mandates(sigil)`
+  off the hot path without scanning; D-009's domain-byte namespace extends
+  naturally (0x01 sigil, 0x02 credential, 0x03 mandate).
+
+## D-024 — §1.3 steps 2–3 demonstrated in two phases until task 0.7
+
+- **Date:** 2026-06-12 (task 0.4)
+- **SPEC:** §1.3 steps 2–3, §10 row 0.4
+- **Decision:** baseapp v0.50 `runTx` rejects any msg lacking a registered
+  handler BEFORE the ante handler runs, and x/veil's msg server lands at
+  task 0.7 — so a `MsgSubmitIntent` cannot transit a block yet in any
+  mode. The acceptance test therefore runs (1) the exact §1.3 intent flow
+  through the production ante pipeline (`app.NewAnteHandler` over the
+  app's keepers, real signed tx bytes, gas metered) and (2) the identical
+  enforcement through full FinalizeBlock+Commit delivery using a routable
+  msg (`MsgSend`) under the same ceilings. CONCLAVE-TODO(phase-0): fold
+  into one full-block test at 0.7.
+- **Rationale:** The §10 build order (mandate before veil) makes this
+  unavoidable; the two phases together cover every §1.3 steps 2–3
+  assertion, including "no gas beyond ante" on both paths.
+
+## D-025 — Intent bonds count toward spend ceilings
+
+- **Date:** 2026-06-12 (task 0.4, acceptance amendment)
+- **SPEC:** §6.2 step 4, §6.3 bond rules
+- **Decision:** `MsgSubmitIntent`'s spend intent is the per-denom max of
+  give legs PLUS the intent bond, in both the per-tx and window
+  aggregation. The bond charges even when the payload is malformed
+  (zero give-leg spend per D-021). Consequence of D-019: a mandate
+  permitting `MsgSubmitIntent` must list a native-denom ceiling that
+  budgets bonds.
+- **Rationale:** Bonds are slashable 50% on INVALID, so unbounded bond
+  spend is an unbounded CLV burn for a stolen mandate-bound key — the
+  exact "jailbroken agent" threat Mandates exist to cap. Reading D-019 and
+  D-021 together without this left the burn bounded by nothing in the
+  mandate. The same accounting carries into Phase 1, where ante binds
+  `spend_commitment + bond` (SPEC §6.3 "Spend commitment", §8(e)).

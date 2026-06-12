@@ -62,6 +62,9 @@ import (
 	solomachine "github.com/cosmos/ibc-go/v8/modules/light-clients/06-solomachine"
 	ibctm "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
 
+	"github.com/AryaSingh22/conclave/x/mandate"
+	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
+	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	"github.com/AryaSingh22/conclave/x/sigil"
 	sigilkeeper "github.com/AryaSingh22/conclave/x/sigil/keeper"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
@@ -107,7 +110,8 @@ type ConclaveApp struct {
 
 	// Conclave keepers (wired manually, same pattern as IBC; modules land
 	// in SPEC §10 task order)
-	SigilKeeper sigilkeeper.Keeper
+	SigilKeeper   sigilkeeper.Keeper
+	MandateKeeper mandatekeeper.Keeper
 
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
@@ -233,13 +237,19 @@ func NewConclaveApp(
 	// ---- Conclave modules (SPEC §10 build order) ----
 
 	sigilKey := storetypes.NewKVStoreKey(sigiltypes.StoreKey)
-	if err := app.RegisterStores(sigilKey); err != nil {
+	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
+	if err := app.RegisterStores(sigilKey, mandateKey); err != nil {
 		panic(err)
 	}
 	app.SigilKeeper = sigilkeeper.NewKeeper(app.appCodec, runtime.NewKVStoreService(sigilKey), govAuthority)
+	app.MandateKeeper = mandatekeeper.NewKeeper(
+		app.appCodec, runtime.NewKVStoreService(mandateKey),
+		app.SigilKeeper, app.BankKeeper, app.AccountKeeper, govAuthority,
+	)
 
 	if err := app.RegisterModules(
 		sigil.NewAppModule(app.appCodec, app.SigilKeeper),
+		mandate.NewAppModule(app.appCodec, app.MandateKeeper),
 	); err != nil {
 		panic(err)
 	}
@@ -292,7 +302,12 @@ func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) {
 				FeegrantKeeper:  app.FeeGrantKeeper,
 				SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 			},
-			IBCKeeper: app.IBCKeeper,
+			IBCKeeper:     app.IBCKeeper,
+			MandateKeeper: app.MandateKeeper,
+			// CONCLAVE-TODO(phase-0): task 0.8 swaps the face-value source
+			// for the x/session clearing-price implementation (SPEC §6.2
+			// step 4)
+			PriceSource: mandatetypes.FaceValuePriceSource{},
 		},
 	)
 	if err != nil {

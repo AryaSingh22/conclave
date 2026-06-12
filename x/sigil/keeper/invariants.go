@@ -18,11 +18,9 @@ func RegisterInvariants(ir sdk.InvariantRegistry, k Keeper) {
 
 // AddressIndexInvariant implements SPEC §6.1 invariant 1: every indexed key
 // resolves to exactly one existing Sigil, and every sigil's controller is
-// correctly indexed.
-//
-// CONCLAVE-TODO(phase-0): task 0.4 extends this to assert every Mandate's
-// grantee key resolves through this index ("every Mandate's agent key
-// resolves to exactly one Sigil").
+// correctly indexed. The mandate side of the invariant ("every Mandate's
+// agent key resolves to exactly one Sigil") is registered by x/mandate as
+// grantee-resolves-to-sigil, where both keepers are in scope (task 0.4).
 func AddressIndexInvariant(k Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		var msg string
