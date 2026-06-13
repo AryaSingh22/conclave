@@ -158,6 +158,26 @@ func (k Keeper) IsCredentialActive(ctx sdk.Context, chamberID uint32, sigilID, c
 	return true
 }
 
+// HasActiveCredentialSchema reports whether a sigil holds any active
+// (non-revoked, non-expired) credential of the given schema. This backs the
+// x/session counterparty-class predicate has_credential("schema") (SPEC §6.4
+// rule 5 / §6.1 invariant 3). Iterates the sigil's credentials in key order
+// (deterministic, §11.6).
+func (k Keeper) HasActiveCredentialSchema(ctx sdk.Context, chamberID uint32, sigilID, schema string) bool {
+	found := false
+	_ = k.IterateCredentials(ctx, chamberID, sigilID, func(cred types.CredentialAnchor) bool {
+		if cred.SchemaId != schema || cred.Revoked {
+			return false
+		}
+		if cred.ExpiryHeight != 0 && cred.ExpiryHeight <= uint64(ctx.BlockHeight()) {
+			return false
+		}
+		found = true
+		return true // stop on first match
+	})
+	return found
+}
+
 // IterateCredentials walks all credentials of a sigil.
 func (k Keeper) IterateCredentials(ctx sdk.Context, chamberID uint32, sigilID string, cb func(types.CredentialAnchor) bool) error {
 	sigilIDBz, err := types.SigilIDBytes(sigilID)

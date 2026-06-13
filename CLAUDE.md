@@ -69,3 +69,20 @@ Threshold decryption at session open is called **the Reveal**.
 - CONCLUDE is **all-or-nothing** via a single cache-wrapped context (§6.4).
 - The fallback matcher is deterministic consensus logic — every node computes
   it identically.
+
+## Phase-0 task ledger (SPEC §10)
+
+One task per session, in order. Mark complete only after `make lint test` is
+green and the task is reviewed + committed.
+
+- [x] 0.1 Scaffold chain + `scripts/localnet.sh`
+- [x] 0.2 Protos for all six modules; buf generate
+- [x] 0.3 `x/sigil` full + reputation
+- [x] 0.4 `x/mandate` full incl. MandateDecorator + FeeAbstractionDecorator
+- [x] 0.5 Unordered txs + dedup cache + conformance suite
+- [x] 0.6 Block SDK lanes wired
+- [x] 0.7 `x/veil` stub mode
+- [x] 0.8 `x/session`: lifecycle, solver registry, validation, scoring, Conclude, fallback, sweeps
+- [ ] 0.9 `x/receipt` + reputation hook (ICS-23 proof) — NEXT
+- [ ] 0.10 Reference solver binary (naive + cycles)
+- [ ] 0.11 SDK simulation integration (all modules)

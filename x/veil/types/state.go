@@ -30,10 +30,13 @@ var LegalTransitions = map[IntentState][]IntentState{
 		INTENT_STATE_ROLLED,
 		INTENT_STATE_EXPIRED,
 	},
-	// CONCLAVE-TODO(phase-0): task 0.8 adds ROLLED's re-entry into the next
-	// session per SPEC §6.4 step 5 (a rolled intent becomes OPEN in the next
-	// session's set). Until the session module defines that hand-off, ROLLED
-	// is terminal here.
+	// task 0.8 (§6.4 step 5): a ttl-ok unmatched intent rolls OPEN→ROLLED then
+	// immediately ROLLED→OPEN re-homed in the next session (x/session's rollover
+	// sweep drives this via RollIntent). The charge PERSISTS across the roll
+	// (D-041): no refund, no re-charge.
+	INTENT_STATE_ROLLED: {
+		INTENT_STATE_OPEN,
+	},
 }
 
 // CanTransition reports whether from → to is a legal §5.2 transition.

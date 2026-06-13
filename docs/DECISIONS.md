@@ -705,3 +705,215 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   ttl) while deferring payload validity keeps the Phase-0 and Phase-1 code
   paths identical — the only thing that changes in Phase 1 is that the
   payload becomes a real ciphertext.
+
+## D-043 — Counterparty-class: deterministic predicate subset, not full CEL
+
+- **Date:** 2026-06-13 (task 0.8, Half A)
+- **SPEC:** §6.4 rule 5, §5.1 counterparty_class, §6.1 invariant 3, §11.6
+- **Decision:** The SPEC §6.4 rule-5 "CEL predicate" is implemented in Phase 0
+  as a minimal, fully deterministic subset (`x/session/types/predicate.go`),
+  NOT google/cel-go. Grammar: `reputation <cmp> <decimal>`,
+  `has_credential("schema")`, `&&`/`||`, parentheses; empty = always true.
+  Evaluated against the counterparty's Sigil state via
+  `GetReputation`/`HasActiveCredentialSchema` (the §6.1 invariant-3 active
+  accessor). **Fail-closed + empty≠malformed:** an EMPTY predicate is always
+  true; any non-empty predicate that fails to parse is MALFORMED and rejects
+  the match (the parse error and a recover in the keeper both yield rejection).
+  Parsing is length- and depth-bounded and never panics; the parser fuzz target
+  asserts a deterministic parse-or-error outcome on arbitrary bytes. Evaluated
+  at solution-validation height (≈ session-open; within solution_window blocks).
+- **Rationale:** cel-go is a heavy consensus dependency with its own
+  determinism surface for a Phase-0 need the spec illustrates only with simple
+  comparisons. Resolves the 0.4 CONCLAVE-TODO (D-015/D-020 CEL gate).
+  CONCLAVE-TODO(phase-2): swap in full cel-go if richer predicates are needed;
+  snapshot reputation at the exact session-open height.
+
+## D-044 — Ante/veil PriceSource swap (D-020) deferred to a dedicated post-0.8 task
+
+- **Date:** 2026-06-13 (task 0.8, Half A)
+- **SPEC:** §6.2 step 4, §6.4 scoring, D-020, D-041
+- **Decision:** Task 0.8 does NOT swap `mandatetypes.FaceValuePriceSource` for a
+  session clearing-price source in the ante handler or x/veil. Face-value
+  pricing stays; the D-020 non-coin-give-leg exposure stays open. x/session
+  scoring (Half B) normalizes surplus to uusdc using each solution's OWN
+  `clearing_prices`, so it has no dependency on the ante PriceSource. The swap
+  becomes its own task after 0.8.
+- **Rationale:** A price-dependent ante introduces a new CheckTx/DeliverTx
+  consistency surface (clearing prices read at both must agree) and is NOT
+  behavior-preserving once any session has cleared — it would start drawing
+  data/svc give legs against mandate ceilings mid-stream. It has zero 0.8
+  acceptance dependency, so bundling it into 0.8 adds risk to the mandate
+  chokepoint for no acceptance gain. CONCLAVE-TODO(phase-0) markers at
+  `mandatetypes.FaceValuePriceSource`/`price_source.go` and the app/veil wiring
+  carry the deferral.
+
+## D-045 — Receipts and escrow stubs live in the x/session store
+
+- **Date:** 2026-06-13 (task 0.8, Half A)
+- **SPEC:** §6.4, §6.5, §6.6, §10 rows 0.8/0.9
+- **Decision:** x/session is the writer of both §6.6 Receipts and the §6.4/§6.5
+  DataGrant escrow stubs, and it writes them into its OWN store. The §6.6
+  receipt key layout is pinned now exactly as the spec writes it —
+  `0x07|chamber|sigil_id|height|receipt_id` (primary, per-agent chronological)
+  and `0x08|receipt_id` (secondary) — even though receipts themselves are
+  emitted in Half B; escrow stubs key `0x09|chamber|escrow_id` (state ACTIVE,
+  no release logic). **Inheritance:** 0.9's x/receipt is a query/proof surface
+  that READS these records from the x/session store (a cross-module read); it
+  never migrates them. ICS-23 existence proofs (0.9 acceptance) work against the
+  session store's IAVL subtree regardless.
+- **Rationale:** §6.6 says "Receipts are written by x/session; this module is
+  the query/proof surface" — the writer owning the store is the literal reading,
+  and standing up x/receipt/x/escrow keepers now would pull 0.9/Phase-2 scope
+  into 0.8. Pinning the byte layout now freezes the contract 0.9 reads against.
+  CONCLAVE-TODO(phase-2): x/escrow takes ownership of the stub records.
+
+## D-046 — SettleLeg sigils resolve to controller addresses; one sigil per match
+
+- **Date:** 2026-06-13 (task 0.8, Half A)
+- **SPEC:** §6.4, §6.1, §1.1 goal 3, D-006, D-010
+- **Decision:** At Conclude, a SettleLeg's `from_sigil`/`to_sigil` resolve to the
+  sigil's CONTROLLER address via `sigilKeeper.ControllerAddress` (the
+  settlement-side counterpart of `SigilIDByAddress`, anticipated since 0.3).
+  Coin legs move between controller treasuries; the intent OWNER (the paying
+  key) still receives the bond refund and the mandate window refund (x/veil's
+  `rec.Owner`). A match may contain at most one OPEN intent per `sender_sigil`
+  (`ErrDuplicateSigil`). **Corrected rationale (vs the plan):** the distinct-
+  sigil rule is NOT needed for address resolution — sigil→controller is a pure
+  function regardless of how many intents share a sigil. It is required for
+  per-intent LIMIT-SATISFACTION attribution (rule 3): legs name sigils, but
+  give/want limits are per-intent, so a sigil must map to exactly one intent in
+  the match for its aggregate net flow to attribute unambiguously.
+- **Rationale:** Resolving to the controller treasury (not the session key) is
+  the §1.1-goal-3 agent-safety model — a mandate on a session key bounds how
+  much of the controller treasury that key can commit, while the bond/window
+  (owner-charged) refund to the key. CONCLAVE-TODO(phase-2): allow multiple
+  intents per sigil per match (a legitimate case — one agent clearing two
+  intents in a batch) by tagging legs with their intent id.
+
+## D-047 — Legs are bound to clearing prices (the binding half of rules 3/4)
+
+- **Date:** 2026-06-13 (task 0.8, Half A — review Correction 1)
+- **SPEC:** §6.4 rules 3 ("at the stated clearing prices") and 4, §11.6
+- **Decision:** `validateSolution` runs `checkPriceBinding` after the quantity
+  checks: for every match, valued at the match's `clearing_prices`, EACH party's
+  give value must equal its receive value EXACTLY — i.e. Σ over the party's net
+  flows of `price[asset] × net == 0` in the match numeraire (the common price
+  quote; dev: uusdc). The numeraire's self-price is 1 (an explicit self-price
+  ≠ 1 rejects); an asset that moves without a price rejects; mixed quotes
+  reject. **Rounding rule: NONE (exact LegacyDec zero).** The solver controls
+  both legs and prices and can always present an exact clearing, so any nonzero
+  per-party residual is a mispriced/extractive solution → `ErrPriceMismatch`,
+  5% slash. Runs AFTER `checkLimits` so a cap/floor breach still surfaces as
+  `ErrLimitViolation`, not a price residual.
+- **Rationale:** Without this, rule 3 bound only quantities and rule 4 only the
+  price list's internal consistency — nothing forced transfers to respect the
+  prices. Half B's surplus skim is a fraction of the margin vs each party's
+  limit; if prices are not binding on transfers, "surplus" is measured against
+  prices the legs need not honor and a solver can extract through the skim while
+  passing every cap/floor. The skim cannot be built on a price-unenforcing
+  settlement layer. (This closed the gap the Half-A review itself surfaced as
+  Q3 caveat b.)
+
+## D-048 — Conservation contract: three distinct per-asset-class invariants
+
+- **Date:** 2026-06-13 (task 0.8, Half A — review Correction 2; amends D-045)
+- **SPEC:** §6.4 rule 2, §6.5, §6.6
+- **Decision:** `CheckConservation`'s per-asset graph net-zero is a BOOKKEEPING
+  device, not a ledger-conservation proof. The ledger invariant it backs
+  differs by asset class, and the code/comments/error taxonomy state each
+  explicitly rather than calling all three "conservation":
+  - **coin → value conservation:** `applyLeg` debits an EXISTING balance and
+    routes it through the module account; graph-zero == on-chain supply
+    unchanged + module nets zero.
+  - **svc/{schema} → authorized mint:** `applyLeg` MINTS to the receiver (the
+    giver is never debited; supply rises by design). Graph-zero means every
+    minted unit is matched by a giver who took the −units side, whose offer is
+    authorized by rule 3.
+  - **data/{hash} → authorized creation:** `applyLeg` writes an escrow stub; NO
+    ledger quantity exists. The per-leg amount of 1 is a pure accounting fiction
+    so the graph balances; the real invariant is offered (give) AND wanted
+    (want), enforced by rule 3.
+  `ErrConservation`'s message is now asset-agnostic ("match graph does not
+  balance"); it no longer implies value conservation for svc/data. The
+  execution-property tests assert each invariant separately
+  (`TestExecutionInvariant_Svc`, `TestExecutionInvariant_Data`) alongside the
+  coin supply-invariance test.
+- **Rationale:** The Half-A report (Q2/Q4) showed the single "conservation"
+  framing conflated three different properties and that the execution proof
+  covered coins only. Stating the real invariant per class prevents the economic
+  layer from assuming a supply guarantee that svc/data do not have.
+
+## D-049 — Phase-0 reads give/want quantity from the leg amount; §5.1 `limit` ignored
+
+- **Date:** 2026-06-13 (task 0.8, Half A — review "ALSO LOG")
+- **SPEC:** §5.1 IntentLeg.limit, §6.4 rule 3
+- **Decision:** Rule-3 limit satisfaction reads each give/want quantity from the
+  leg's ASSET AMOUNT (`coin.Amount` / `svc.Units` / 1 for data), exactly as the
+  veil PriceSource and `legAssetKey` do. The §5.1 `IntentLeg.limit` decimal (a
+  max-give/min-want RATE) is deliberately NOT honored in Phase 0 — a known,
+  deliberate limitation, not silent. Marked `CONCLAVE-TODO(phase-2)` at
+  `checkLimits`/`intentLegKeyAmount`.
+- **Rationale:** Phase-0 intents express quantity through the asset amount (the
+  existing veil valuation already does this); honoring the `limit` rate requires
+  the clearing-price normalization deferred with D-044 and richer partial-fill
+  semantics. Logged so the economic layer treats it as a known boundary.
+
+## D-050 — Surplus skim base is the surplus margin, NOT §6.4's "settled value"
+
+- **Date:** 2026-06-14 (task 0.8, Half B — STOP #1 approved)
+- **SPEC:** §6.4 scoring ("a small skim (param) on settled value"), §14 D3, §11.6
+- **DEVIATION FROM SPEC WORDING — recorded, not silent:** SPEC §6.4 frames the
+  fee-pool skim as "a small skim on **settled value**." Half B instead bases the
+  enforced skim on the **surplus margin** (specifically each party's realized
+  numeraire RECEIVE-EXCESS, `recv_N − floor_N`), never on settled value.
+- **Decision:** `computeMatchSkim` takes `skim_p = floor(surplus_skim_bps ×
+  (recv_N − floor_N) / 10000)` numeraire base units from each party as a
+  `party → @feepool` leg. Because the amount is bounded by receive-excess, the
+  skim is **principal-safe by construction**: every party still ends ≥ its
+  want-floor and (give legs untouched) ≤ its give-cap. The skim-inclusive graph
+  is validated by LITERALLY re-running `CheckConservation` (each skim leg is an
+  ordinary from→to leg, so the graph still nets zero) plus the new
+  `checkSkimBinding`, which generalizes D-047's exact-zero price binding to
+  `residual_p == −skim_p` with `0 ≤ skim_p ≤ surplus_p` and the fee pool as the
+  sole sink. Re-running D-047's verbatim exact-zero check on the skim graph is
+  provably impossible (extracting value v forces residual −v / pool +Σv — a
+  conservation identity), so a generalized invariant is the correct contract.
+  The solver fee composes on the same surplus base: `floor(solver_fee_bps ×
+  total_surplus)`, paid from the pool and CAPPED at the pool balance (solvent by
+  construction, never mints). Scoring (`score = Σ surplus_p`) measures the full
+  both-sides surplus in the numeraire; only the skim/payout are numeraire-bounded.
+- **Rationale (why deviate):** A settled-value skim can EXCEED a thin surplus and
+  bite principal — violating the §1.1 agent-safety guarantee that a settlement
+  never takes more than a party agreed to give. The approving review made
+  principal-safety a hard build condition, so the base must be the surplus the
+  party actually beat its limit by. With dev defaults (skim 50 bps, fee 500 bps)
+  the fee always caps at the collected skim, so the solver receives the whole
+  numeraire skim and the protocol retains zero — a faithful Phase-0 realization
+  of §14 D3 ("surplus skim, solver_fee_bps=500"). `checkSkimBinding` is proven
+  load-bearing by `skim_test.go` (it goes red if either bound is removed).
+  CONCLAVE-TODO(phase-2): revisit whether a settled-value protocol skim (distinct
+  from the solver fee) is wanted once real fee economics (D6) are modeled.
+
+## D-051 — Phase-0 skim is numeraire-only; give-saved and non-numeraire surplus scored but not skimmed
+
+- **Date:** 2026-06-14 (task 0.8, Half B — STOP #1 approved)
+- **SPEC:** §6.4 scoring/skim, §6.5, D-048 (asset-class invariants), D-050
+- **Decision:** Surplus for SCORING is the full economic margin — give-side
+  saving (`cap − given`) plus receive-side excess (`recv − floor`), across ALL
+  assets, valued in the numeraire (the winner-selection measure). The SKIM,
+  however, is taken ONLY from realized numeraire (coin) receive-excess:
+  - **give-saved surplus** (a party kept part of what it offered) is NOT skimmed
+    — with Phase-0 fill-or-kill the give equals the cap, so this is usually zero,
+    and skimming a non-moved asset would need an extra give leg;
+  - **non-numeraire receive-excess** (extra svc/data received) is NOT skimmed —
+    `svc/{schema}` is an authorized mint and `data/{hash}` has no ledger quantity
+    (D-048), so neither is a clean, single-asset, rounding-free skim source;
+  - a `data/` numeraire is never skimmable (no ledger quantity).
+  Keeping the skim in one coin numeraire makes it in-kind, exact (no price
+  round-trip, D-047), and the solver payout trivially payable from the pool.
+- **Rationale:** The numeraire-only skim is the smallest construction that
+  satisfies every STOP #1 constraint (principal-safe, conservation- and
+  price-binding-consistent) without dragging svc-mint/data-creation semantics
+  into the fee path. Marked `CONCLAVE-TODO(phase-2)` at `computeMatchSkim`:
+  multi-asset in-kind skim + in-kind solver payout once §6.5 escrow and richer
+  fee economics land.

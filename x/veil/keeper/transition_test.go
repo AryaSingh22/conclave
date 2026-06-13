@@ -30,12 +30,15 @@ var allStates = []types.IntentState{
 //	SUBMITTED         → SEALED_IN_SESSION | CANCELLED
 //	SEALED_IN_SESSION → OPEN | INVALID | CANCELLED
 //	OPEN              → CONCLUDED | ROLLED | EXPIRED
+//	ROLLED            → OPEN   (§6.4 step-5 rollover re-entry, task 0.8)
 //	everything else   → nothing (terminal in Phase 0)
 //
 // Note SEALED_IN_SESSION → CANCELLED is legal per §5.2 ("any pre-OPEN
 // state") but unreachable in live block flow (D-039): the state exists
 // only between EndBlock and the next BeginBlock, where no tx executes.
-// The edge is still pinned here at the keeper level.
+// The edge is still pinned here at the keeper level. ROLLED → OPEN is the
+// §6.4 step-5 re-entry x/session's rollover sweep drives via RollIntent;
+// the D-041 charge persists across it (no refund, no re-charge).
 var spec52Legal = map[types.IntentState]map[types.IntentState]bool{
 	types.INTENT_STATE_SUBMITTED: {
 		types.INTENT_STATE_SEALED_IN_SESSION: true,
@@ -50,6 +53,9 @@ var spec52Legal = map[types.IntentState]map[types.IntentState]bool{
 		types.INTENT_STATE_CONCLUDED: true,
 		types.INTENT_STATE_ROLLED:    true,
 		types.INTENT_STATE_EXPIRED:   true,
+	},
+	types.INTENT_STATE_ROLLED: {
+		types.INTENT_STATE_OPEN: true,
 	},
 }
 

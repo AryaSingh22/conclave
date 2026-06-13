@@ -240,9 +240,9 @@ type windowFuzzAgent struct {
 // bond-conservation fuzz: over random submit/seal/open/expire/cancel/
 // invalid sequences across multiple mandate-bound grantees, every
 // mandate's window_spent must equal the sum of charged_spend over its own
-// intents that have NOT been refunded — i.e. all states except EXPIRED and
-// CANCELLED (D-041 refund matrix: INVALID and ROLLED keep their charge,
-// D-040; EXPIRED/CANCELLED refund). Equivalently
+// intents that have NOT been refunded — i.e. all states except EXPIRED,
+// CANCELLED, and CONCLUDED (D-041 refund matrix: INVALID and ROLLED keep
+// their charge, D-040; EXPIRED/CANCELLED/CONCLUDED refund). Equivalently
 // sum(window_spent) == sum(charged_spend of live intents) - sum(refunds).
 //
 // The test charges each window exactly as the ante would (same
@@ -250,6 +250,11 @@ type windowFuzzAgent struct {
 // refunds; it catches both double-refund (window goes too low) and
 // forgotten-refund (window stays too high) drift, and — by checking each
 // mandate independently — refunds credited to the wrong mandate.
+//
+// Guard 2 (task 0.8): CONCLUDED is exercised here for the first time — task
+// 0.7 only ever saw EXPIRED/CANCELLED. The fuzz drives random OPEN intents to
+// CONCLUDED via ConcludeIntent (x/session's settlement hook) and asserts the
+// CONCLUDED window refund balances exactly like the other refunding states.
 func TestFuzzWindowAccountingConservation(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		f := setupKeeper(rt)
@@ -305,8 +310,9 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 				malformed: rapid.Bool().Draw(rt, "malformed"),
 			}
 		}
-		// optional cancels keyed by height
+		// optional cancels / concludes keyed by height
 		cancelAt := rapid.IntRange(0, lastHeight).Draw(rt, "cancel_height")
+		concludeAt := rapid.IntRange(0, lastHeight).Draw(rt, "conclude_height")
 
 		assertConservation := func() {
 			rt.Helper()
@@ -314,7 +320,9 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 			// intents not in {EXPIRED, CANCELLED}
 			expected := make(map[string]sdk.Coins)
 			require.NoError(rt, f.k.IterateIntentRecords(f.ctx, func(rec types.IntentRecord) bool {
-				if rec.State == types.INTENT_STATE_EXPIRED || rec.State == types.INTENT_STATE_CANCELLED {
+				if rec.State == types.INTENT_STATE_EXPIRED ||
+					rec.State == types.INTENT_STATE_CANCELLED ||
+					rec.State == types.INTENT_STATE_CONCLUDED {
 					return false
 				}
 				expected[rec.Owner] = expected[rec.Owner].Add(rec.ChargedSpend...)
@@ -363,6 +371,18 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 				require.NoError(rt, f.k.IterateIntentRecords(f.ctx, func(rec types.IntentRecord) bool {
 					if types.IsPreOpen(rec.State) {
 						require.NoError(rt, f.k.CancelIntent(f.ctx, rec.Owner, rec.Intent.Id))
+						return true
+					}
+					return false
+				}))
+			}
+
+			// Guard 2: an optional CONCLUDE of the lowest-id OPEN intent via the
+			// x/session settlement hook — exercises the CONCLUDED window refund.
+			if int64(concludeAt) == h {
+				require.NoError(rt, f.k.IterateIntentRecords(f.ctx, func(rec types.IntentRecord) bool {
+					if rec.State == types.INTENT_STATE_OPEN {
+						require.NoError(rt, f.k.ConcludeIntent(f.ctx, rec.Intent.Id))
 						return true
 					}
 					return false

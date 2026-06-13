@@ -257,13 +257,15 @@ func (k Keeper) ExpireOpen(ctx sdk.Context) error {
 	return nil
 }
 
-// settleRefund applies the EXPIRED/CANCELLED settlement (SPEC §5.2 "bond
-// refunded"; §6.2 step 5 / §6.4 step 7 window refund): the full bond
+// settleRefund applies the EXPIRED/CANCELLED/CONCLUDED settlement (SPEC §5.2
+// "bond refunded"; §6.2 step 5 / §6.4 step 7 window refund): the full bond
 // returns to the owner and the stored charged_spend returns to the owner's
-// mandate window (a no-op for unbound root keys).
+// mandate window (a no-op for unbound root keys). The D-041 matrix gives all
+// three terminal states identical refunds; only INVALID and ROLLED differ.
 //
-// CONCLAVE-TODO(phase-0): CONCLUDED refunds (bond + window) are x/session's
-// job at task 0.8, inside the §6.4 Conclude cache-context.
+// CONCLUDED reaches this path via ConcludeIntent, called by x/session inside
+// its §6.4 Conclude cache-context (task 0.8), so the refund is part of that
+// all-or-nothing settlement write.
 func (k Keeper) settleRefund(ctx sdk.Context, rec types.IntentRecord, eventType string) error {
 	owner := sdk.MustAccAddressFromBech32(rec.Owner)
 	if rec.Intent.Bond.IsPositive() {

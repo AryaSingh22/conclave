@@ -43,10 +43,9 @@ for name in operator alice bob carol solver1; do
 done
 $BIN genesis add-genesis-account faucet "$FAUCET_FUNDS" "${KEYRING[@]}" --home "$HOME_DIR"
 
-# CONCLAVE-TODO(phase-0): genesis solver registration for solver1 (SPEC §12:
-# "Genesis includes one pre-registered solver so the demo can also exercise
-# the registered-solver path before testing fallback") — lands with x/session
-# at task 0.8.
+# SPEC §12 pre-registered solver (solver1): its x/session registry record and
+# bonded stake are written into genesis below (after genesis.json exists), so the
+# demo can exercise the registered-solver path before testing fallback.
 
 $BIN genesis gentx validator "$SELF_DELEGATION" --chain-id "$CHAIN_ID" "${KEYRING[@]}" --home "$HOME_DIR"
 $BIN genesis collect-gentxs --home "$HOME_DIR"
@@ -91,6 +90,34 @@ jq --arg addr "$MANDATE_ADDR" --arg amt "$FEE_POOL_AMOUNT" --arg denom "$DENOM" 
   | .app_state.bank.supply = (.app_state.bank.supply | map(
       if .denom == $denom then .amount = ((.amount | tonumber) + ($amt | tonumber) | tostring) else . end
     ))' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
+
+# SPEC §12 / §6.4: pre-register solver1 in x/session genesis with the minimum
+# bond (100 CLV), and move that bond from solver1's account into the session
+# module account (the §6.4 bond custodian / fee pool). Supply-neutral: the bond
+# is solver1's own stake, not minted. Direct bank-balance edits (never
+# add-genesis-account) keep the session module account a true ModuleAccount,
+# exactly as the x/mandate fee pool above; x/session InitGenesis rebuilds the
+# solver's unbonding/state indexes from this record.
+SOLVER_BOND_AMT="100000000" # 100 CLV = x/session DefaultSolverMinBond
+SOLVER1_ADDR=$($BIN keys show solver1 -a "${KEYRING[@]}" --home "$HOME_DIR")
+SESSION_ADDR_HEX=$(echo -n "session" | sha256sum | cut -c1-40)
+SESSION_ADDR=$($BIN debug addr "$SESSION_ADDR_HEX" | awk '/Bech32 Acc:/ {print $3}')
+jq --arg saddr "$SOLVER1_ADDR" --arg maddr "$SESSION_ADDR" --arg bond "$SOLVER_BOND_AMT" --arg denom "$DENOM" '
+  .app_state.session.solvers = [{
+    "addr": $saddr,
+    "bond": [{ "denom": $denom, "amount": $bond }],
+    "status": "SOLVER_STATUS_ACTIVE",
+    "slashed_count": "0",
+    "lifetime_surplus": "0",
+    "unbond_height": "0"
+  }]
+  | .app_state.bank.balances = (.app_state.bank.balances | map(
+      if .address == $saddr then
+        .coins = (.coins | map(
+          if .denom == $denom then .amount = ((.amount | tonumber) - ($bond | tonumber) | tostring) else . end))
+      else . end))
+  | .app_state.bank.balances += [{ "address": $maddr, "coins": [{ "denom": $denom, "amount": $bond }] }]
+' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
 
 $BIN genesis validate --home "$HOME_DIR"
 

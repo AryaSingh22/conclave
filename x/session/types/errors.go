@@ -1,0 +1,33 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+// x/session error registry. Stable codespace per SPEC §13: session = 14xx.
+var (
+	ErrInvalidID            = errorsmod.Register(ModuleName, 1400, "invalid id")
+	ErrInvalidParams        = errorsmod.Register(ModuleName, 1401, "invalid params")
+	ErrUnauthorized         = errorsmod.Register(ModuleName, 1402, "unauthorized")
+	ErrSessionNotFound      = errorsmod.Register(ModuleName, 1403, "session not found")
+	ErrSolverNotFound       = errorsmod.Register(ModuleName, 1404, "solver not found")
+	ErrSolverExists         = errorsmod.Register(ModuleName, 1405, "solver already registered")
+	ErrBondInsufficient     = errorsmod.Register(ModuleName, 1406, "solver bond below minimum")
+	ErrInvalidBond          = errorsmod.Register(ModuleName, 1407, "invalid solver bond")
+	ErrSolverNotActive      = errorsmod.Register(ModuleName, 1408, "solver is not active")
+	ErrSessionNotInAuction  = errorsmod.Register(ModuleName, 1409, "session is not accepting solutions")
+	ErrEquivocation         = errorsmod.Register(ModuleName, 1410, "solver already proposed for this session")
+	ErrTooManySolutions     = errorsmod.Register(ModuleName, 1411, "session solution limit reached")
+	ErrInvalidSolution      = errorsmod.Register(ModuleName, 1412, "solution failed validation")
+	ErrIntentNotOpen        = errorsmod.Register(ModuleName, 1413, "referenced intent is not OPEN in this session")
+	ErrIntentReused         = errorsmod.Register(ModuleName, 1414, "intent referenced in two matches")
+	ErrConservation         = errorsmod.Register(ModuleName, 1415, "match graph does not balance (an asset is given != received)")
+	ErrLimitViolation       = errorsmod.Register(ModuleName, 1416, "match violates a party's give/want limit")
+	ErrPriceMismatch        = errorsmod.Register(ModuleName, 1424, "leg amounts do not clear at the stated prices")
+	ErrNonUniformPrice      = errorsmod.Register(ModuleName, 1417, "asset pair clears at more than one price")
+	ErrCounterpartyClass    = errorsmod.Register(ModuleName, 1418, "counterparty-class predicate not satisfied")
+	ErrGraphTooLarge        = errorsmod.Register(ModuleName, 1419, "settlement graph exceeds max_graph_legs")
+	ErrConditionsNotEnabled = errorsmod.Register(ModuleName, 1420, "delivery conditions are disabled in Phase 0")
+	ErrDuplicateSigil       = errorsmod.Register(ModuleName, 1421, "a sigil appears on two intents in one match")
+	ErrConcludeFailed       = errorsmod.Register(ModuleName, 1422, "settlement graph execution failed")
+	ErrInvalidLeg           = errorsmod.Register(ModuleName, 1423, "invalid settlement leg")
+	ErrSkimViolation        = errorsmod.Register(ModuleName, 1425, "surplus skim violates the residual==-skim binding (would touch principal or mis-route)")
+)

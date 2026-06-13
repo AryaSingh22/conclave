@@ -8,6 +8,8 @@ const (
 	EventTypeIntentInvalid   = "intent_invalid"
 	EventTypeIntentCancelled = "intent_cancelled"
 	EventTypeIntentExpired   = "intent_expired"
+	EventTypeIntentConcluded = "intent_concluded"
+	EventTypeIntentRolled    = "intent_rolled"
 
 	AttributeKeyIntentID    = "intent_id"
 	AttributeKeySenderSigil = "sender_sigil"

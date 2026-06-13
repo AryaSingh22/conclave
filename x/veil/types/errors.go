@@ -16,4 +16,5 @@ var (
 	ErrInvalidParams        = errorsmod.Register(ModuleName, 1309, "invalid params")
 	ErrUnauthorized         = errorsmod.Register(ModuleName, 1310, "unauthorized")
 	ErrInvalidChamber       = errorsmod.Register(ModuleName, 1311, "chamber_id must be 0 until Phase 3")
+	ErrIntentNotOpen        = errorsmod.Register(ModuleName, 1312, "intent is not OPEN")
 )

@@ -66,6 +66,7 @@ import (
 
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
+	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
@@ -107,6 +108,11 @@ var (
 		// it never mints or burns — bonds flow back out as refunds or to the
 		// community pool as INVALID slashes
 		{Account: veiltypes.ModuleName},
+		// the session module account is the SPEC §6.4 settlement escrow account
+		// (coin legs route through it and it nets zero per Conclude), the
+		// solver-bond custodian, and the protocol fee pool. It holds the Minter
+		// permission to mint svc/{schema} service-voucher tokens at settlement.
+		{Account: sessiontypes.ModuleName, Permissions: []string{authtypes.Minter}},
 	}
 
 	// blocked account addresses (module accounts that must not receive user funds)
@@ -119,6 +125,7 @@ var (
 		ibctransfertypes.ModuleName,
 		mandatetypes.ModuleName,
 		veiltypes.ModuleName,
+		sessiontypes.ModuleName,
 		// the gov module account is allowed to receive funds (deposits)
 	}
 
@@ -168,6 +175,10 @@ var (
 						ibctransfertypes.ModuleName,
 						capabilitytypes.ModuleName,
 						feegrant.ModuleName,
+						// SPEC §6.4 EndBlock steps 1–5 (advance/scoring/conclude/
+						// fallback/rollover) run BEFORE x/veil's expiry sweep +
+						// boundary seal (steps 6–7) — the D-038 ordering pin.
+						sessiontypes.ModuleName,
 						// SPEC §6.3 veil lifecycle sweeps: expiry, then the
 						// session-boundary seal that fixes intent ordering
 						veiltypes.ModuleName,
@@ -210,6 +221,7 @@ var (
 						sigiltypes.ModuleName,
 						mandatetypes.ModuleName,
 						veiltypes.ModuleName,
+						sessiontypes.ModuleName,
 					},
 				}),
 			},
