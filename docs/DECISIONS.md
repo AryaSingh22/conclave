@@ -305,6 +305,16 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
 - **Rationale:** The §10 build order (mandate before veil) makes this
   unavoidable; the two phases together cover every §1.3 steps 2–3
   assertion, including "no gas beyond ante" on both paths.
+- **RESOLVED (task 0.7):** x/veil's msg server is now routed, so
+  `MsgSubmitIntent` transits real blocks. `app/mandate_e2e_test.go` is
+  folded into ONE full-consensus flow: the over-ceiling intent is rejected
+  with `ErrMandateExceeded` through FinalizeBlock (code, codespace, no gas
+  beyond ante, nothing charged/escrowed), then an under-ceiling intent
+  lands (bond escrowed, window charged), seals at the boundary EndBlock,
+  opens at the next BeginBlock (order-then-reveal through consensus),
+  expires with bond + window refunded — proven real by a follow-up intent
+  that bounced against the consumed window now landing — and a real-block
+  cancel refunds identically. The MsgSend surrogate phase is deleted.
 
 ## D-025 — Intent bonds count toward spend ceilings
 
@@ -538,3 +548,160 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   skips over-limit txs without removal; proposals.UpdateProposal errors
   on over-share partitions in both prepare and process). Pinned by the
   queue-then-drain integration test.
+
+## D-037 — x/veil store layout: spec-literal 0x02 index, intent id domain, IntentRecord owner
+
+- **Date:** 2026-06-13 (task 0.7)
+- **SPEC:** §5.3, §6.3, §5.1
+- **Decision:** Keys follow §5.3's veil example exactly:
+  `0x01|chamber(4)|intent_id(32)` → IntentRecord;
+  `0x02|state(1)|ttl(8,BE)|intent_id(32)` → state/expiry index (empty
+  value). The 0x02 index deliberately carries NO chamber component — §5.3's
+  own example omits it (unlike the convention sentence above it), and every
+  sweep (boundary seal, Reveal, expiry) is state-scoped, not chamber-scoped,
+  until Phase 3. Params at `0x03`, id sequence at `0x04`. Intent ids use the
+  D-009 derivation with intent domain byte 0x04 (0x01 sigil, 0x02 cred,
+  0x03 mandate, 0x04 intent) and payload = sender_sigil — exactly §5.1's
+  `hash(sender_sigil, nonce, chamber)` with the module sequence as nonce.
+  `IntentRecord` (D-001's wrapper, not §5.1-authoritative) gains
+  `string owner = 4`: the §5.1 SealedIntent names only the sigil, which
+  does not identify the paying key — owner is the bond-refund target, the
+  window-refund grantee, and the MsgCancelIntent authorization identity.
+- **Rationale:** §5.3 says "implement … exactly"; the example is the more
+  specific instruction where it and the general convention diverge. Every
+  transition flows through one `transitionIntent` chokepoint that rewrites
+  the 0x02 entry, so index and records never drift. CONCLAVE-TODO(phase-3)
+  at the index for chamber sharding.
+
+## D-038 — SessionKeeper interface + Phase-0 stub; veil owns the sweeps until 0.8
+
+- **Date:** 2026-06-13 (task 0.7)
+- **SPEC:** §6.3 ABCI hooks, §5.2, §6.4 params
+- **Decision:** The session-boundary hand-off goes behind a
+  `SessionKeeper` interface: `SessionBoundary(ctx) (isBoundary bool,
+  sessionID uint64)` and `IntakeRevealed(ctx, sessionID, intentIDs)`.
+  `StubSessionKeeper{SessionLengthBlocks}` fires a boundary whenever
+  `height % k == 0` and returns the **boundary height as the session id** —
+  deterministic, unique per boundary, and it makes the order-then-reveal
+  invariant directly checkable (the Reveal in BeginBlock(H) only touches
+  records with `session_id < H`). The cadence is constructor-fixed (app
+  wires the dev default 3), NOT a veil param: the governable
+  `session_length_blocks` belongs to x/session per §6.4 and lands at 0.8 —
+  parking it in veil params now would force a param migration. §5.2 says
+  transitions happen "in x/session EndBlock", which does not exist yet, so
+  x/veil owns the sweeps in the interim: BeginBlock = the Reveal; EndBlock =
+  expiry sweep then boundary seal. CONCLAVE-TODO(phase-0): 0.8 supplies the
+  real session keeper and moves sweep ownership under §6.4's EndBlock order.
+- **Rationale:** A keeper interface with a deterministic stub lets the whole
+  lifecycle and every test run against the true boundary semantics now,
+  with Phase-0.8 swapping only the implementation — the same discipline
+  §6.3 mandates for the ThresholdScheme.
+- **EndBlock order consistency with §6.4 (pin for 0.8):** 0.7's veil
+  EndBlock runs (1) the expiry sweep (with its mandate window refunds) then
+  (2) the boundary seal; the Reveal is in BeginBlock per §6.3. This is a
+  §6.4-consistent subsequence: §6.4's mandated EndBlock order is advance
+  states → Reveal intake → scoring → conclude → fallback → rollover sweep →
+  expiry sweep → mandate window refunds (steps 1–7). The veil expiry sweep
+  + refund are §6.4 steps 6–7, run on the already-open intents BEFORE the
+  boundary seal fixes the next session's ordering (the §6.3 boundary action
+  that begins the next session). So 0.8 inserts x/session's steps 1–5
+  (advance/intake/scoring/conclude/fallback/rollover) AHEAD of veil's expiry
+  sweep, and the BeginBlock Reveal continues to feed IntakeRevealed — with
+  NO reordering of veil's existing operations. The expiry-before-seal order
+  is the load-bearing fact 0.8 relies on.
+
+## D-039 — Cancel/boundary race resolved by ABCI phase ordering
+
+- **Date:** 2026-06-13 (task 0.7)
+- **SPEC:** §6.3 fuzz target "cancel/boundary races", §5.2
+- **Decision:** No new mechanism — the race is settled by where each action
+  runs in a block. A cancel is a DeliverTx msg; the boundary seal is in
+  EndBlock; the Reveal is in the next BeginBlock. Therefore: (a) a cancel
+  landing in the boundary block B executes before EndBlock(B) seals → the
+  cancel WINS and the seal never sees the intent; (b) a cancel landing in
+  B+1 executes after BeginBlock(B+1) has opened the intent → it is no
+  longer pre-OPEN → the cancel LOSES with `ErrIntentNotCancellable`. The
+  rule stated operationally: a cancel succeeds iff the intent is pre-OPEN
+  at the instant its tx executes. Corollary: SEALED_IN_SESSION exists only
+  between EndBlock(B) and BeginBlock(B+1) — a span in which no tx executes
+  — so cancel-from-SEALED is legal per §5.2 ("any pre-OPEN state") and kept
+  in the transition table/keeper, but unreachable in live block flow.
+- **Rationale:** Phase ordering is already consensus-deterministic, so the
+  race needs no tie-break invention. The rapid fuzz target drives random
+  submit/cancel schedules against random cadences and asserts exactly this
+  rule plus replay-determinism across two runs.
+
+## D-040 — INVALID settlement: 50% to community pool, remainder refunded, NO window refund
+
+- **Date:** 2026-06-13 (task 0.7)
+- **SPEC:** §6.3 bond rules, §6.2 step 5, §6.4 step 7, D-007
+- **Decision:** At the Reveal, a payload failing proto-unmarshal (behind
+  `recover`, never a panic — §11.6) turns the intent INVALID:
+  `invalid_slash_bps` (5000 = 50%) of the bond funds the community pool via
+  `DistrKeeper.FundCommunityPool` from the veil module account, the
+  remainder refunds to the owner, and the mandate window is deliberately
+  NOT refunded. §6.2 step 5 and §6.4 step 7 name only *expired/cancelled*
+  intents for window refunds; a malformed intent's ante charge was
+  bond-only anyway (D-021), and keeping it charged preserves D-025's bound
+  on the malformed-intent burn from a stolen key.
+- **Rationale:** Refunding the window on INVALID would hand a stolen key
+  free retries of the exact spam the slash exists to deter. EXPIRED and
+  CANCELLED, by contrast, are honest non-matches and refund fully.
+
+## D-041 — charged_spend persisted at submission; refunds never recompute; face-value scalar
+
+- **Date:** 2026-06-13 (task 0.7)
+- **SPEC:** §6.2 step 4, §6.3 bond rules, §11.6
+- **Decision:** `IntentRecord` gains `repeated Coin charged_spend`,
+  computed at MsgSubmitIntent execution exactly as the ante valued it
+  (same PriceSource, same block: per-denom max of give legs + bond, D-025)
+  and persisted. EVERY refund path (EXPIRED, CANCELLED now; CONCLUDED at
+  0.8) refunds the STORED value via `MandateKeeper.RefundWindowSpend` —
+  never a recomputation — so refunds are exact by construction and immune
+  to the 0.8 price-source swap. The §6.3 bond formula's `face_value` is the
+  Phase-0 scalar: the denom-blind sum of the per-denom max give-leg amounts
+  in base units (no cross-denom prices exist pre-0.8; this is the only
+  deterministic scalar and it scales the bond with intent size). The scalar
+  is clamped at 10^50 so the bps multiplication can never overflow
+  math.Int (§11.6: an over-large face value just demands an unpayable bond
+  and rejects as ErrBondInsufficient). Malformed payload → zero give spend
+  (D-021) → min_bond applies; the Reveal slash is the deterrent.
+- **Rationale:** Replaces the plan's recompute approach (rejected by review
+  amendment): persisting the charge makes the EXPIRED/CANCELLED/CONCLUDED
+  window refunds exact and 0.8-proof. CONCLAVE-TODO(phase-0): 0.8's
+  clearing-price source normalizes give legs to uusdc, replacing the scalar.
+- **Refund matrix (charged_spend treatment per state — inherited by 0.8):**
+  | terminal/transitional state | bond | mandate window (charged_spend) |
+  |---|---|---|
+  | EXPIRED   | full refund | full refund |
+  | CANCELLED | full refund | full refund |
+  | INVALID   | 50% community pool + 50% refund | NO refund — charge persists (D-040) |
+  | ROLLED    | held (still live) | NO refund, NO re-charge — charge PERSISTS |
+  | CONCLUDED | refund (0.8) | refund (0.8) |
+  ROLLED is non-terminal: an unmatched-but-not-expired intent re-enters the
+  next session still OPEN and was never un-spent, so its charge stays put —
+  it is neither refunded nor charged again. 0.8 inherits this when it drives
+  ROLLED re-entry (SPEC §6.4 step 5); CONCLUDED's refunds run inside 0.8's
+  §6.4 Conclude cache-context. The window-accounting conservation fuzz pins
+  the whole matrix: Σ(window_spent) == Σ(charged_spend of intents not in
+  {EXPIRED, CANCELLED}).
+
+## D-042 — Envelope validation rules; payload validity deferred to the Reveal
+
+- **Date:** 2026-06-13 (task 0.7)
+- **SPEC:** §6.3 "validates envelope", §5.1, §1.2, D-035
+- **Decision:** MsgSubmitIntent validates ONLY the plaintext envelope: it
+  must unmarshal as IntentEnvelope; `ttl_height` must be strictly beyond
+  the submit height; `chamber_id` must be 0 (and equal `msg.chamber_id`);
+  `fee_bid` must be empty or parse as a non-negative LegacyDec. The payload
+  (ciphertext) is deliberately NOT inspected for validity at submission —
+  malformedness is the Reveal's job even in stub mode (§6.3 INVALID path),
+  and Phase 1 cannot inspect ciphertexts here at all. The sender must also
+  resolve to `sender_sigil` through the x/sigil reverse index (which
+  includes mandate-bound delegate keys, D-017(d)).
+- **Rationale:** D-035 made veil-lane ordering tolerate garbage `fee_bid`
+  precisely because envelope validation rejects it at execution; this is
+  where that rejection lives. Validating the envelope (needed to index by
+  ttl) while deferring payload validity keeps the Phase-0 and Phase-1 code
+  paths identical — the only thing that changes in Phase 1 is that the
+  payload becomes a real ciphertext.

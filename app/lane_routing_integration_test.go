@@ -18,6 +18,7 @@ import (
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
@@ -35,9 +36,10 @@ import (
 // PrepareProposal/ProcessProposal handlers over an in-process app.
 //
 // Veil and session msgs route and verify through proposals (their types
-// are decodable since 0.6, D-033) but cannot EXECUTE until their msg
-// servers land. CONCLAVE-TODO(phase-0): extend to FinalizeBlock execution
-// coverage of veil txs at 0.7 and session txs at 0.8.
+// are decodable since 0.6, D-033). Veil msgs also EXECUTE through
+// FinalizeBlock since task 0.7 (TestVeilLaneFinalizeBlockExecution below;
+// D-024 resolved). CONCLAVE-TODO(phase-0): extend to FinalizeBlock
+// execution coverage of session txs at 0.8.
 
 // prepare runs PrepareProposal for the next height.
 func (c *conformanceChain) prepare(maxTxBytes int64) *abci.ResponsePrepareProposal {
@@ -364,4 +366,78 @@ func TestProposalWindowCoherence(t *testing.T) {
 		"K window-fitting txs must be accepted")
 	require.Equal(t, abci.ResponseProcessProposal_REJECT, c.process(sorted),
 		"K+1 txs over the window ceiling must be rejected at ProcessProposal")
+}
+
+// TestVeilLaneFinalizeBlockExecution closes the task-0.7 half of the
+// 0.6 phase-0 TODO: a veil MsgSubmitIntent now transits the WHOLE path —
+// CheckTx admission (which D-024 forbade before the msg server landed) →
+// veil lane → PrepareProposal → ProcessProposal → FinalizeBlock execution
+// — and lands as a SUBMITTED intent with its bond escrowed. The submitter
+// is a sigil-controlling root key, so the MandateDecorator passes it
+// through (step 1) and the only gating is x/veil's own validation.
+func TestVeilLaneFinalizeBlockExecution(t *testing.T) {
+	agent := secp256k1.GenPrivKey()
+	agentAddr := sdk.AccAddress(agent.PubKey().Address())
+	accs, balances := confAccounts(t, agent)
+	c := newConformanceChain(t, accs, balances)
+
+	// register the agent's sigil (commerce lane) so SubmitIntent's
+	// sender→sigil resolution succeeds
+	didHash := sha256.Sum256([]byte("did:conclave:veil-exec"))
+	res := c.block(c.signTx(agent, 0, nil, &sigiltypes.MsgRegisterSigil{
+		Controller: agentAddr.String(),
+		DidDocHash: didHash[:],
+	}))
+	require.Equal(t, uint32(0), res[0].Code, "register sigil: %s", res[0].Log)
+
+	sigilID, err := c.app.SigilKeeper.SigilIDByAddress(c.app.NewContext(true), 0, agentAddr)
+	require.NoError(t, err)
+
+	coin := sdk.NewInt64Coin(app.MockUSDCDenom, 100_000_000)
+	payloadBz, err := (&veiltypes.IntentPayload{
+		Give: []veiltypes.IntentLeg{{Asset: &veiltypes.IntentLeg_Coin{Coin: &coin}}},
+	}).Marshal()
+	require.NoError(t, err)
+	envBz, err := (&veiltypes.IntentEnvelope{TtlHeight: 100, FeeBid: "7"}).Marshal()
+	require.NoError(t, err)
+	bond := sdk.NewInt64Coin(app.BaseDenom, 1_000_000)
+	submit := &veiltypes.MsgSubmitIntent{
+		Sender:      agentAddr.String(),
+		SenderSigil: sigilID,
+		Ciphertext:  payloadBz,
+		Envelope:    envBz,
+		Bond:        bond,
+	}
+
+	// CheckTx must now ADMIT the veil tx (D-024 resolved: the msg server is
+	// routed), and it must route into the veil lane
+	txBz := c.signTx(agent, 1, nil, submit)
+	checkRes, err := c.app.CheckTx(&abci.RequestCheckTx{Tx: txBz, Type: abci.CheckTxType_New})
+	require.NoError(t, err)
+	require.Equal(t, uint32(0), checkRes.Code, "CheckTx must admit the veil tx: %s", checkRes.Log)
+	require.Equal(t, uint64(1), c.app.LanedMempool.GetTxDistribution()[app.LaneVeil],
+		"the submit intent routes into the veil lane")
+
+	// prepare → process → finalize the proposal carrying it
+	prepared := c.prepare(1_000_000)
+	require.Len(t, prepared.Txs, 1)
+	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, c.process(prepared.Txs))
+	results := c.block(prepared.Txs...)
+	require.Equal(t, uint32(0), results[0].Code, "veil submit must execute: %s", results[0].Log)
+
+	// the intent landed mid-lifecycle with its bond escrowed (it is
+	// SUBMITTED, or SEALED_IN_SESSION if the exec block was a boundary —
+	// either way it executed and is progressing)
+	ctx := c.app.NewContext(true)
+	var rec veiltypes.IntentRecord
+	require.NoError(t, c.app.VeilKeeper.IterateIntentRecords(ctx, func(r veiltypes.IntentRecord) bool {
+		rec = r
+		return true
+	}))
+	require.True(t, veiltypes.IsPreOpen(rec.State),
+		"the intent must land in a live pre-OPEN state, got %s", rec.State)
+	require.Equal(t, agentAddr.String(), rec.Owner)
+	require.Equal(t, bond.Amount,
+		c.app.BankKeeper.GetBalance(ctx, authtypes.NewModuleAddress(veiltypes.ModuleName), app.BaseDenom).Amount,
+		"bond escrowed in the veil module account through full block execution")
 }

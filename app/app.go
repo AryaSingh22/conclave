@@ -67,6 +67,7 @@ import (
 
 	"github.com/AryaSingh22/conclave/app/unordered"
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
+	"github.com/AryaSingh22/conclave/crypto/reveal"
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/mandate"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
@@ -75,6 +76,8 @@ import (
 	"github.com/AryaSingh22/conclave/x/sigil"
 	sigilkeeper "github.com/AryaSingh22/conclave/x/sigil/keeper"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
+	"github.com/AryaSingh22/conclave/x/veil"
+	veilkeeper "github.com/AryaSingh22/conclave/x/veil/keeper"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
 
@@ -120,6 +123,7 @@ type ConclaveApp struct {
 	// in SPEC §10 task order)
 	SigilKeeper   sigilkeeper.Keeper
 	MandateKeeper mandatekeeper.Keeper
+	VeilKeeper    veilkeeper.Keeper
 
 	// UnorderedManager owns the SPEC §6.7 dedup cache (app-level, not a
 	// module)
@@ -255,8 +259,9 @@ func NewConclaveApp(
 
 	sigilKey := storetypes.NewKVStoreKey(sigiltypes.StoreKey)
 	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
+	veilKey := storetypes.NewKVStoreKey(veiltypes.StoreKey)
 	unorderedKey := storetypes.NewKVStoreKey(unorderedtypes.StoreKey)
-	if err := app.RegisterStores(sigilKey, mandateKey, unorderedKey); err != nil {
+	if err := app.RegisterStores(sigilKey, mandateKey, veilKey, unorderedKey); err != nil {
 		panic(err)
 	}
 	app.SigilKeeper = sigilkeeper.NewKeeper(app.appCodec, runtime.NewKVStoreService(sigilKey), govAuthority)
@@ -264,25 +269,38 @@ func NewConclaveApp(
 		app.appCodec, runtime.NewKVStoreService(mandateKey),
 		app.SigilKeeper, app.BankKeeper, app.AccountKeeper, govAuthority,
 	)
+	app.VeilKeeper = veilkeeper.NewKeeper(
+		app.appCodec, runtime.NewKVStoreService(veilKey),
+		// SPEC §6.3 Phase 0 STUB mode: identity Reveal behind the real
+		// ThresholdScheme interface; Phase 1 swaps the implementation only
+		reveal.StubScheme{},
+		app.BankKeeper, app.DistrKeeper, app.SigilKeeper, app.MandateKeeper,
+		// CONCLAVE-TODO(phase-0): task 0.8 replaces the stub session keeper
+		// (boundary every session_length_blocks, D-038) and the face-value
+		// price source with the real x/session implementations
+		veiltypes.NewStubSessionKeeper(veiltypes.DefaultSessionLengthBlocks),
+		mandatetypes.FaceValuePriceSource{},
+		govAuthority,
+	)
 	app.UnorderedManager = unordered.NewManager(runtime.NewKVStoreService(unorderedKey))
 
 	if err := app.RegisterModules(
 		sigil.NewAppModule(app.appCodec, app.SigilKeeper),
 		mandate.NewAppModule(app.appCodec, app.MandateKeeper),
+		veil.NewAppModule(app.appCodec, app.VeilKeeper),
 		unordered.NewAppModule(app.UnorderedManager),
 	); err != nil {
 		panic(err)
 	}
 
-	// Lane-class msg types whose modules land later (veil 0.7, session 0.8,
-	// escrow Phase 2) are registered now: the SPEC §6.7 lanes route on these
+	// Lane-class msg types whose modules land later (session 0.8, escrow
+	// Phase 2) are registered now: the SPEC §6.7 lanes route on these
 	// TypeURLs, so the app's tx decoder must resolve them for lane
 	// verification in ProcessProposal (D-033). No msg server is routed, so
-	// baseapp keeps rejecting these msgs in execution (D-024 unchanged).
-	veiltypes.RegisterInterfaces(app.interfaceRegistry)
+	// baseapp keeps rejecting these msgs in execution. Veil msgs are
+	// registered by the x/veil module itself since 0.7 (D-024 resolved).
 	sessiontypes.RegisterInterfaces(app.interfaceRegistry)
 	escrowtypes.RegisterInterfaces(app.interfaceRegistry)
-	veiltypes.RegisterLegacyAminoCodec(app.legacyAmino)
 	sessiontypes.RegisterLegacyAminoCodec(app.legacyAmino)
 	escrowtypes.RegisterLegacyAminoCodec(app.legacyAmino)
 

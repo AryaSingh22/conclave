@@ -122,5 +122,20 @@ message IntentRecord {
   SealedIntent intent = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
   IntentState state = 2;
   // session_id is the session the intent is sealed into (0 = none yet).
+  // Phase 0 stub: the session-boundary block height (D-038).
   uint64 session_id = 3;
+  // owner is the address that submitted the intent and escrowed the bond:
+  // the bond-refund target, the mandate window-refund grantee, and the
+  // MsgCancelIntent authorization identity (D-037; the §5.1 SealedIntent
+  // names only the sigil, which does not identify the paying key).
+  string owner = 4;
+  // charged_spend is the spend intent the ante handler charged to the
+  // owner's mandate window for this intent (per-denom max of give legs
+  // plus bond, D-025), persisted at submission so every refund path
+  // returns exactly what was charged — never recomputed (D-041).
+  repeated cosmos.base.v1beta1.Coin charged_spend = 5 [
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
 }

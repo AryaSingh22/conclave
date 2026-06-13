@@ -67,6 +67,7 @@ import (
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
+	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
 
 // Conclave chain identity (SPEC §0 Naming Canon).
@@ -102,6 +103,10 @@ var (
 		// a genesis-funded CLV float that accumulates converted fee denoms;
 		// it never mints or burns
 		{Account: mandatetypes.ModuleName},
+		// the veil module account escrows intent anti-spam bonds (SPEC §6.3);
+		// it never mints or burns — bonds flow back out as refunds or to the
+		// community pool as INVALID slashes
+		{Account: veiltypes.ModuleName},
 	}
 
 	// blocked account addresses (module accounts that must not receive user funds)
@@ -113,6 +118,7 @@ var (
 		stakingtypes.NotBondedPoolName,
 		ibctransfertypes.ModuleName,
 		mandatetypes.ModuleName,
+		veiltypes.ModuleName,
 		// the gov module account is allowed to receive funds (deposits)
 	}
 
@@ -150,6 +156,9 @@ var (
 						ibcexported.ModuleName,
 						ibctransfertypes.ModuleName,
 						authz.ModuleName,
+						// the Reveal (SPEC §6.3): strictly the block after
+						// the EndBlock that fixed ordering
+						veiltypes.ModuleName,
 					},
 					EndBlockers: []string{
 						crisistypes.ModuleName,
@@ -159,6 +168,9 @@ var (
 						ibctransfertypes.ModuleName,
 						capabilitytypes.ModuleName,
 						feegrant.ModuleName,
+						// SPEC §6.3 veil lifecycle sweeps: expiry, then the
+						// session-boundary seal that fixes intent ordering
+						veiltypes.ModuleName,
 						// SPEC §6.7 unordered dedup-cache sweep (app-level
 						// shim, manually registered)
 						unorderedtypes.ModuleName,
@@ -197,6 +209,7 @@ var (
 						// Conclave modules (manually registered, SPEC §10 order)
 						sigiltypes.ModuleName,
 						mandatetypes.ModuleName,
+						veiltypes.ModuleName,
 					},
 				}),
 			},
