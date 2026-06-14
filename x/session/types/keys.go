@@ -184,6 +184,17 @@ func ReceiptByIDKey(receiptIDBz []byte) []byte {
 	return append(append([]byte{}, ReceiptByIDPrefix...), receiptIDBz...)
 }
 
+// ReceiptBySigilPrefix returns 0x07 | chamber(4) | sigil_id(32) — scans one
+// agent's receipts in ascending height-then-receipt-id order (the §6.6 primary
+// per-agent chronological index). Task 0.9's x/receipt paginates this prefix
+// (cross-module read; D-045/D-052).
+func ReceiptBySigilPrefix(chamberID uint32, sigilIDBz []byte) []byte {
+	key := make([]byte, 0, 1+4+IDLength)
+	key = append(key, ReceiptKeyPrefix...)
+	key = append(key, chamberBytes(chamberID)...)
+	return append(key, sigilIDBz...)
+}
+
 // PrefixEnd returns the exclusive upper bound for iterating a key prefix.
 func PrefixEnd(prefix []byte) []byte {
 	end := make([]byte, len(prefix))

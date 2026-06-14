@@ -917,3 +917,56 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   into the fee path. Marked `CONCLAVE-TODO(phase-2)` at `computeMatchSkim`:
   multi-asset in-kind skim + in-kind solver payout once §6.5 escrow and richer
   fee economics land.
+
+## D-052 — x/receipt is a store-less query/proof surface; cross-module read via SessionReceiptReader
+
+- **Date:** 2026-06-14 (task 0.9)
+- **SPEC:** §6.6, §10 row 0.9, D-045
+- **Decision:** x/receipt is registered as an `AppModule` with **no KVStoreKey**
+  (it is absent from `app.RegisterStores`, `maccPerms`, the BeginBlocker and
+  EndBlocker order lists; its `InitGenesis`/`ExportGenesis` are no-ops and its
+  genesis `Validate` rejects any non-empty receipt list). It therefore CANNOT
+  write consensus state — the §6.6 "query/proof surface" guarantee is enforced
+  structurally, not by convention. It reads the §6.6 receipts x/session writes
+  (D-045) through an **expected-keeper interface**, `receipttypes.SessionReceipt
+  Reader` (`GetReceiptByID`, `GetReceiptsBySigil` with pagination,
+  `ReceiptStoreName`, `ReceiptByIDStoreKey`), satisfied by `*sessionkeeper.
+  Keeper` and wired in `app.go`. Pagination over the 0x07 per-agent index lives
+  in x/session (where the store is); x/receipt is a thin facade. The dependency
+  direction is receipt→session only — `x/receipt/types` imports no session
+  package, so there is no cycle.
+- **Rationale:** Chosen over a shared-store-key read so x/session stays the sole
+  authority over its own byte layout (0x07/0x08 are its keys, pinned by D-045):
+  x/receipt asks "give me the key/store-name to prove receipt X" rather than
+  reconstructing `0x08‖IDBytes(id)` itself, so a future layout change is a
+  single-module edit. The no-store-key form is the strong version of "this
+  module writes nothing" — there is no store for a bug to write to.
+
+## D-053 — ReceiptProof proves the 0x08 key as marshaled ProofOps; verification is height-bound
+
+- **Date:** 2026-06-14 (task 0.9)
+- **SPEC:** §6.6 (`ReceiptProof(id)`, "ICS-23 existence proofs come free"), §11.6
+- **Decision:** `ReceiptProof(id)` proves the **0x08 secondary** key
+  (`receipt_id`, derivable from the query input alone) against the committed
+  session IAVL root. The proof is built by querying the app `CommitMultiStore`
+  (a `*rootmulti.Store`, injected as `receipttypes.ProofQuerier`) with
+  `Path:"/session/key", Prove:true`: rootmulti appends the multistore commit op,
+  so the returned `crypto.ProofOps` chains value → session IAVL root → app hash.
+  The response carries the **marshaled `ProofOps`** plus `ProofHeight` (the
+  committed store version). x/receipt's consensus-path code thus depends only on
+  CometBFT's crypto proto + `store/types` — **no ibc import in the module**;
+  verification (ibc `ConvertProofs` → `MerkleProof.VerifyMembership` with
+  `GetSDKSpecs`, path `["session", key]`) is a verifier-side concern (tests and
+  IBC counterparties), where ibc is already a dependency.
+- **Acceptance (the consequential deliverable):** `TestReceiptProofVerifies`
+  proves the returned proof VERIFIES against `cms.LastCommitID().Hash`, and
+  proves it REJECTS in two ways: (a) a byte-flipped value (sensitivity to the
+  committed bytes), and (b) — per review — a **stale root**: the same proof,
+  taken at ProofHeight H, fails to verify after another block advances the root,
+  while still verifying against the correct root at H. The staleness case is
+  what makes `ProofHeight` load-bearing rather than decorative — it is the crux
+  of §6.6's "verify the proof, not the indexer", and
+  `TestReputationMovedAndSameIntentProofVerifies` closes the loop: the same
+  CONCLUDED intent whose §6.1 reputation moved (the 0.8 hook, unchanged) has a
+  proof that cryptographically verifies. No consensus state is written by any of
+  this (D-052).

@@ -66,6 +66,7 @@ import (
 
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
+	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
@@ -222,6 +223,10 @@ var (
 						mandatetypes.ModuleName,
 						veiltypes.ModuleName,
 						sessiontypes.ModuleName,
+						// x/receipt is a store-less query/proof surface (D-052);
+						// its InitGenesis is a no-op but the module manager
+						// requires every registered module in the order list.
+						receipttypes.ModuleName,
 					},
 				}),
 			},

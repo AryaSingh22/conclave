@@ -72,6 +72,9 @@ import (
 	"github.com/AryaSingh22/conclave/x/mandate"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
+	"github.com/AryaSingh22/conclave/x/receipt"
+	receiptkeeper "github.com/AryaSingh22/conclave/x/receipt/keeper"
+	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
 	"github.com/AryaSingh22/conclave/x/session"
 	sessionkeeper "github.com/AryaSingh22/conclave/x/session/keeper"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
@@ -129,6 +132,9 @@ type ConclaveApp struct {
 	// SessionKeeper is a pointer so SetVeilKeeper can wire the veil↔session
 	// dependency cycle in place after both keepers exist (Guard 1).
 	SessionKeeper *sessionkeeper.Keeper
+	// ReceiptKeeper is the SPEC §6.6 query/proof surface over the receipts
+	// x/session writes (D-045). It owns no store (D-052).
+	ReceiptKeeper receiptkeeper.Keeper
 
 	// UnorderedManager owns the SPEC §6.7 dedup cache (app-level, not a
 	// module)
@@ -302,6 +308,17 @@ func NewConclaveApp(
 	// wire the veil↔session cycle now that both keepers exist (Guard 1): must
 	// run before any block, which app construction guarantees.
 	app.SessionKeeper.SetVeilKeeper(app.VeilKeeper)
+	// x/receipt is the SPEC §6.6 query/proof surface: it READS the receipts
+	// x/session writes (the SessionKeeper, via the SessionReceiptReader
+	// boundary; D-045/D-052) and builds ICS-23 proofs against the committed
+	// app root (the CommitMultiStore is a *rootmulti.Store, which implements the
+	// ProofQuerier Query method; D-053). It is given NO store key — by
+	// construction it cannot write consensus state.
+	app.ReceiptKeeper = receiptkeeper.NewKeeper(
+		app.appCodec,
+		app.SessionKeeper,
+		app.CommitMultiStore().(receipttypes.ProofQuerier),
+	)
 	app.UnorderedManager = unordered.NewManager(runtime.NewKVStoreService(unorderedKey))
 
 	if err := app.RegisterModules(
@@ -309,6 +326,7 @@ func NewConclaveApp(
 		mandate.NewAppModule(app.appCodec, app.MandateKeeper),
 		veil.NewAppModule(app.appCodec, app.VeilKeeper),
 		session.NewAppModule(app.appCodec, app.SessionKeeper),
+		receipt.NewAppModule(app.appCodec, app.ReceiptKeeper),
 		unordered.NewAppModule(app.UnorderedManager),
 	); err != nil {
 		panic(err)

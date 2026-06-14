@@ -83,6 +83,6 @@ green and the task is reviewed + committed.
 - [x] 0.6 Block SDK lanes wired
 - [x] 0.7 `x/veil` stub mode
 - [x] 0.8 `x/session`: lifecycle, solver registry, validation, scoring, Conclude, fallback, sweeps
-- [ ] 0.9 `x/receipt` + reputation hook (ICS-23 proof) — NEXT
-- [ ] 0.10 Reference solver binary (naive + cycles)
+- [x] 0.9 `x/receipt` query/proof surface + reputation hook (verified ICS-23 proof)
+- [ ] 0.10 Reference solver binary (naive + cycles) — NEXT
 - [ ] 0.11 SDK simulation integration (all modules)
