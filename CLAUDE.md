@@ -84,5 +84,5 @@ green and the task is reviewed + committed.
 - [x] 0.7 `x/veil` stub mode
 - [x] 0.8 `x/session`: lifecycle, solver registry, validation, scoring, Conclude, fallback, sweeps
 - [x] 0.9 `x/receipt` query/proof surface + reputation hook (verified ICS-23 proof)
-- [ ] 0.10 Reference solver binary (naive + cycles) — NEXT
-- [ ] 0.11 SDK simulation integration (all modules)
+- [x] 0.10 Reference solver binary (naive + cycles)
+- [ ] 0.11 SDK simulation integration (all modules) — NEXT

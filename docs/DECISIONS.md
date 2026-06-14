@@ -970,3 +970,99 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   CONCLUDED intent whose §6.1 reputation moved (the 0.8 hook, unchanged) has a
   proof that cryptographically verifies. No consensus state is written by any of
   this (D-052).
+
+## D-054 — Off-chain solver reimplements the matching IDEA but REUSES the chain's price-binding validator
+
+- **Date:** 2026-06-14 (task 0.10)
+- **SPEC:** §4 (solver/ layout), §6.4 (6-rule validation), §7, §1.3
+- **Decision:** The reference solver (`solver/`, `cmd/conclave-solver`) is an
+  off-chain, permissionless gRPC client, NOT consensus code. The MATCHING IDEA is
+  reimplemented off-chain as separate packages — `solver/cycles` (cycle finder)
+  and `solver/naive` (greedy pairwise) — that import ONLY proto message types
+  (`x/veil/types`, `x/session/types`), never `x/session/keeper`. They are a
+  distinct implementation from the in-consensus fallback (`buildFallbackMatches`
+  is not imported). HOWEVER, the one rule that must not drift between solver and
+  chain — price-binding representability (D-047) — is NOT reimplemented: it is
+  reused verbatim. `keeper.checkPriceBinding` was EXPORTED as
+  `keeper.CheckPriceBinding` (pure: `(Match, NetFlows) error`, no ctx/store; one
+  internal caller updated, behavior byte-identical), joining the already-exported
+  `keeper.CheckConservation`. The solver's pre-submission self-check
+  (`solver/gate`) calls these exact functions, so the accept/reject verdict on a
+  candidate Match is identical to the chain's by construction. `solver/gate` is
+  the ONLY solver package importing `x/session/keeper`, and only the pure
+  validation primitives — never the fallback matcher.
+- **Rationale:** The bootstrap framing requires the binary not be coupled to the
+  consensus fallback *matcher*; the build confirmation requires the price-binding
+  *validator* be a faithful mirror that cannot drift. Both are satisfied by
+  reimplementing the algorithm (the matcher) while sharing the validation
+  primitive (the rule). Stateful §6.4 rules (OPEN-in-session, no-reuse,
+  counterparty class) remain the chain's authority — the gate covers exactly the
+  conservation + price-binding rules under the solver's control, which are what
+  would otherwise cost it a 5% slash. CONCLAVE-TODO(phase-2): if the off-chain
+  matcher ever needs richer §6.4 self-checks (limits/uniform-price), export those
+  pure checks too rather than reimplementing them.
+
+## D-055 — Cycle-finder prices: numeraire-anchored exact-LegacyDec propagation; representability decided by the shared gate
+
+- **Date:** 2026-06-14 (task 0.10)
+- **SPEC:** §6.4 rules 3/4, §4 (Bellman-Ford-style cycle finder), §11.6, D-047
+- **Decision:** `solver/cycles` detects a trade cycle as a provider-chain over
+  OPEN intents — the provider of intent A is an intent B whose give exactly fills
+  A's want (`B.giveKey == A.wantKey`, `B.giveAmt == A.wantAmt`; Phase-0
+  fill-or-kill, mirroring the fallback's full-give terms) — via bounded DFS in
+  id order (deterministic). It constructs the n-party Match's clearing prices by
+  anchoring a coin numeraire at price 1 and propagating around the cycle from the
+  per-party identity `price[G_k]·giveAmt_k == price[G_{k+1}]·wantAmt_k`, each
+  price an exact `LegacyDec` (`base.MulInt(giveAmt).Quo(LegacyNewDec(wantAmt))`,
+  the same truncating quotient the solver will submit). The cycle finder does NOT
+  itself decide whether the result is representable: it emits the candidate and
+  the shared chain gate (D-054) is the SOLE arbiter — a cycle whose anchored
+  prices are not exactly representable in LegacyDec (e.g. an implied 100/3) leaves
+  a nonzero per-party residual, `keeper.CheckPriceBinding` rejects it, and
+  `solver.Solve` drops it (its intents fall through to the pairwise pass). So the
+  "which cycles are skippable" decision is literally the chain's rule, identical
+  on both sides. **Acceptance:** `TestPriceBindingSelfCheckAgreesWithChain`
+  asserts `gate.PriceBindingOK(m)` and `keeper.CheckPriceBinding` return the SAME
+  verdict for the same Match, including the non-representable 100/3 cycle (reject)
+  and the §1.3 cycle (accept); `TestSolveClearsTheCycleOnlyWhenRepresentable`
+  pins the pipeline behavior.
+- **Rationale:** This is the build-confirmation's load-bearing requirement: the
+  solver must never believe a price-binding-valid solution the chain would reject
+  (or skip one it would accept). Single-source-of-truth makes divergence
+  structurally impossible; numeraire anchoring is the smallest exact construction
+  that makes the §1.3 cycle clear (uusdc=1, data=100M, svc=10M — all exact
+  integers). CONCLAVE-TODO(phase-2): try alternate numeraire anchorings when one
+  is non-representable; partial-fill cycles (`B.giveAmt >= A.wantAmt`); retry
+  intents freed from a gate-rejected cycle in a different cycle.
+
+## D-056 — demo_e2e.sh: bash owns lifecycle, a Go driver owns chain logic; step 7 doubles as the cycle-finder proof
+
+- **Date:** 2026-06-14 (task 0.10)
+- **SPEC:** §1.3 (acceptance), §10 row 0.10, §12
+- **Decision:** `scripts/demo_e2e.sh` owns PROCESS LIFECYCLE only (build, boot
+  localnet, start/kill `conclave-solver`); all chain interaction and assertions
+  live in a Go driver `cmd/conclave-demo` (reusing the unordered-blast
+  gRPC/signing pattern), split into subcommands (`setup`, `cycle-and-assert`,
+  `fallback`) so each phase is a fresh process re-reading on-chain state. Chosen
+  because a SealedIntent's `ciphertext` is a serialized `IntentPayload` —
+  impractical to build via autocli CLI flags. The solver runs as a FRESH bonded
+  key `solver2` (provisioned + faucet-funded in `setup`), exercising
+  `MsgRegisterSolver` end to end (§1.3 step 5), distinct from the genesis-bonded
+  `solver1`. Cross-process state for alice's ephemeral session key is carried in
+  the test keyring (`setup` creates `alice-session` via `NewMnemonic`; later
+  phases load it). The 3 cyclic intents are submitted CONCURRENTLY (one block) so
+  they seal into one session; `cycle-and-assert` asserts same-session before
+  waiting. **Step 7 proves two things at once:** with the solver killed, (a) a
+  mutually-fillable 2-party swap clears via the in-consensus fallback and the
+  driver asserts its session carried ZERO solver solutions (so it was the
+  fallback, not a solver), and (b) a fresh 3-party cycle stays unmatched (never
+  CONCLUDED over ~12 blocks) — the fallback is pairwise-only, so the cycle is
+  proof that `solver/cycles` is load-bearing.
+- **Rationale:** The §1.3 "kill the solver" step requires a real long-running
+  solver process the script can start and kill, so bash is the natural lifecycle
+  owner and Go the natural chain-logic owner. Folding the cycle-finder load-
+  bearing proof into step 7 means demo_e2e.sh failing-to-clear-the-cycle-without-
+  the-finder and succeeding-with-it is asserted in the same run, per the build
+  plan. The cycle CANNOT be cleared by the fallback, so steps 4-6 clearing it is
+  itself proof the solver did it. CONCLAVE-TODO(phase-2): align concurrent intent
+  submission to a fresh forming window if boundary-split flakiness ever appears.

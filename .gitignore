@@ -3,6 +3,11 @@ build/
 dist/
 *.exe
 *.test
+# stray root-level binaries from `go build ./cmd/...` (use `go install` / build/)
+/conclaved
+/conclave-solver
+/conclave-demo
+/unordered-blast
 
 # coverage & profiling
 *.out

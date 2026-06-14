@@ -232,14 +232,14 @@ func (k Keeper) validateSolution(ctx sdk.Context, session types.Session, matches
 		// rules 3/4, second half: every leg amount must obey the stated clearing
 		// prices (checked AFTER limits so a cap/floor breach still surfaces as
 		// ErrLimitViolation, not a price residual).
-		if err := checkPriceBinding(m, flows); err != nil {
+		if err := CheckPriceBinding(m, flows); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// checkPriceBinding enforces the binding half of SPEC §6.4 rules 3/4: every leg
+// CheckPriceBinding enforces the binding half of SPEC §6.4 rules 3/4: every leg
 // amount must clear at the match's stated prices. Equivalently, valued at those
 // prices each party's give value equals its receive value EXACTLY — the legs
 // clear at the prices, leaving no residual a Half-B surplus skim could be
@@ -251,7 +251,14 @@ func (k Keeper) validateSolution(ctx sdk.Context, session types.Session, matches
 // solver controls both the legs and the prices and can always present an exact
 // clearing, so any nonzero per-party residual is a mispriced/extractive
 // solution and is rejected.
-func checkPriceBinding(m types.Match, flows NetFlows) error {
+//
+// EXPORTED as the SINGLE SOURCE OF TRUTH for the price-representability rule
+// (D-055): the off-chain reference solver (solver/gate) calls this exact
+// function as its pre-submission self-check, so the rule deciding "which prices
+// are exactly representable in LegacyDec, hence which cycles are clearable"
+// cannot drift between the chain and the solver. Pure (no ctx/store): the
+// off-chain caller passes flows from the exported CheckConservation.
+func CheckPriceBinding(m types.Match, flows NetFlows) error {
 	numeraire := ""
 	priceOf := make(map[string]math.LegacyDec, len(m.ClearingPrices))
 	for i := range m.ClearingPrices {
