@@ -1230,3 +1230,85 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   per-period settled spend) explicit and independently conserved.
   CONCLAVE-TODO(phase-1): the Veil `spend_commitment` envelope (§6.3, §8(e))
   binds the encrypted-intent commitment to the same `outstanding_commitment`.
+
+## D-060 — D8 resolved: stay on SDK v0.50 through Phase 1; sigverify fork retained
+
+- **Date:** 2026-06-15 (Phase-0 → Phase-1 boundary planning session)
+- **SPEC:** §14 D8, §3 (version pins), §8 (vote extensions)
+- **RESOLVES** the SPEC §14 D8 open decision (slated for re-evaluation at exactly
+  this boundary). See docs/PHASE1_DESIGN.md §1.
+- **Decision:** Do NOT bump to SDK v0.53 for Phase 1. Keep cosmos-sdk v0.50.15,
+  cometbft v0.38.23, ibc-go v8.8.0, block-sdk/v2 v2.1.5, the goleveldb replace
+  pin, and the `app/unordered/sigverify.go` fork (D-027) plus the TxBody
+  extension-option unordered encoding (D-026).
+- **Decisive reasoning:** vote extensions — the entire Phase-1 consensus surface
+  — are a CometBFT v0.38 / SDK v0.50 feature ALREADY available on the current
+  pins, so the bump buys Phase 1 nothing it needs while re-baselining the whole
+  dependency graph at the moment the largest new crypto/consensus surface lands.
+  Isolate variables: do not perturb determinism (the D-057 sim workaround, §11.3
+  gate) and the laned mempool while introducing threshold crypto + DKG + VE. The
+  fork is byte-identical to upstream for ordered txs and behavior-pinned by the
+  conformance suite — a low, bounded, tested cost.
+- **Empirical spike (throwaway, Go module proxy; recorded so the flip-condition
+  is accurate, not a stale memory assumption):**
+  - `skip-mev/block-sdk/v2` latest = **v2.1.5** (our pin) → requires cosmos-sdk
+    v0.50.3, cometbft v0.38.5. No newer v2 release; no `block-sdk/v3` module
+    path. **block-sdk has no SDK-v0.53 line at all** — the gating dependency.
+  - `cosmos/ibc-go/v8` latest = **v8.8.0**; the entire v8 line targets cosmos-sdk
+    v0.50.x. SDK v0.53 would force an ibc-go MAJOR bump (v8 → the v0.53 line),
+    not a point release.
+  - cosmos-sdk v0.53 is mature (through v0.53.7) — the SDK is ready; its
+    ecosystem (block-sdk, ibc-go v8) is not.
+- **Flip-condition for the Phase-1 → Phase-2 re-evaluation:** bump only when ALL
+  of (a) an MVS-clean block-sdk release targeting SDK v0.53 exists (today: none),
+  (b) a v0.53-compatible IBC line is adopted (today an ibc-go major bump), and
+  (c) the D-057 sim/FinalizeBlock lifecycle is confirmed intact or cheaply
+  replaced. The Phase-2 wasmd integration (§10 task 2.2) forces a dependency
+  revisit regardless — the natural re-evaluation point. CONCLAVE-TODO(phase-1) at
+  the fork site is re-pointed to this Phase-2 boundary in task 1.2.
+
+## D-061 — SPEC §8 "threshold encryption" resolved: kyber primitives + an authored encryption layer
+
+- **Date:** 2026-06-15 (Phase-1 planning session)
+- **SPEC:** §8, §6.3 ThresholdScheme, §14 D4
+- **UNDER-SPECIFICATION RESOLVED — recorded, not silent:** SPEC §8 names BLS
+  threshold encryption via the drand/kyber lineage, but those libraries ship
+  threshold *signatures* (`tbls`) + DKG, NOT threshold *encryption*. See
+  docs/PHASE1_DESIGN.md §3 (FLAG I).
+- **Decision:** Use `go.dedis.ch/kyber/v3` + `drand/kyber-bls12381` for the DKG
+  and threshold primitives (mature, drand-proven, the §8/D4-named lineage,
+  MPL-2.0 file-level copyleft — OK for linking), and **author** the threshold-
+  encryption layer (encrypt-to-`EpochPubKey`, verifiable partial decryption)
+  on top, referencing drand `tlock`'s IBE/KEM construction. Do NOT build BLS or
+  DKG from scratch. Because the encryption layer is authored, it has no prior
+  audit and is therefore the heart of the §8(d) external audit (task 1.8).
+- **Hard library criteria (a construction failing any is disqualified in 1.3):**
+  (1) threshold *encryption*, not just signatures; (2) **verifiable partial
+  decryption** — each `RevealShare` carries a pairing/NIZK proof it is a correct
+  partial decryption under the validator's published key share, so one bad share
+  cannot poison `Combine` undetectably; (3) **deterministic** on-chain `Combine`
+  + verification (no fresh randomness — §11.6). DKG randomness is off-chain
+  (a validator protocol), client `Encrypt` is off-chain — both acceptable.
+- **Rationale:** §8 says do not implement DKG ad hoc; kyber supplies the audited-
+  adjacent DKG + primitives. The encryption layer is the irreducible authored
+  surface; naming it now scopes the 1.8 audit precisely.
+
+## D-062 — ThresholdScheme.EpochSetup must be revised for a real DKG (not a pure implementation swap)
+
+- **Date:** 2026-06-15 (Phase-1 planning session)
+- **SPEC:** §6.3 ThresholdScheme, §8
+- **CORRECTION TO A SPEC/PROMPT CLAIM — recorded loudly:** §6.3 frames Phase 1 as
+  "swaps the scheme implementation only." That holds for the CONSUMING state
+  machines — `Combine` (Reveal), client `Encrypt`, `Threshold(n)` keep their
+  signatures — but NOT for key generation. See docs/PHASE1_DESIGN.md §3 (FLAG II).
+- **Decision:** The current `EpochSetup(valset []Validator) (EpochPubKey,
+  []KeyShare, error)` returns ALL key shares to a SINGLE caller, which a real
+  distributed DKG never does (no node holds all shares — that defeats the
+  threshold model). `EpochSetup` is a Phase-0 stub artifact and is REDESIGNED in
+  task 1.3 into a multi-round DKG sub-protocol (per-validator round functions +
+  a transcript/state object), with `KeyShare` staying local to each validator
+  and never aggregated. `RevealShare` gains the D-061 validity proof. The
+  consuming code (Reveal, client Encrypt) is unaffected.
+- **Rationale:** Surfacing the interface limitation rather than quietly
+  reshaping it keeps the §6.3 contract honest; the redesign is confined to key
+  generation, where the stub could not model the real protocol.
