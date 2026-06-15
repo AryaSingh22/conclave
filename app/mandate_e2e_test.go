@@ -149,13 +149,13 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 	usdcCoins := func(amt int64) sdk.Coins {
 		return sdk.NewCoins(sdk.NewCoin(app.MockUSDCDenom, math.NewInt(amt)))
 	}
-	windowSpent := func() sdk.Coins {
+	outstandingCommitment := func() sdk.Coins {
 		t.Helper()
 		ctx := conclaveApp.NewContext(true)
 		m, found, err := conclaveApp.MandateKeeper.ActiveMandateByGrantee(ctx, 0, session)
 		require.NoError(t, err)
 		require.True(t, found)
-		return m.WindowSpent
+		return m.OutstandingCommitment
 	}
 	veilEscrow := func() math.Int {
 		ctx := conclaveApp.NewContext(true)
@@ -243,7 +243,7 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 		"§1.3 step 3: over-ceiling intent must be rejected with ErrMandateExceeded: %s", res.Log)
 	require.Equal(t, mandatetypes.ModuleName, res.Codespace)
 	require.Less(t, res.GasUsed, int64(100_000), "no gas beyond ante")
-	require.True(t, windowSpent().IsZero(), "a rejected intent charges nothing")
+	require.True(t, outstandingCommitment().IsZero(), "a rejected intent charges nothing")
 	require.True(t, veilEscrow().IsZero(), "a rejected intent escrows nothing")
 
 	// ---- under-ceiling intent lands; bond escrowed; window charged ----
@@ -258,8 +258,8 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 	require.Equal(t, uint32(0), res.Code, "under-ceiling intent must land: %s", res.Log)
 
 	// the optimistic window charge committed: give max + bond (D-025)
-	require.Equal(t, usdcCoins(300_000_000).Add(bond).String(), windowSpent().String(),
-		"SPEC §6.2 step 5: window charged optimistically, bond included")
+	require.Equal(t, usdcCoins(300_000_000).Add(bond).String(), outstandingCommitment().String(),
+		"SPEC §6.2 step 5 (D-059): intent commitment charged to outstanding_commitment, bond included")
 	// the bond sits in the veil module account
 	require.Equal(t, bond.Amount, veilEscrow(), "bond escrowed (SPEC §6.3)")
 
@@ -289,15 +289,15 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 	require.Equal(t, veiltypes.INTENT_STATE_EXPIRED, intentState(intentID),
 		"ttl %d reached → EXPIRED (SPEC §5.2)", ttl)
 	require.True(t, veilEscrow().IsZero(), "bond refunded on expiry")
-	require.True(t, windowSpent().IsZero(),
-		"SPEC §6.2 step 5 refund path: the stored charged_spend returns to the window (D-041)")
+	require.True(t, outstandingCommitment().IsZero(),
+		"SPEC §6.2 step 5 / D-059: EXPIRED decommits the stored charged_spend from outstanding_commitment")
 
 	// ---- the refund is real capacity: the bounced intent now lands ----
 	resubmitTTL := uint64(conclaveApp.LastBlockHeight()) + 100
 	res = deliver(sessionPriv, submitIntent(300_000_000, resubmitTTL))
 	require.Equal(t, uint32(0), res.Code,
 		"window capacity demonstrably restored after expiry: %s", res.Log)
-	require.Equal(t, usdcCoins(300_000_000).Add(bond).String(), windowSpent().String())
+	require.Equal(t, usdcCoins(300_000_000).Add(bond).String(), outstandingCommitment().String())
 
 	// ---- MsgCancelIntent through a real block refunds the same way ----
 	secondID := onlySubmittedID()
@@ -308,5 +308,5 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 	require.Equal(t, uint32(0), res.Code, "cancel intent: %s", res.Log)
 	require.Equal(t, veiltypes.INTENT_STATE_CANCELLED, intentState(secondID))
 	require.True(t, veilEscrow().IsZero(), "bond refunded on cancel")
-	require.True(t, windowSpent().IsZero(), "window refunded on cancel")
+	require.True(t, outstandingCommitment().IsZero(), "commitment released on cancel (D-059)")
 }

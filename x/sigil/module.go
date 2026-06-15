@@ -17,6 +17,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	"github.com/AryaSingh22/conclave/simutil"
 	"github.com/AryaSingh22/conclave/x/sigil/keeper"
 	"github.com/AryaSingh22/conclave/x/sigil/types"
 )
@@ -25,22 +26,28 @@ import (
 const ConsensusVersion = 1
 
 var (
-	_ module.AppModuleBasic = AppModule{}
-	_ module.HasGenesis     = AppModule{}
-	_ module.HasServices    = AppModule{}
-	_ module.HasInvariants  = AppModule{}
-	_ appmodule.AppModule   = AppModule{}
+	_ module.AppModuleBasic      = AppModule{}
+	_ module.HasGenesis          = AppModule{}
+	_ module.HasServices         = AppModule{}
+	_ module.HasInvariants       = AppModule{}
+	_ module.AppModuleSimulation = AppModule{}
+	_ appmodule.AppModule        = AppModule{}
 )
 
 // AppModule implements the x/sigil module (SPEC §6.1).
 type AppModule struct {
 	cdc    codec.Codec
 	keeper keeper.Keeper
+
+	// accountKeeper is used only by the task 0.11 simulation operations to sign
+	// msgs as the controlling key; nil outside simulation wiring.
+	accountKeeper simutil.AccountKeeper
 }
 
-// NewAppModule creates the x/sigil AppModule.
-func NewAppModule(cdc codec.Codec, k keeper.Keeper) AppModule {
-	return AppModule{cdc: cdc, keeper: k}
+// NewAppModule creates the x/sigil AppModule. ak is wired for the SDK
+// simulation (task 0.11) and is otherwise unused at runtime.
+func NewAppModule(cdc codec.Codec, k keeper.Keeper, ak simutil.AccountKeeper) AppModule {
+	return AppModule{cdc: cdc, keeper: k, accountKeeper: ak}
 }
 
 // IsOnePerModuleType implements appmodule.AppModule.

@@ -85,4 +85,12 @@ green and the task is reviewed + committed.
 - [x] 0.8 `x/session`: lifecycle, solver registry, validation, scoring, Conclude, fallback, sweeps
 - [x] 0.9 `x/receipt` query/proof surface + reputation hook (verified ICS-23 proof)
 - [x] 0.10 Reference solver binary (naive + cycles)
-- [ ] 0.11 SDK simulation integration (all modules) — NEXT
+- [x] 0.11 SDK simulation integration (all modules) — 500-block run, no invariant
+      break, same-seed determinism; surfaced + fixed the D-059 window-accounting
+      conflation bug (lifetime `outstanding_commitment` vs per-period
+      `window_spent`)
+
+**Phase 0 build COMPLETE.** Next is the independent Phase-0 audit (not a build
+task): a fresh-context auditor re-runs every acceptance script, re-derives the
+conservation/accounting invariants from scratch (incl. the D-059 lifetime/
+per-period split), sweeps the naming canon, and reads adversarially.

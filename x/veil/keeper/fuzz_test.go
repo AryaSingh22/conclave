@@ -316,8 +316,13 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 
 		assertConservation := func() {
 			rt.Helper()
-			// expected per-owner window = Σ charged_spend over that owner's
-			// intents not in {EXPIRED, CANCELLED}
+			// expected per-owner commitment = Σ charged_spend over that owner's
+			// intents not in {EXPIRED, CANCELLED, CONCLUDED}. After the D-059
+			// split this is the LIFETIME outstanding_commitment (not the
+			// per-period window_spent). The dedicated leak/over-commitment tests
+			// (keeper_test.go) prove the equality holds across window
+			// rollover/amend/reissue; this fuzz pins it under random
+			// submit/cancel/conclude schedules.
 			expected := make(map[string]sdk.Coins)
 			require.NoError(rt, f.k.IterateIntentRecords(f.ctx, func(rec types.IntentRecord) bool {
 				if rec.State == types.INTENT_STATE_EXPIRED ||
@@ -336,8 +341,8 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 				if want == nil {
 					want = sdk.NewCoins()
 				}
-				require.Equal(rt, want.String(), m.WindowSpent.String(),
-					"window_spent must equal Σ charged_spend of non-refunded intents for %s", a.grantee)
+				require.Equal(rt, want.String(), m.OutstandingCommitment.String(),
+					"outstanding_commitment must equal Σ charged_spend of live intents for %s", a.grantee)
 			}
 		}
 
@@ -360,7 +365,8 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 				m, found, err := f.mandate.ActiveMandateByGrantee(f.ctx, 0, a.grantee)
 				require.NoError(rt, err)
 				require.True(rt, found)
-				require.NoError(rt, f.mandate.ChargeWindow(f.ctx, m, charged))
+				// an intent's charge is a refundable COMMITMENT (D-059)
+				require.NoError(rt, f.mandate.ChargeWindow(f.ctx, m, charged, sdk.NewCoins()))
 				id, err := f.k.SubmitIntent(f.ctx, msg)
 				require.NoError(rt, err)
 				ownerOf[id] = a.grantee

@@ -58,6 +58,22 @@ message Mandate {
   bool revoked = 14;
   // chamber_id scopes the mandate; fixed 0 until Phase 3 (SPEC §1.2).
   uint32 chamber_id = 15;
+  // outstanding_commitment is the LIFETIME accumulator of refundable
+  // optimistic intent commitments (D-059): it increases when a
+  // MsgSubmitIntent is charged and decreases only when that intent terminates
+  // (expire/cancel/conclude). Unlike window_spent — which is the PER-PERIOD
+  // settled-spend counter and resets each window (and on amend/reissue) — this
+  // is NEVER reset by a window rollover or an amendment, because a still-live
+  // intent's funds remain optimistically committed across those events.
+  // Splitting the two (a lifetime balance vs a per-period consumption, which
+  // window_spent conflated) is the fix for the task-0.11 over-commitment +
+  // refund-clamp finding: Σ outstanding_commitment == Σ charged_spend(live
+  // intents) holds by construction across every reset.
+  repeated cosmos.base.v1beta1.Coin outstanding_commitment = 16 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true,
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"
+  ];
 }
 
 // Params are the governable x/mandate module parameters (SPEC §6.2).

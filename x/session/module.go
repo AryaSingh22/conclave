@@ -19,31 +19,41 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	"github.com/AryaSingh22/conclave/simutil"
 	"github.com/AryaSingh22/conclave/x/session/keeper"
 	"github.com/AryaSingh22/conclave/x/session/types"
+	veilkeeper "github.com/AryaSingh22/conclave/x/veil/keeper"
 )
 
 // ConsensusVersion defines the module's consensus-breaking version.
 const ConsensusVersion = 1
 
 var (
-	_ module.AppModuleBasic   = AppModule{}
-	_ module.HasGenesis       = AppModule{}
-	_ module.HasServices      = AppModule{}
-	_ appmodule.AppModule     = AppModule{}
-	_ appmodule.HasEndBlocker = AppModule{}
+	_ module.AppModuleBasic      = AppModule{}
+	_ module.HasGenesis          = AppModule{}
+	_ module.HasServices         = AppModule{}
+	_ module.AppModuleSimulation = AppModule{}
+	_ appmodule.AppModule        = AppModule{}
+	_ appmodule.HasEndBlocker    = AppModule{}
 )
 
 // AppModule implements the x/session module (SPEC §6.4).
 type AppModule struct {
 	cdc    codec.Codec
 	keeper *keeper.Keeper
+
+	// simulation-only keepers (task 0.11): account keeper for signing, veil
+	// keeper to decode a session's OPEN intents for the reference solver. nil
+	// outside simulation wiring.
+	accountKeeper simutil.AccountKeeper
+	veilKeeper    veilkeeper.Keeper
 }
 
 // NewAppModule creates the x/session AppModule. The keeper is a pointer so the
 // veil↔session dependency wired via SetVeilKeeper (Guard 1) is visible here.
-func NewAppModule(cdc codec.Codec, k *keeper.Keeper) AppModule {
-	return AppModule{cdc: cdc, keeper: k}
+// ak/vk are wired for the SDK simulation (task 0.11) and otherwise unused.
+func NewAppModule(cdc codec.Codec, k *keeper.Keeper, ak simutil.AccountKeeper, vk veilkeeper.Keeper) AppModule {
+	return AppModule{cdc: cdc, keeper: k, accountKeeper: ak, veilKeeper: vk}
 }
 
 // IsOnePerModuleType implements appmodule.AppModule.

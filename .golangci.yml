@@ -50,3 +50,11 @@ issues:
       linters: [forbidigo]
     - path: ^scripts/
       linters: [forbidigo]
+    # SDK module-simulation operations are test-support code, not consensus:
+    # the simtypes.Operation signature requires math/rand, and the randomness is
+    # the framework's SEEDED *rand.Rand (deterministic given the seed), exactly
+    # as the cosmos-sdk x/*/simulation packages do (task 0.11).
+    - path: /simulation/
+      linters: [depguard, forbidigo]
+    - path: ^simutil/
+      linters: [depguard, forbidigo]

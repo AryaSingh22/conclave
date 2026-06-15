@@ -1066,3 +1066,167 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   plan. The cycle CANNOT be cleared by the fallback, so steps 4-6 clearing it is
   itself proof the solver did it. CONCLAVE-TODO(phase-2): align concurrent intent
   submission to a fresh forming window if boundary-split flakiness ever appears.
+
+## D-057 — SDK simulation design: operation set, genesis, the v0.50 persistence workaround, tolerant ops, measured coverage
+
+- **Date:** 2026-06-15 (task 0.11)
+- **SPEC:** §10 row 0.11, §11 (testing), §3 (SDK simulation row)
+- **Decision:**
+  - **Per-module operations.** Each stateful custom module
+    (`x/{sigil,mandate,veil,session}`) implements `module.AppModuleSimulation`
+    (`GenerateGenesisState`, `RegisterStoreDecoder`, `WeightedOperations`) in a
+    `simulation/` subpackage; `x/escrow` (protos-only) and `x/receipt`
+    (store-less, D-052) contribute none. The coverage ENGINE is x/veil's
+    operations: coordinated MATCHABLE intent sets (2-party coin swaps the §6.4
+    fallback clears, and §1.3 3-party data/svc cycles only `solver/cycles` can
+    clear), plus window-charging intents from mandate-bound session keys
+    (within-ceiling and deliberately over-ceiling), plus malformed-payload
+    intents (INVALID slash path). x/session's `ProposeSolution` REUSES the
+    reference solver (`solver.Solve` + `solver/gate`, D-054/D-055) to build valid
+    solutions over a live AUCTION session, exercising the real scoring→Conclude
+    path — not just the fallback. AppModule constructors gained sim-only keeper
+    refs (account/bank/sigil/mandate/veil) used only by `WeightedOperations`.
+  - **v0.50 SimulateFromSeed persistence workaround (load-bearing).** The v0.50
+    sim loop runs operations via `SimDeliver` AFTER `FinalizeBlock` has already
+    called `workingHash()` (which flushed the begin/end-block state to the commit
+    store); `Commit()` never re-flushes `finalizeBlockState`, so the post-
+    FinalizeBlock operation writes are stranded and dropped — state never
+    accumulates and the per-block invariants observe nothing. The fix is a
+    baseapp `SetPrecommiter` option (`simPrecommitFlush`) that `Write()`s the
+    finalizeBlockState cache to the commit store just before `cms.Commit()` (the
+    precommiter runs there). `Commit=true` is required so FinalizeBlock's height
+    advances. Without this the sim is silently vacuous (diagnosed via
+    accounts-with-seq>0 == 0 while mint inflation persisted).
+  - **Full op set, wrapped TOLERANT.** Operations are the FULL
+    `SimulationManager` set (standard SDK modules + the six custom ones), each
+    wrapped so a delivery error becomes a no-op. Standard ops are required to
+    maintain the validator set and keep blocks busy (excluding them empties the
+    set and aborts the run); they are wrapped tolerant because a standard op may
+    sign with a mandate-bound grantee key whose tx the MandateDecorator CORRECTLY
+    rejects (the msg is not in the mandate allowlist) — which unwrapped SDK ops
+    treat as fatal. Tolerating op errors does NOT weaken the bug-finding gate:
+    that gate is the per-block crisis-invariant panic, independent of op success.
+    Ops are built with the APP's own `TxConfig` (not `MakeTestTxConfig`) so the
+    custom msg types decode.
+  - **Genesis.** `simtestutil.AppStateFn` (randomizes all modules incl. the
+    custom genesis) wrapped to add uclv+uusdc to every sim account (the base
+    genesis funds only the staking "stake" denom; staking stays in "stake",
+    Conclave economics run in uclv/uusdc — consistent with `bootConclaveApp`).
+    `inv-check-period=1` so crisis asserts every invariant on EVERY block.
+  - **Measured, not asserted coverage.** Like 0.10's branch-distribution proof,
+    the harness prints the executed operation mix (a sim-only `simcoverage`
+    atomic registry, observation-only so it never touches the app hash) AND the
+    consensus-side OUTCOME tallies read from committed state (intents by state,
+    sessions CLOSED, solvers, etc.) — a green sim with CLOSED==0/CONCLUDED==0
+    is treated as a vacuous failure. Sim tests gate behind `-Enabled`
+    (`simcli.FlagEnabledValue`) so they skip in `make test`.
+- **Rationale:** SPEC §10 row 0.11 demands a 500-block run with no invariant
+  break and no non-determinism that actually EXERCISES the modules. The
+  persistence workaround was the difference between a vacuous green run and a
+  real one; the tolerant-full-op set was the difference between a run that
+  aborts on validator depletion and one that completes. CONCLAVE-TODO(phase-1):
+  re-evaluate the persistence workaround if the SDK v0.53 bump (D8) changes the
+  sim/FinalizeBlock lifecycle.
+
+## D-058 — Invariant taxonomy: what is and is not a crisis invariant; crisis-runs-first ordering
+
+- **Date:** 2026-06-15 (task 0.11)
+- **SPEC:** §6.1 invariants, §6.4 rule 2, §11.3, §11.6, app_config EndBlock order
+- **Decision:** The 0.11 sim checks, every block, the already-registered module
+  invariants (sigil: address-index, reputation-non-negative, revoked-credential-
+  inactive; mandate: grantee→sigil, grantee-index) PLUS three new app-level
+  accounting invariants registered in `app/invariants.go` (they need bank
+  balance access and/or span >1 custom module's store, so they live at app level
+  rather than forcing a cross-module keeper edge):
+  - **veil-bond-custody:** veil module-account balance == Σ bonds of live-state
+    intents (resting consequence of §6.3 bond escrow).
+  - **solver-bond-custody:** session module-account balance ≥ Σ active solver
+    bonds (≥ because the same account is also the settlement-escrow + fee pool).
+  - **mandate-commitment-conservation:** the D-041 property promoted to a
+    per-block crisis invariant — after the D-059 split it is on the LIFETIME
+    `outstanding_commitment` (see D-059), GLOBAL form, holding across every
+    reset/amend/reissue by construction. It IS a valid crisis invariant because
+    crisis runs FIRST in the EndBlock order (`crisis → … → session → veil`): an
+    intent about to expire/conclude is still counted AND still committed at
+    check time, and is uncounted AND decommitted after the session/veil sweep —
+    equality holds at the crisis-check boundary.
+  Plus the SDK bank total-supply invariant (registered by x/bank), the resting
+  proxy for value conservation.
+- **What CANNOT be a crisis invariant (stated in code + here):**
+  - Conservation of value within a CONCLUDE (§6.4 rule 2) is a TRANSITION
+    property, not a single-snapshot predicate; enforced at solution validation
+    (`CheckConservation`) + the conservation fuzz, with the bank-supply +
+    custody invariants as the resting proxy.
+  - Limit-satisfaction / uniform-price / counterparty-class (rules 3/4/5) are
+    per-solution transition properties with no resting form.
+  - Fallback/scoring determinism (§11.3) is a cross-run property, covered by the
+    same-seed `TestAppStateDeterminism`, not crisis.
+- **Rationale:** 0.11 asked exactly which accounting properties can be promoted
+  to crisis invariants and which cannot. The crisis-runs-first ordering is the
+  load-bearing fact that makes commitment conservation checkable per block.
+
+## D-059 — FOUND-AND-FIXED interaction bug: window_spent conflated a lifetime commitment with per-period spend; split into outstanding_commitment
+
+- **Date:** 2026-06-15 (task 0.11 — the first found-and-fixed interaction bug of the project)
+- **SPEC:** §6.2 steps 4–5, §1.1 goal 3, §6.4 step 7
+- **SUPERSEDES** the single-window-counter assumption in **D-025**, the
+  amend/reissue window-reset semantics of **D-018/D-017a**, and the D-041 refund
+  matrix's treatment of the window (the bond/window split it describes).
+- **The bug (surfaced by the 0.11 simulation, not by any prior hand-authored
+  test).** With the crisis commitment-conservation invariant registered, the
+  500-block sim broke DETERMINISTICALLY at block 2: a grantee's window counter
+  was less than the sum of charged_spend over its still-live intents. Root cause:
+  the single `window_spent` field CONFLATED two physically distinct quantities
+  with two different conservation laws —
+  - a **refundable intent COMMITMENT** (MsgSubmitIntent give-legs + bond): a
+    LIFETIME outstanding balance that moves only on submit (charge) and on the
+    intent's terminate (release), conserved across epochs; and
+  - **non-refundable SETTLED spend** (bank sends, etc.): a PER-PERIOD consumption
+    that resets each window by design (SPEC §6.2 step 5).
+  A window rollover (§6.2 step 5), an amendment (D-018), or a reissue (D-017a
+  REPLACE) zeroed `window_spent`, which ALSO zeroed the live intent commitments —
+  (a) freeing ceiling capacity while the intent was still outstanding, an
+  OVER-COMMITMENT that weakens the §1.1-goal-3 "a leaked key is bounded"
+  guarantee across a reset, and (b) making the later terminate-time refund clamp
+  at the reset counter and silently vanish (a reachable capacity/accounting leak
+  for exactly the long-lived agents Conclave targets).
+- **The fix (Option X — separate the two quantities; chosen over the lighter
+  Option Y, epoch-aware refund).** `Mandate` gains a `outstanding_commitment`
+  Coins field (proto field 16). `ChargeWindow` now takes `(commit, settled)`:
+  the MandateDecorator classifies each msg (`MsgSubmitIntent` → commit; bank
+  sends → settled) and routes intent charges to `outstanding_commitment` (a
+  LIFETIME accumulator, NEVER reset by rollover/amend/reissue) and settled spend
+  to `window_spent` (per-period, still reset by §6.2 step 5). The per-tx ceiling
+  applies to the tx total; the **window ceiling bounds TOTAL live exposure**
+  (`outstanding_commitment + window_spent`), so a leaked key can never commit +
+  spend beyond `spend_ceiling_window` even across a reset. `RefundWindowSpend`
+  became `DecommitIntent`, releasing the exact charge from
+  `outstanding_commitment` (the lifetime balance always holds the live charge,
+  so the release is exact and never clamp-loses). Amend/reissue reset
+  `window_spent` (settled per-period budget) but CARRY `outstanding_commitment`
+  (the in-flight intents are still live). The crisis invariant returns to its
+  GLOBAL form: `Σ outstanding_commitment == Σ charged_spend(live intents)`,
+  holding by construction across every reset.
+- **Why X over Y.** Y (keep one counter, make the refund epoch-aware) would fix
+  the clamp-loss but NOT the over-commitment: it frees the live commitment's
+  ceiling capacity at the period boundary, which is correct for settled spend
+  and WRONG for a still-live refundable commitment — re-opening the §1.1-goal-3
+  weakening. The clamp-loss was a SYMPTOM; the conflation of a lifetime quantity
+  with a per-period one was the root. X separates two things that are genuinely
+  separate; the GLOBAL invariant then holds by construction (the strongest
+  outcome) instead of needing a per-epoch narrowing.
+- **Tests (load-bearing, all green):**
+  `TestCommitmentSurvivesRolloverNoLeak` (commitment survives a rollover; the
+  post-rollover decommit is exact, never clamps), `TestOverCommitmentRejected
+  AcrossRollover` (a live commitment keeps bounding the ceiling across a
+  rollover — the test that proves Y would have been wrong), the §6.2 `TestFuzz
+  WindowResetBoundary` stays green UNCHANGED (settled-spend per-period reset
+  preserved), and the 0.7 window-accounting conservation fuzz now pins the new
+  `outstanding_commitment`. The 500-block sim completes with the GLOBAL
+  invariant intact and reaches real clearing (CLOSED>0, CONCLUDED>0).
+- **Rationale:** This is the canonical 0.11 success — a real interaction bug no
+  prior task could reach, found by the sim and fixed at the root. The split
+  makes the window's two jobs (bound lifetime in-flight commitment; budget
+  per-period settled spend) explicit and independently conserved.
+  CONCLAVE-TODO(phase-1): the Veil `spend_commitment` envelope (§6.3, §8(e))
+  binds the encrypted-intent commitment to the same `outstanding_commitment`.

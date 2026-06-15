@@ -298,10 +298,15 @@ func TestAmendMandate(t *testing.T) {
 	id, err := f.k.IssueMandate(f.ctx, controller, validTerms(sigilID, grantee))
 	require.NoError(t, err)
 
-	// charge some window spend, then amend: accounting must reset (D-018)
+	// charge a live intent COMMITMENT and some per-period SETTLED spend, then
+	// amend. D-059: amendment resets the per-period window_spent (settled
+	// budget) but CARRIES the lifetime outstanding_commitment, because the
+	// grantee's in-flight intents are still live and their funds still committed.
 	m, _, err := f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
-	require.NoError(t, f.k.ChargeWindow(f.ctx, m, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100))))
+	require.NoError(t, f.k.ChargeWindow(f.ctx, m,
+		sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100)), // commitment
+		sdk.NewCoins(sdk.NewInt64Coin("uusdc", 30)))) // settled
 
 	amended := validTerms(sigilID, grantee)
 	amended.SpendCeilingPerTx = sdk.NewCoins(sdk.NewInt64Coin("uusdc", 42))
@@ -316,7 +321,9 @@ func TestAmendMandate(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, amended.SpendCeilingPerTx, m.SpendCeilingPerTx)
-	require.True(t, m.WindowSpent.IsZero(), "amendment must reset window accounting")
+	require.True(t, m.WindowSpent.IsZero(), "amendment resets the per-period window_spent")
+	require.Equal(t, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100)).String(), m.OutstandingCommitment.String(),
+		"amendment carries forward the lifetime outstanding_commitment (D-059)")
 
 	// amending a revoked mandate is rejected: reissue instead
 	require.NoError(t, f.k.RevokeMandate(f.ctx, controller, id))
@@ -376,7 +383,9 @@ func TestChargeWindow(t *testing.T) {
 				m, found, err := f.k.ActiveMandateByGrantee(ctx, 0, grantee)
 				require.NoError(t, err)
 				require.True(t, found)
-				lastErr = f.k.ChargeWindow(ctx, m, spend)
+				// these cases exercise per-period SETTLED spend (bank-send
+				// style): the window_spent counter that resets each period.
+				lastErr = f.k.ChargeWindow(ctx, m, sdk.NewCoins(), spend)
 			}
 			if tc.wantErr != nil {
 				require.ErrorIs(t, lastErr, tc.wantErr)
@@ -387,7 +396,7 @@ func TestChargeWindow(t *testing.T) {
 	}
 }
 
-func TestRefundWindowSpend(t *testing.T) {
+func TestDecommitIntent(t *testing.T) {
 	f := setupKeeper(t)
 	controller := randAddr()
 	sigilID := f.registerSigil(t, controller)
@@ -395,18 +404,114 @@ func TestRefundWindowSpend(t *testing.T) {
 	_, err := f.k.IssueMandate(f.ctx, controller, validTerms(sigilID, grantee))
 	require.NoError(t, err)
 
+	// an intent commitment lands in outstanding_commitment (not window_spent)
 	m, _, err := f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
-	require.NoError(t, f.k.ChargeWindow(f.ctx, m, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100))))
-
-	// refund more than spent: clamps to zero, never negative
-	require.NoError(t, f.k.RefundWindowSpend(f.ctx, 0, grantee, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 250))))
+	require.NoError(t, f.k.ChargeWindow(f.ctx, m, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100)), sdk.NewCoins()))
 	m, _, err = f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
-	require.True(t, m.WindowSpent.IsZero())
+	require.Equal(t, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100)).String(), m.OutstandingCommitment.String())
+	require.True(t, m.WindowSpent.IsZero(), "intent commitments never touch the per-period window_spent")
 
-	// refund to a key without a mandate is a no-op
-	require.NoError(t, f.k.RefundWindowSpend(f.ctx, 0, randAddr(), sdk.NewCoins(sdk.NewInt64Coin("uusdc", 1))))
+	// decommit more than committed: clamps to zero, never negative (defensive)
+	require.NoError(t, f.k.DecommitIntent(f.ctx, 0, grantee, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 250))))
+	m, _, err = f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
+	require.NoError(t, err)
+	require.True(t, m.OutstandingCommitment.IsZero())
+
+	// decommit to a key without a mandate is a no-op
+	require.NoError(t, f.k.DecommitIntent(f.ctx, 0, randAddr(), sdk.NewCoins(sdk.NewInt64Coin("uusdc", 1))))
+}
+
+// TestCommitmentSurvivesRolloverNoLeak is the D-059 leak test (the task-0.11
+// finding, fixed). An intent commitment is charged, the window period rolls
+// over, and the intent then terminates: the decommit must release EXACTLY the
+// charge from the lifetime outstanding_commitment and never clamp-and-lose at
+// the period boundary. Under the pre-D-059 single window_spent, the rollover
+// zeroed the live commitment and this decommit clamped to a no-op — the silent
+// refund/capacity leak the simulation surfaced (it broke the global invariant
+// at block 2). With outstanding_commitment split out and never reset, the
+// release is exact.
+func TestCommitmentSurvivesRolloverNoLeak(t *testing.T) {
+	f := setupKeeper(t)
+	controller := randAddr()
+	sigilID := f.registerSigil(t, controller)
+	grantee := randAddr()
+	terms := validTerms(sigilID, grantee)
+	terms.WindowBlocks = 10
+	_, err := f.k.IssueMandate(f.ctx, controller, terms)
+	require.NoError(t, err)
+
+	commit := sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100))
+	m, _, err := f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
+	require.NoError(t, err)
+	require.NoError(t, f.k.ChargeWindow(f.ctx, m, commit, sdk.NewCoins()))
+
+	// roll the window over (advance well past window_blocks); a settled charge
+	// triggers the per-period reset branch
+	rolled := f.ctx.WithBlockHeight(f.ctx.BlockHeight() + 100)
+	m, _, err = f.k.ActiveMandateByGrantee(rolled, 0, grantee)
+	require.NoError(t, err)
+	require.NoError(t, f.k.ChargeWindow(rolled, m, sdk.NewCoins(), sdk.NewCoins(sdk.NewInt64Coin("uusdc", 5))))
+
+	// the commitment SURVIVES the rollover; only window_spent reset
+	m, _, err = f.k.ActiveMandateByGrantee(rolled, 0, grantee)
+	require.NoError(t, err)
+	require.Equal(t, commit.String(), m.OutstandingCommitment.String(),
+		"the live intent commitment survives the window rollover")
+	require.Equal(t, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 5)).String(), m.WindowSpent.String(),
+		"only the per-period settled counter reset")
+
+	// the intent terminates AFTER the rollover: the decommit releases exactly
+	// the charge — no clamp-loss
+	require.NoError(t, f.k.DecommitIntent(rolled, 0, grantee, commit))
+	m, _, err = f.k.ActiveMandateByGrantee(rolled, 0, grantee)
+	require.NoError(t, err)
+	require.True(t, m.OutstandingCommitment.IsZero(),
+		"decommit after a rollover is exact and never clamp-loses (D-059)")
+}
+
+// TestOverCommitmentRejectedAcrossRollover proves Option Y (free the live
+// commitment at the period boundary) would have been WRONG, and is the §1.1
+// goal-3 "leaked key is bounded" guarantee made explicit across a reset. An
+// intent commits the full window ceiling; the window rolls over; a NEW intent
+// is REJECTED because the still-live commitment continues to count against the
+// ceiling. Only once the intent terminates (decommit) does capacity free up.
+func TestOverCommitmentRejectedAcrossRollover(t *testing.T) {
+	f := setupKeeper(t)
+	controller := randAddr()
+	sigilID := f.registerSigil(t, controller)
+	grantee := randAddr()
+	terms := validTerms(sigilID, grantee)
+	terms.WindowBlocks = 10
+	terms.SpendCeilingPerTx = sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100))
+	terms.SpendCeilingWindow = sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100))
+	_, err := f.k.IssueMandate(f.ctx, controller, terms)
+	require.NoError(t, err)
+
+	// commit the full window ceiling as one live intent
+	m, _, err := f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
+	require.NoError(t, err)
+	require.NoError(t, f.k.ChargeWindow(f.ctx, m, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100)), sdk.NewCoins()))
+
+	// roll the window over, then attempt a NEW intent commitment: REJECTED,
+	// because outstanding_commitment (100) + new (1) exceeds the ceiling (100).
+	// The live commitment is NOT freed by the rollover — this is the
+	// over-commitment that Option Y would have allowed.
+	rolled := f.ctx.WithBlockHeight(f.ctx.BlockHeight() + 100)
+	m, _, err = f.k.ActiveMandateByGrantee(rolled, 0, grantee)
+	require.NoError(t, err)
+	require.ErrorIs(t,
+		f.k.ChargeWindow(rolled, m, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 1)), sdk.NewCoins()),
+		types.ErrMandateExceeded,
+		"a live commitment must keep bounding the ceiling across a rollover")
+
+	// once the intent terminates, the freed capacity is usable again
+	require.NoError(t, f.k.DecommitIntent(rolled, 0, grantee, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 100))))
+	m, _, err = f.k.ActiveMandateByGrantee(rolled, 0, grantee)
+	require.NoError(t, err)
+	require.NoError(t, f.k.ChargeWindow(rolled, m, sdk.NewCoins(sdk.NewInt64Coin("uusdc", 80)), sdk.NewCoins()),
+		"after the intent terminates the ceiling capacity is available again")
 }
 
 func TestFeeAbstraction(t *testing.T) {

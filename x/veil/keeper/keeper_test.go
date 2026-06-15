@@ -473,7 +473,7 @@ func TestRevealInvalidSlash(t *testing.T) {
 	m, found, err := f.mandate.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.NoError(t, f.mandate.ChargeWindow(f.ctx, m, f.mustRecord(t, id).ChargedSpend))
+	require.NoError(t, f.mandate.ChargeWindow(f.ctx, m, f.mustRecord(t, id).ChargedSpend, sdk.NewCoins()))
 
 	// boundary seals, next BeginBlock reveals → INVALID
 	f.ctx = f.ctx.WithBlockHeight(3)
@@ -495,8 +495,8 @@ func TestRevealInvalidSlash(t *testing.T) {
 	m, found, err = f.mandate.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, sdk.NewCoins(minBond()).String(), m.WindowSpent.String(),
-		"INVALID intents keep their window charge (D-040)")
+	require.Equal(t, sdk.NewCoins(minBond()).String(), m.OutstandingCommitment.String(),
+		"INVALID intents keep their outstanding commitment (D-040/D-059)")
 }
 
 // TestExpiry drives OPEN → EXPIRED through the EndBlock sweep: full bond
@@ -529,7 +529,7 @@ func TestExpiry(t *testing.T) {
 	m, found, err := f.mandate.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.NoError(t, f.mandate.ChargeWindow(f.ctx, m, rec.ChargedSpend))
+	require.NoError(t, f.mandate.ChargeWindow(f.ctx, m, rec.ChargedSpend, sdk.NewCoins()))
 
 	// seal at 3, open at 4; ttl 5 hits at EndBlock(5)
 	f.ctx = f.ctx.WithBlockHeight(3)
@@ -551,8 +551,8 @@ func TestExpiry(t *testing.T) {
 	m, found, err = f.mandate.ActiveMandateByGrantee(f.ctx, 0, grantee)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.True(t, m.WindowSpent.IsZero(),
-		"EXPIRED refunds the stored charged_spend to the window (D-041)")
+	require.True(t, m.OutstandingCommitment.IsZero(),
+		"EXPIRED decommits the stored charged_spend (D-041/D-059)")
 }
 
 func TestCancelIntent(t *testing.T) {
@@ -582,7 +582,7 @@ func TestCancelIntent(t *testing.T) {
 		m, found, err := f.mandate.ActiveMandateByGrantee(f.ctx, 0, grantee)
 		require.NoError(t, err)
 		require.True(t, found)
-		require.NoError(t, f.mandate.ChargeWindow(f.ctx, m, rec.ChargedSpend))
+		require.NoError(t, f.mandate.ChargeWindow(f.ctx, m, rec.ChargedSpend, sdk.NewCoins()))
 
 		require.NoError(t, f.k.CancelIntent(f.ctx, grantee.String(), id))
 		require.Equal(t, types.INTENT_STATE_CANCELLED, f.mustRecord(t, id).State)
@@ -591,7 +591,7 @@ func TestCancelIntent(t *testing.T) {
 
 		m, _, err = f.mandate.ActiveMandateByGrantee(f.ctx, 0, grantee)
 		require.NoError(t, err)
-		require.True(t, m.WindowSpent.IsZero(), "window refunded on cancel")
+		require.True(t, m.OutstandingCommitment.IsZero(), "commitment released on cancel (D-059)")
 	})
 
 	t.Run("owner-only", func(t *testing.T) {

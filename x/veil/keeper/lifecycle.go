@@ -273,7 +273,7 @@ func (k Keeper) settleRefund(ctx sdk.Context, rec types.IntentRecord, eventType 
 			return err
 		}
 	}
-	if err := k.mandateKeeper.RefundWindowSpend(ctx, rec.Intent.ChamberId, owner, rec.ChargedSpend); err != nil {
+	if err := k.mandateKeeper.DecommitIntent(ctx, rec.Intent.ChamberId, owner, rec.ChargedSpend); err != nil {
 		return err
 	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent(

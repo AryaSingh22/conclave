@@ -25,3 +25,9 @@ Thumbs.db
 
 # local env
 .env
+
+# rapid property-test failure-replay corpus (local regression seeds, not committed)
+**/testdata/rapid/
+
+# transient commit-message scratch files
+.commitmsg-*

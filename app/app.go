@@ -322,10 +322,10 @@ func NewConclaveApp(
 	app.UnorderedManager = unordered.NewManager(runtime.NewKVStoreService(unorderedKey))
 
 	if err := app.RegisterModules(
-		sigil.NewAppModule(app.appCodec, app.SigilKeeper),
-		mandate.NewAppModule(app.appCodec, app.MandateKeeper),
-		veil.NewAppModule(app.appCodec, app.VeilKeeper),
-		session.NewAppModule(app.appCodec, app.SessionKeeper),
+		sigil.NewAppModule(app.appCodec, app.SigilKeeper, app.AccountKeeper),
+		mandate.NewAppModule(app.appCodec, app.MandateKeeper, app.AccountKeeper, app.SigilKeeper),
+		veil.NewAppModule(app.appCodec, app.VeilKeeper, app.AccountKeeper, app.BankKeeper, app.SigilKeeper, app.MandateKeeper),
+		session.NewAppModule(app.appCodec, app.SessionKeeper, app.AccountKeeper, app.VeilKeeper),
 		receipt.NewAppModule(app.appCodec, app.ReceiptKeeper),
 		unordered.NewAppModule(app.UnorderedManager),
 	); err != nil {
@@ -349,6 +349,12 @@ func NewConclaveApp(
 	// register module invariants with the crisis module (SPEC §6.1 requires
 	// Conclave module invariants to be registered here as they land)
 	app.ModuleManager.RegisterInvariants(app.CrisisKeeper)
+
+	// register the cross-module accounting invariants (task 0.11): veil/solver
+	// bond custody and the D-041 window/bond conservation property promoted to a
+	// per-block crisis invariant. Registered at app level because they need bank
+	// balance access and span more than one custom module's store.
+	RegisterConservationInvariants(app.CrisisKeeper, app.BankKeeper, app.MandateKeeper, app.VeilKeeper, app.SessionKeeper)
 
 	// simulation manager (SDK simulation integration is task 0.11)
 	overrideModules := map[string]module.AppModuleSimulation{

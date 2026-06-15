@@ -84,18 +84,24 @@ func (d MandateDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 		for _, url := range m.AllowedMsgTypes {
 			allowed[url] = true
 		}
-		spend := sdk.NewCoins()
+		// D-059: spend splits into a refundable intent COMMITMENT (lifetime
+		// outstanding) and non-refundable SETTLED spend (per-period), tracked
+		// separately by ChargeWindow. The split is computed per leaf msg and
+		// summed across the tx (and through nested wrappers).
+		commit := sdk.NewCoins()
+		settled := sdk.NewCoins()
 		for _, msg := range tx.GetMsgs() {
-			msgSpend, err := d.checkMsg(ctx, allowed, msg, 0, params.MaxMsgNestingDepth)
+			msgCommit, msgSettled, err := d.checkMsg(ctx, allowed, msg, 0, params.MaxMsgNestingDepth)
 			if err != nil {
 				return ctx, d.deny(ctx, m, err)
 			}
-			spend = spend.Add(msgSpend...)
+			commit = commit.Add(msgCommit...)
+			settled = settled.Add(msgSettled...)
 		}
 
-		// steps 4 + 5: ceilings + optimistic window charge (CheckTx AND
-		// DeliverTx — see Keeper.ChargeWindow)
-		if err := d.keeper.ChargeWindow(ctx, m, spend); err != nil {
+		// steps 4 + 5: ceilings + optimistic charge (CheckTx AND DeliverTx —
+		// see Keeper.ChargeWindow)
+		if err := d.keeper.ChargeWindow(ctx, m, commit, settled); err != nil {
 			return ctx, d.deny(ctx, m, err)
 		}
 
@@ -111,35 +117,36 @@ func (d MandateDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 // nested-msg unwrap, recursion capped at max_msg_nesting_depth) and step 4
 // (spend intent valuation), in one walk. depth counts wrapper levels above
 // this msg: top-level msgs are depth 0; depth > maxDepth → ErrMsgTooNested.
-func (d MandateDecorator) checkMsg(ctx sdk.Context, allowed map[string]bool, msg sdk.Msg, depth, maxDepth uint32) (sdk.Coins, error) {
+func (d MandateDecorator) checkMsg(ctx sdk.Context, allowed map[string]bool, msg sdk.Msg, depth, maxDepth uint32) (commit, settled sdk.Coins, err error) {
 	if depth > maxDepth {
-		return nil, errorsmod.Wrapf(types.ErrMsgTooNested,
+		return nil, nil, errorsmod.Wrapf(types.ErrMsgTooNested,
 			"nested msg at depth %d exceeds max_msg_nesting_depth %d", depth, maxDepth)
 	}
 
 	url := sdk.MsgTypeURL(msg)
 	if !allowed[url] {
-		return nil, errorsmod.Wrapf(types.ErrMsgNotPermitted, "%s", url)
+		return nil, nil, errorsmod.Wrapf(types.ErrMsgNotPermitted, "%s", url)
 	}
 
-	spend := d.spendIntent(ctx, msg)
+	commit, settled = d.spendIntent(ctx, msg)
 
 	// nested msgs matter: a wrapper's inner msgs are checked against the
-	// same allowlist and their spend intents charged to the same window —
+	// same allowlist and their spend intents charged to the same mandate —
 	// wrapping can never widen a mandate or dodge a ceiling
 	for _, innerAny := range nestedAnys(msg) {
 		var inner sdk.Msg
 		if err := d.keeper.Codec().UnpackAny(innerAny, &inner); err != nil {
-			return nil, errorsmod.Wrapf(types.ErrMsgNotPermitted,
+			return nil, nil, errorsmod.Wrapf(types.ErrMsgNotPermitted,
 				"undecodable nested msg %s: %s", innerAny.TypeUrl, err)
 		}
-		innerSpend, err := d.checkMsg(ctx, allowed, inner, depth+1, maxDepth)
+		innerCommit, innerSettled, err := d.checkMsg(ctx, allowed, inner, depth+1, maxDepth)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		spend = spend.Add(innerSpend...)
+		commit = commit.Add(innerCommit...)
+		settled = settled.Add(innerSettled...)
 	}
-	return spend, nil
+	return commit, settled, nil
 }
 
 // nestedAnys returns the packed inner msgs of known wrapper msg types
@@ -158,25 +165,26 @@ func nestedAnys(msg sdk.Msg) []*codectypes.Any {
 	}
 }
 
-// spendIntent implements SPEC §6.2 step 4 valuation for one msg: for bank
-// sends, the send amount; for MsgSubmitIntent, the per-denom max of give
-// legs valued via the PriceSource (face value until task 0.8 — D-020).
-// Unknown msg types carry zero spend intent: they are gated by the step 3
+// spendIntent implements SPEC §6.2 step 4 valuation for one msg, classified by
+// D-059 into (commit, settled): a MsgSubmitIntent is a REFUNDABLE commitment
+// (the per-denom max of give legs + bond, released when the intent terminates);
+// bank sends are NON-REFUNDABLE settled spend (the send amount). Unknown msg
+// types carry zero spend intent in both buckets: they are gated by the step 3
 // allowlist instead.
-func (d MandateDecorator) spendIntent(ctx sdk.Context, msg sdk.Msg) sdk.Coins {
+func (d MandateDecorator) spendIntent(ctx sdk.Context, msg sdk.Msg) (commit, settled sdk.Coins) {
 	switch m := msg.(type) {
 	case *banktypes.MsgSend:
-		return sdk.NewCoins(m.Amount...)
+		return sdk.NewCoins(), sdk.NewCoins(m.Amount...)
 	case *banktypes.MsgMultiSend:
 		total := sdk.NewCoins()
 		for _, input := range m.Inputs {
 			total = total.Add(input.Coins...)
 		}
-		return total
+		return sdk.NewCoins(), total
 	case *veiltypes.MsgSubmitIntent:
-		return d.intentSpend(ctx, m)
+		return d.intentSpend(ctx, m), sdk.NewCoins()
 	default:
-		return nil
+		return sdk.NewCoins(), sdk.NewCoins()
 	}
 }
 

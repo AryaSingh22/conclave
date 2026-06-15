@@ -180,6 +180,16 @@ func (f *fixture) windowSpent(t testing.TB) sdk.Coins {
 	return m.WindowSpent
 }
 
+// outstandingCommitment returns the grantee's lifetime intent-commitment
+// accumulator (D-059): MsgSubmitIntent charges land here, not in window_spent.
+func (f *fixture) outstandingCommitment(t testing.TB) sdk.Coins {
+	t.Helper()
+	m, found, err := f.k.ActiveMandateByGrantee(f.ctx, 0, f.grantee)
+	require.NoError(t, err)
+	require.True(t, found)
+	return m.OutstandingCommitment
+}
+
 // submitIntentMsg builds a MsgSubmitIntent from f.grantee whose payload
 // gives the provided legs.
 func (f *fixture) submitIntentMsg(t testing.TB, give ...sdk.Coin) *veiltypes.MsgSubmitIntent {
@@ -382,7 +392,7 @@ func TestIntentSpendValuation(t *testing.T) {
 	// max(300, 200) = 300 charged (not 500), plus the 1uclv bond
 	msg := f.submitIntentMsg(t, sdk.NewInt64Coin("uusdc", 300), sdk.NewInt64Coin("uusdc", 200))
 	require.NoError(t, f.runMandateDecorator(t, f.buildTx(t, nil, msg)))
-	require.Equal(t, usdc(300).Add(uclv(1)...), f.windowSpent(t))
+	require.Equal(t, usdc(300).Add(uclv(1)...), f.outstandingCommitment(t))
 
 	// an over-ceiling give leg is rejected — §1.3 step 3 in miniature
 	msg = f.submitIntentMsg(t, sdk.NewInt64Coin("uusdc", 600))
@@ -396,8 +406,8 @@ func TestIntentSpendValuation(t *testing.T) {
 		Bond:       sdk.NewInt64Coin("uclv", 1),
 	}
 	require.NoError(t, f.runMandateDecorator(t, f.buildTx(t, nil, bad)))
-	require.Equal(t, usdc(300).Add(uclv(2)...), f.windowSpent(t),
-		"malformed payload charges its bond and nothing else")
+	require.Equal(t, usdc(300).Add(uclv(2)...), f.outstandingCommitment(t),
+		"malformed payload commits its bond and nothing else")
 }
 
 // TestBondAloneDrainsWindow is the D-025 attack in isolation: a stolen key
@@ -425,7 +435,9 @@ func TestBondAloneDrainsWindow(t *testing.T) {
 		f.runMandateDecorator(t, f.buildTx(t, nil, malformedIntent())),
 		types.ErrMandateExceeded,
 		"over-window via bonds alone must be rejected")
-	require.Equal(t, uclv(8), f.windowSpent(t))
+	// D-059: intent bonds accumulate in outstanding_commitment, and the window
+	// ceiling still bounds them via the exposure check (outstanding + settled).
+	require.Equal(t, uclv(8), f.outstandingCommitment(t))
 }
 
 // TestWindowAccountingAcrossTxsAndResets is SPEC §6.2 step 5: optimistic

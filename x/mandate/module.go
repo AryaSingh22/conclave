@@ -18,30 +18,39 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	"github.com/AryaSingh22/conclave/simutil"
 	"github.com/AryaSingh22/conclave/x/mandate/keeper"
 	"github.com/AryaSingh22/conclave/x/mandate/types"
+	sigilkeeper "github.com/AryaSingh22/conclave/x/sigil/keeper"
 )
 
 // ConsensusVersion defines the module's consensus-breaking version.
 const ConsensusVersion = 1
 
 var (
-	_ module.AppModuleBasic = AppModule{}
-	_ module.HasGenesis     = AppModule{}
-	_ module.HasServices    = AppModule{}
-	_ module.HasInvariants  = AppModule{}
-	_ appmodule.AppModule   = AppModule{}
+	_ module.AppModuleBasic      = AppModule{}
+	_ module.HasGenesis          = AppModule{}
+	_ module.HasServices         = AppModule{}
+	_ module.HasInvariants       = AppModule{}
+	_ module.AppModuleSimulation = AppModule{}
+	_ appmodule.AppModule        = AppModule{}
 )
 
 // AppModule implements the x/mandate module (SPEC §6.2).
 type AppModule struct {
 	cdc    codec.Codec
 	keeper keeper.Keeper
+
+	// simulation-only keepers (task 0.11): account keeper for signing, sigil
+	// keeper for resolving controllers/sigil ids. nil outside simulation wiring.
+	accountKeeper simutil.AccountKeeper
+	sigilKeeper   sigilkeeper.Keeper
 }
 
-// NewAppModule creates the x/mandate AppModule.
-func NewAppModule(cdc codec.Codec, k keeper.Keeper) AppModule {
-	return AppModule{cdc: cdc, keeper: k}
+// NewAppModule creates the x/mandate AppModule. ak and sk are wired for the SDK
+// simulation (task 0.11) and are otherwise unused at runtime.
+func NewAppModule(cdc codec.Codec, k keeper.Keeper, ak simutil.AccountKeeper, sk sigilkeeper.Keeper) AppModule {
+	return AppModule{cdc: cdc, keeper: k, accountKeeper: ak, sigilKeeper: sk}
 }
 
 // IsOnePerModuleType implements appmodule.AppModule.

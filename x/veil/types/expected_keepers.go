@@ -26,11 +26,13 @@ type SigilKeeper interface {
 	SigilIDByAddress(ctx sdk.Context, chamberID uint32, addr sdk.AccAddress) (string, error)
 }
 
-// MandateKeeper is the x/mandate surface x/veil depends on: the SPEC §6.2
-// step 5 refund path returns optimistically charged window spend when an
-// intent expires or cancels unmatched (SPEC §6.4 EndBlock step 7).
+// MandateKeeper is the x/mandate surface x/veil depends on: when an intent
+// terminates (expired/cancelled/concluded) x/veil releases its optimistic
+// commitment from the grantee's lifetime outstanding_commitment (SPEC §6.4
+// EndBlock step 7; D-059 — the split of the lifetime commitment from the
+// per-period window_spent).
 type MandateKeeper interface {
-	RefundWindowSpend(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress, amount sdk.Coins) error
+	DecommitIntent(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress, amount sdk.Coins) error
 }
 
 // PriceSource values intent give legs exactly as the ante handler does

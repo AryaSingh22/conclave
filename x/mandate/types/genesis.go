@@ -62,6 +62,9 @@ func (gs GenesisState) Validate() error {
 		if err := m.WindowSpent.Validate(); err != nil {
 			return errorsmod.Wrapf(ErrInvalidTerms, "mandate %s window_spent: %s", m.Id, err)
 		}
+		if err := m.OutstandingCommitment.Validate(); err != nil {
+			return errorsmod.Wrapf(ErrInvalidTerms, "mandate %s outstanding_commitment: %s", m.Id, err)
+		}
 		if m.FeeSponsor != "" {
 			if _, err := sdk.AccAddressFromBech32(m.FeeSponsor); err != nil {
 				return errorsmod.Wrapf(ErrInvalidTerms, "mandate %s fee_sponsor: %s", m.Id, err)

@@ -11,25 +11,38 @@ import (
 	"github.com/AryaSingh22/conclave/x/mandate/types"
 )
 
-// ChargeWindow implements SPEC §6.2 steps 4–5 for one tx's aggregate spend
-// intent: per-tx ceiling, window reset, window ceiling, then OPTIMISTIC
-// charging. The caller (MandateDecorator) invokes this identically in
-// CheckTx and DeliverTx — zero mode branching. CheckTx charges accumulate
-// in the mempool's check state so parallel unordered txs from one key are
-// bounded before any of them executes; DeliverTx charges commit; the check
-// state re-branches from committed state each block and surviving mempool
-// txs re-charge on recheck.
+// ChargeWindow implements SPEC §6.2 steps 4–5 for one tx, charging its spend
+// against the mandate. D-059 splits the spend into two physically distinct
+// quantities with two distinct conservation laws:
 //
-// Ceiling comparisons are deny-by-default per denom (D-019): a spend denom
-// absent from a ceiling Coins list has an implicit ceiling of zero.
-func (k Keeper) ChargeWindow(ctx sdk.Context, m types.Mandate, spend sdk.Coins) error {
-	// step 4: per-tx spend ceiling
-	if !spend.IsAllLTE(m.SpendCeilingPerTx) {
+//   - commit  — refundable optimistic intent commitments (MsgSubmitIntent):
+//     accumulated in OUTSTANDING_COMMITMENT, a LIFETIME balance that is
+//     released only when the intent terminates (DecommitIntent) and is NEVER
+//     reset by a window rollover or amendment, because the funds remain
+//     committed while the intent is live.
+//   - settled — non-refundable settled spend (bank sends, etc.): accumulated
+//     in WINDOW_SPENT, a PER-PERIOD consumption counter that resets each
+//     window (SPEC §6.2 step 5) to grant fresh per-period budget.
+//
+// Conflating the two (the pre-D-059 single window_spent) caused the task-0.11
+// finding: a window reset zeroed live intent commitments, freeing ceiling
+// capacity while the intent was still outstanding (over-commitment, a
+// §1.1-goal-3 bound weakening) and making the later DecommitIntent clamp-lose.
+//
+// The caller (MandateDecorator) invokes this identically in CheckTx and
+// DeliverTx — zero mode branching. Ceiling comparisons are deny-by-default per
+// denom (D-019).
+func (k Keeper) ChargeWindow(ctx sdk.Context, m types.Mandate, commit, settled sdk.Coins) error {
+	// step 4: per-tx spend ceiling applies to this tx's TOTAL spend intent
+	// (commitment + settled), regardless of which counter each part lands in.
+	total := commit.Add(settled...)
+	if !total.IsAllLTE(m.SpendCeilingPerTx) {
 		return errorsmod.Wrapf(types.ErrMandateExceeded,
-			"spend intent %s exceeds per-tx ceiling %s", spend, m.SpendCeilingPerTx)
+			"spend intent %s exceeds per-tx ceiling %s", total, m.SpendCeilingPerTx)
 	}
 
-	// step 5: window reset
+	// step 5: per-period reset of the SETTLED-spend counter only. The lifetime
+	// outstanding_commitment is deliberately untouched here (D-059).
 	height := uint64(ctx.BlockHeight())
 	if height >= m.WindowStartHeight+m.WindowBlocks {
 		m.WindowSpent = sdk.NewCoins()
@@ -42,27 +55,34 @@ func (k Keeper) ChargeWindow(ctx sdk.Context, m types.Mandate, spend sdk.Coins) 
 		))
 	}
 
-	// step 5: window ceiling, then charge optimistically (refunds for
-	// expired/cancelled unmatched intents are x/session's job — see
-	// RefundWindowSpend)
-	newSpent := m.WindowSpent.Add(spend...)
-	if !newSpent.IsAllLTE(m.SpendCeilingWindow) {
+	// step 5: the window ceiling bounds TOTAL live exposure at any instant —
+	// outstanding intent commitments plus settled spend this period — so a
+	// leaked key can never commit + spend beyond spend_ceiling_window even
+	// across a reset (the over-commitment the conflation allowed).
+	newCommit := m.OutstandingCommitment.Add(commit...)
+	newSpent := m.WindowSpent.Add(settled...)
+	exposure := newCommit.Add(newSpent...)
+	if !exposure.IsAllLTE(m.SpendCeilingWindow) {
 		return errorsmod.Wrapf(types.ErrMandateExceeded,
-			"window spend %s + intent %s exceeds window ceiling %s",
-			m.WindowSpent, spend, m.SpendCeilingWindow)
+			"exposure (outstanding %s + window %s) exceeds window ceiling %s",
+			newCommit, newSpent, m.SpendCeilingWindow)
 	}
+	m.OutstandingCommitment = newCommit
 	m.WindowSpent = newSpent
 	return k.SetMandate(ctx, m)
 }
 
-// RefundWindowSpend returns optimistically charged spend to the grantee's
-// current window, clamped at zero per denom: refunds never cross a window
-// reset, and a replaced/absent mandate refunds nothing.
-//
-// CONCLAVE-TODO(phase-0): x/session EndBlock calls this at task 0.8 (SPEC
-// §6.4 EndBlock step 7 "mandate window refunds for expired/cancelled
-// intents") with the spend intent charged for each unmatched intent.
-func (k Keeper) RefundWindowSpend(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress, amount sdk.Coins) error {
+// DecommitIntent releases an intent's optimistic commitment from the grantee's
+// LIFETIME outstanding_commitment when the intent terminates (SPEC §6.4 EndBlock
+// step 7; D-059). x/veil calls it for EXPIRED/CANCELLED/CONCLUDED intents with
+// the exact charged_spend it persisted, so the release is exact and the global
+// invariant Σ outstanding_commitment == Σ charged_spend(live intents) is
+// preserved. Because outstanding_commitment is a lifetime balance (never reset),
+// the .Min clamp is a defensive belt that never bites in correct operation: a
+// live intent's charge is always present to release (it was the
+// clamp-and-lose under the old per-period window_spent that this fix removes).
+// A replaced/absent mandate releases nothing.
+func (k Keeper) DecommitIntent(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress, amount sdk.Coins) error {
 	m, found, err := k.ActiveMandateByGrantee(ctx, chamberID, grantee)
 	if err != nil {
 		return err
@@ -70,11 +90,11 @@ func (k Keeper) RefundWindowSpend(ctx sdk.Context, chamberID uint32, grantee sdk
 	if !found {
 		return nil
 	}
-	refund := m.WindowSpent.Min(amount)
-	if refund.IsZero() {
+	release := m.OutstandingCommitment.Min(amount)
+	if release.IsZero() {
 		return nil
 	}
-	m.WindowSpent = m.WindowSpent.Sub(refund...)
+	m.OutstandingCommitment = m.OutstandingCommitment.Sub(release...)
 	return k.SetMandate(ctx, m)
 }
 

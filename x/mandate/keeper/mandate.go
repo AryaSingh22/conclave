@@ -257,10 +257,17 @@ func (k Keeper) IssueMandate(ctx sdk.Context, controller sdk.AccAddress, terms t
 	}
 
 	// REPLACE semantics: delete the superseded record; the new mandate
-	// keeps the grantee indexed, so D-017 retention holds
+	// keeps the grantee indexed, so D-017 retention holds. D-059: the new
+	// mandate INHERITS the superseded outstanding_commitment — the grantee's
+	// in-flight intents are still live and their funds still committed, so the
+	// lifetime balance carries across the reissue (only the per-period
+	// window_spent starts fresh). Σ outstanding_commitment == Σ charged_spend
+	// (live intents) therefore holds across the REPLACE.
+	carriedCommitment := sdk.NewCoins()
 	if existing, found, err := k.ActiveMandateByGrantee(ctx, terms.ChamberId, grantee); err != nil {
 		return "", err
 	} else if found {
+		carriedCommitment = existing.OutstandingCommitment
 		if err := k.deleteMandate(ctx, existing); err != nil {
 			return "", err
 		}
@@ -274,6 +281,9 @@ func (k Keeper) IssueMandate(ctx sdk.Context, controller sdk.AccAddress, terms t
 	id := deriveID(domainMandate, terms.ChamberId, payload, seq)
 
 	m := mandateFromTerms(id, terms, uint64(ctx.BlockHeight()))
+	if !carriedCommitment.IsZero() {
+		m.OutstandingCommitment = carriedCommitment
+	}
 	if err := k.SetMandate(ctx, m); err != nil {
 		return "", err
 	}
@@ -362,6 +372,14 @@ func (k Keeper) AmendMandate(ctx sdk.Context, controller sdk.AccAddress, mandate
 	}
 
 	amended := mandateFromTerms(m.Id, terms, uint64(ctx.BlockHeight()))
+	// D-059: an amendment replaces every term wholesale and resets the
+	// per-period window_spent (settled budget — fine), but the grantee's
+	// still-live intents (grantee/sigil immutable under amendment) remain
+	// committed, so their LIFETIME outstanding_commitment carries across the
+	// amendment rather than zeroing. This keeps Σ outstanding_commitment ==
+	// Σ charged_spend(live intents) true across the controller-initiated reset
+	// and prevents the over-commitment the old single-counter reset allowed.
+	amended.OutstandingCommitment = m.OutstandingCommitment
 	if err := k.SetMandate(ctx, amended); err != nil {
 		return err
 	}
@@ -403,12 +421,16 @@ func mandateFromTerms(id string, terms types.MandateTerms, height uint64) types.
 		WindowBlocks:       terms.WindowBlocks,
 		WindowSpent:        sdk.NewCoins(),
 		WindowStartHeight:  height,
-		CounterpartyClass:  terms.CounterpartyClass,
-		FeeSponsor:         terms.FeeSponsor,
-		FeeDenoms:          terms.FeeDenoms,
-		ExpiryHeight:       terms.ExpiryHeight,
-		Revoked:            false,
-		ChamberId:          terms.ChamberId,
+		// fresh mandate carries no outstanding commitments; amend/reissue
+		// override this to carry the grantee's still-live intent commitments
+		// (D-059), since those funds stay committed across the term change.
+		OutstandingCommitment: sdk.NewCoins(),
+		CounterpartyClass:     terms.CounterpartyClass,
+		FeeSponsor:            terms.FeeSponsor,
+		FeeDenoms:             terms.FeeDenoms,
+		ExpiryHeight:          terms.ExpiryHeight,
+		Revoked:               false,
+		ChamberId:             terms.ChamberId,
 	}
 }
 

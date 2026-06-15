@@ -18,6 +18,9 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	"github.com/AryaSingh22/conclave/simutil"
+	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
+	sigilkeeper "github.com/AryaSingh22/conclave/x/sigil/keeper"
 	"github.com/AryaSingh22/conclave/x/veil/keeper"
 	"github.com/AryaSingh22/conclave/x/veil/types"
 )
@@ -26,23 +29,31 @@ import (
 const ConsensusVersion = 1
 
 var (
-	_ module.AppModuleBasic     = AppModule{}
-	_ module.HasGenesis         = AppModule{}
-	_ module.HasServices        = AppModule{}
-	_ appmodule.AppModule       = AppModule{}
-	_ appmodule.HasBeginBlocker = AppModule{}
-	_ appmodule.HasEndBlocker   = AppModule{}
+	_ module.AppModuleBasic      = AppModule{}
+	_ module.HasGenesis          = AppModule{}
+	_ module.HasServices         = AppModule{}
+	_ module.AppModuleSimulation = AppModule{}
+	_ appmodule.AppModule        = AppModule{}
+	_ appmodule.HasBeginBlocker  = AppModule{}
+	_ appmodule.HasEndBlocker    = AppModule{}
 )
 
 // AppModule implements the x/veil module (SPEC §6.3).
 type AppModule struct {
 	cdc    codec.Codec
 	keeper keeper.Keeper
+
+	// simulation-only keepers (task 0.11). nil outside simulation wiring.
+	accountKeeper simutil.AccountKeeper
+	bankKeeper    simutil.BankKeeper
+	sigilKeeper   sigilkeeper.Keeper
+	mandateKeeper mandatekeeper.Keeper
 }
 
-// NewAppModule creates the x/veil AppModule.
-func NewAppModule(cdc codec.Codec, k keeper.Keeper) AppModule {
-	return AppModule{cdc: cdc, keeper: k}
+// NewAppModule creates the x/veil AppModule. ak/bk/sk/mk are wired for the SDK
+// simulation (task 0.11) and are otherwise unused at runtime.
+func NewAppModule(cdc codec.Codec, k keeper.Keeper, ak simutil.AccountKeeper, bk simutil.BankKeeper, sk sigilkeeper.Keeper, mk mandatekeeper.Keeper) AppModule {
+	return AppModule{cdc: cdc, keeper: k, accountKeeper: ak, bankKeeper: bk, sigilKeeper: sk, mandateKeeper: mk}
 }
 
 // IsOnePerModuleType implements appmodule.AppModule.
