@@ -22,6 +22,13 @@ build:
 test:
 	go test -count=1 ./...
 
+# sim-determinism is the F-1 / D-063 determinism gate: it runs the determinism
+# sim over the committed seed vector in two independent processes and fails on
+# any SKIP, abort, or app-hash mismatch (within or across runs). It is NOT part
+# of `make test` because the simulation is -Enabled-gated (D-057).
+sim-determinism:
+	bash scripts/sim_determinism.sh
+
 lint:
 	golangci-lint run
 
@@ -38,4 +45,4 @@ proto-gen:
 proto-lint:
 	cd proto && buf lint
 
-.PHONY: all install build test lint lint-fix localnet proto-gen proto-lint
+.PHONY: all install build test sim-determinism lint lint-fix localnet proto-gen proto-lint

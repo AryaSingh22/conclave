@@ -1,0 +1,4 @@
+{
+  "initially_bonded_validators": 30,
+  "signed_blocks_window": 1000
+}

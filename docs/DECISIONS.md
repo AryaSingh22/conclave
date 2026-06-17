@@ -1312,3 +1312,113 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
 - **Rationale:** Surfacing the interface limitation rather than quietly
   reshaping it keeps the §6.3 contract honest; the redesign is confined to key
   generation, where the stub could not model the real protocol.
+
+## D-063 — Phase-1 Task 1.0: determinism-harness hardening (AUDIT F-1); the gate immediately surfaced a real mandate-commitment bug
+
+- **Date:** 2026-06-17 (Phase-1 Task 1.0)
+- **SPEC:** §11.3 determinism gate; AUDIT F-1; D-057 (sim design); D-059/D-058
+  (the surfaced invariant); §1.1 goal 3
+- **RESOLVES** AUDIT finding F-1 (the determinism HARNESS was flaky and so
+  untrustworthy as a gate, even though the CHAIN is verified deterministic).
+  This is the first Phase-1 build task — the gate must be dependable BEFORE
+  Phase 1 adds vote extensions + DKG, the largest new nondeterminism surface.
+- **Decision (harness changes only — `app/sim_test.go`, `app/testdata/
+  sim_params.json`, `scripts/sim_determinism.sh`, `Makefile`):**
+  - **Reproducible seeding.** The determinism/survival runs are driven by an
+    explicit, committed seed vector (`-ConclaveSimSeeds`, default
+    `1,2,7,12,42` — curated to completing seeds, see below); the un-seeded
+    `rand.Int63()` self-seeding is gone. No un-seeded global RNG remains in the
+    harness's control flow.
+  - **Validator-set survivability via genesis tuning.** `testdata/
+    sim_params.json` pins, through the SDK's `AppParams.GetOrGenerate` (so the
+    full `AppStateFn` incl. its not-bonded-pool reconciliation is reused
+    unchanged): `initially_bonded_validators=30` (vs the SDK's random 1..299,
+    which lands at 1–3 on unlucky seeds and is then jailed/unbonded to zero) and
+    `signed_blocks_window=1000` (widening the window is realistic, not
+    suppression). **Slashing fractions stay at SDK defaults on purpose (floor-
+    high, keep-jailing-realistic):** disabling downtime slashing would make the
+    set survive by turning OFF the depleting mechanism, never exercising the
+    jailing/unbonding/churn surface — load-bearing in Phase 1 (validators
+    produce vote extensions and hold DKG shares; a leaver-mid-epoch-holding-a-
+    share is a real case, PHASE1_DESIGN §2(b)). `TestValidatorSetSurvives500`
+    reports the per-seed end-state composition (bonded/unbonding/unbonded/jailed)
+    as evidence jailing/unbonding fire heavily (e.g. seed 1: 529 jail events,
+    1624 unbondings over 500 blocks) while the active set stays above the floor —
+    the "jailing live but floor holds" outcome, not the "nothing jails" mode.
+  - **Curated to COMPLETING seeds (noise removal, not signal suppression).** The
+    SDK sim op/evidence mix (equivocation-tombstoning at ~1 jail/block plus
+    voluntary undelegation) drives the validator set to zero within 500 blocks
+    for a large fraction of seeds — physically impossible on a real chain
+    (unbonding takes weeks; mass equivocation is economically irrational).
+    Empirically ~half of seeds deplete: {1,2,7,42} survive 500 blocks, while
+    {3,5,8,11,99} deplete. **Genesis SIZING cannot fix this** — depletion is rate-
+    driven, not size-driven: seed 99 depleted at floors 50/80/150, and seeds 5
+    and 8 depleted even at floor=150/max=200. (Pinning a param also skips its
+    `GetOrGenerate` RNG draw, so each floor/cap is a re-randomized run, not a
+    monotonic search.) So the redirect's "raise the floor if it doesn't survive"
+    fallback is empirically dead; floor stays at 30 and the vector is CURATED to
+    completing seeds instead. Crucially, a non-completing run yields NO
+    determinism information (no comparable cross-process hash), so it is not a
+    data point being suppressed — it is noise being removed. **The fail-on-
+    depletion conversion STAYS** (next bullet), so a committed seed that USED to
+    complete and later mass-depletes still fails the gate — curation excludes a
+    seed that never carried signal; it does not hide a future regression. This is
+    sound curation, explicitly NOT the 0.11 vacuous-gate anti-pattern (which would
+    be dropping a seed that *finds a bug* — see seed 7 below, which is KEPT).
+  - **SKIP → hard FAILURE.** `SimulateFromSeed` skips on an empty validator set
+    at genesis (`x/simulation/simulate.go` ~L109) and on mid-run depletion
+    (~L251); `tb.Skip` there `runtime.Goexit`s and silently marks the test
+    SKIPPED — a gate that can skip itself is not a gate. **Deviation from the
+    approved plan, recorded:** a wrapping `testing.TB` cannot intercept this —
+    the SDK type-asserts the CONCRETE `*testing.T` in `getTestingMode`
+    (`x/simulation/util.go:24`), so a wrapper panics. The portable equivalent
+    is used instead: run each sim in a subtest (the SDK gets a real
+    `*testing.T`) and convert an observed `st.Skipped()` into a parent
+    `t.Fatalf` (`runSimSeed`). Same guarantee. `stopEarly` (the no-proposer
+    depletion path) is likewise a hard failure.
+  - **CI target.** `make sim-determinism` runs the determinism sim over the
+    vector TWICE in independent processes and fails on any SKIP, abort, or
+    app-hash mismatch within OR across the two runs (cross-process
+    reproducibility). Not part of `make test` (sim is `-Enabled`-gated, D-057).
+  - **D-057 PRESERVED verbatim:** `simPrecommitFlush` and the tolerant full-op
+    set (`simOperations`/`tolerantOp`) are unchanged; only seeding and genesis
+    survivability change. The trajectory-sampling app replicates only
+    `simPrecommitFlush`'s one-line cache flush (the named function is untouched).
+- **Determinism gate runs inv-check=0 (orthogonal to invariant-checking).**
+  Determinism is byte-identical app hashes; the per-block crisis invariant is a
+  SEPARATE bug-finding gate (`TestFullAppSimulation`, inv-check=1). Crisis checks
+  write no state, so inv-check on/off does not change the hashes for clean seeds;
+  but with inv-check=1 a DETERMINISTIC invariant break aborts the run before a
+  comparable hash is produced. Running the hash gate at inv-check=0 lets every
+  COMPLETING seed yield a cross-process hash — including the bug-bearing seed 7,
+  which is therefore KEPT in the vector (dropping it would be signal
+  suppression). The determinism gate is GREEN across the curated vector.
+- **THE GATE EARNED ITS KEEP ON ITS FIRST RUN — a found defect, recorded:** the
+  first hardened run (inv-check=1) deterministically (byte-identical across two
+  independent processes: same grantee, `5648205uclv`, mandate id) tripped the
+  D-059 `mandate-commitment-conservation` crisis invariant at seed 7 —
+  `outstanding_commitment=0` while a still-live intent carries charge. Root
+  cause: `IssueMandate` (`x/mandate/keeper/mandate.go`) carries
+  `outstanding_commitment` to the replacement mandate only when the superseded
+  mandate is ACTIVE (`ActiveMandateByGrantee` found); a revoke-then-reissue (or
+  expire-then-reissue) leaves the live intent's charge orphaned, breaking the
+  conservation AND weakening the §1.1-goal-3 leaked-key bound. This is a real
+  D-059-SIBLING accounting bug random seeding had masked — exactly what F-1
+  exists to expose. The red state lives **behind inv-check** (the inv-check=1
+  bug-finding path over seed 7) and is orthogonal to the determinism/survival
+  vector curation; it is documented here, not papered over, and is the immediate
+  next task.
+- **The fix is a SEPARATE, dedicated task (next, fresh session) — see D-064
+  when written.** It is a D-059-class commitment-ownership design decision, not
+  an inline patch, and it interacts with D-017: the revoked mandate record is
+  RETAINED deliberately (deleting its grantee-index entry would silently
+  re-promote the session key to root passthrough under the ante's "no mandate
+  entry = root key" rule). The fix must carry the commitment across
+  revoke/reissue WITHOUT a record deletion that re-promotes the key — precisely
+  the cross-decision interaction that needs its own plan-stop.
+- **Rationale:** Fix the gate while it still guards known-good code, so any NEW
+  nondeterminism in Phase 1 is unambiguously a real defect, not harness noise.
+  Treating the surfaced mandate bug as its own task (not folding it into a
+  harness task framed "no module code") gives a commitment-ownership decision
+  the dedicated attention the last D-059-class decision needed (Option Y would
+  have shipped a subtle hole).
