@@ -30,6 +30,25 @@ type Keeper struct {
 
 	// authority is the address allowed to update params (gov module account).
 	authority string
+
+	// liveExposureFn, when wired at app construction, returns the grantee's
+	// LIVE intent exposure (Σ charged_spend over non-terminated intents).
+	// IssueMandate folds it into a FRESH mandate's outstanding_commitment so a
+	// key transitioning root->mandated is bounded from the instant of issuance
+	// (D-064; D-059 Option X extended to the issuance boundary). It is injected
+	// via SetLiveExposureFn rather than imported, so the mandate keeper stays
+	// free of a compile-time x/veil edge (D-058 keeps cross-module accounting at
+	// app level) and the veil↔mandate cycle is broken the same way SetVeilKeeper
+	// breaks veil↔session. nil => no adoption (mandate unit tests without veil).
+	liveExposureFn func(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress) (sdk.Coins, error)
+}
+
+// SetLiveExposureFn wires the x/veil live-exposure scan used by IssueMandate to
+// adopt a root->mandated key's in-flight commitments at issuance (D-064). The
+// app calls this once both keepers exist, BEFORE the keeper value is captured by
+// the module/ante wiring, so every copy observes it (mirrors SetVeilKeeper).
+func (k *Keeper) SetLiveExposureFn(fn func(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress) (sdk.Coins, error)) {
+	k.liveExposureFn = fn
 }
 
 // NewKeeper creates a new x/mandate Keeper.

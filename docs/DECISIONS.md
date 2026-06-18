@@ -1422,3 +1422,120 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   harness task framed "no module code") gives a commitment-ownership decision
   the dedicated attention the last D-059-class decision needed (Option Y would
   have shipped a subtle hole).
+
+## D-064 — FOUND-AND-FIXED (Task 1.0b): the gate's mandate-commitment break is the root→mandated transition, NOT revoke/reissue; FRESH issuance ADOPTS live root-era exposure
+
+- **Date:** 2026-06-18 (Phase-1 Task 1.0b — the dedicated fix forward-referenced by D-063)
+- **SPEC:** §6.2 steps 4–5, §6.3, §1.1 goal 3, §6.4 step 7
+- **EXTENDS** D-059 (Option X: the lifetime `outstanding_commitment` vs per-period
+  `window_spent` split) to the **mandate-issuance boundary**, and **LOUDLY
+  SUPERSEDES D-063's stated root-cause hypothesis** (recorded as a correction, in
+  the D-062 style — not silently reshaped).
+- **D-063's hypothesis was a GUESS; the instrumented trace found the truth.**
+  D-063 conjectured the seed-7 break was `IssueMandate` carrying
+  `outstanding_commitment` "only when the superseded mandate is ACTIVE," i.e. a
+  revoke/expire-then-reissue orphaning the carry. **That path is already correct:**
+  `ActiveMandateByGrantee` returns `found=true` for revoked AND expired mandates
+  (the 0x02 index is retained, D-017), so the carry fires on every reissue —
+  verified statically and by the sim (55 revokes / 95 issues / 127 amends, none
+  broke on that path). Targeted instrumentation of grantee
+  `conc1twg…`/mandate `2c0b45…` (the gate working as intended) showed the REAL
+  sequence: the grantee **submitted intents while UNMANDATED** (h=3/94/100 — a
+  sigil **controller**, so it resolves through the sigil reverse index and may
+  submit; the ante takes the root/controller passthrough, so **no `ChargeWindow`
+  ever ran** and no commitment was recorded), its sigil binding was then removed
+  (**controller rotation**, h≈112 — `SigilIDByAddress` now returns "no sigil"),
+  making it **FRESH-mandate-eligible** (the D-017(c) conflict guard is skipped),
+  and a FRESH mandate was issued (`oc=0`). The commitment-conservation invariant
+  then **adopted** the grantee's still-live root-era intents (`charged_spend`
+  persisted by veil for ALL intents, D-041) and found `oc=0 ≠ Σ charged_spend(live)
+  = 5648205uclv`. So: **root-key-submit → later-FRESH-mandate**, not revoke/reissue.
+- **The design question (the real fork, not "which field holds the truth"):** what
+  happens to a live root-era intent's real exposure (`give+bond`) at the moment its
+  key becomes mandated? Three options were analysed:
+  - **(1) Zero it / leave uncounted** (faithful-`charged_spend`): conservation
+    holds, but the key is **under-bounded across the transition** — it can commit
+    fresh mandated intents to the FULL ceiling while the live root-era intent is
+    still committing real funds. This is exactly the **D-059 Option-Y
+    over-commitment hole through a different door**: §1.1-goal-3 must hold from the
+    instant of issuance, and conservation-by-zeroing satisfies the INVARIANT but
+    not the bounded-key GUARANTEE. Not defensible as "bounded elsewhere" — D-025
+    (slashable bond burn) and D-059 (`give+bond` is the exposure `oc` exists to
+    bound) already define this as exactly what the ceiling must cover. REJECTED.
+  - **(2) ADOPT it into the new mandate at FRESH issuance** (CHOSEN): conservation
+    holds AND the key is bounded from issuance. Cost: a mandate→veil read.
+  - **(3) FORBID/defer issuance while live root-era intents exist:** same
+    enumeration cost as (2) but more restrictive and safety-backwards (you most
+    want to clamp a possibly-compromised key immediately, not wait ≤1 TTL for its
+    root intents to drain), and it leaves those intents unbounded-as-root. REJECTED.
+- **Commitment-OWNERSHIP model (the keystone):** `outstanding_commitment` is owned
+  by the **mandate-lineage that charged the intent**. A root/controller intent was
+  charged to **no mandate**; its `charged_spend` is persisted (D-041) but owned by
+  nothing until — and unless — its key becomes mandated, at which point the FRESH
+  mandate **adopts** the live exposure. `charged_spend` itself is left UNCHANGED
+  (`give+bond`), which is the load-bearing detail: adoption sets `oc += give+bond`
+  and `DecommitIntent` at terminate releases `oc -= give+bond` — **the same
+  figure**, so adoption and release are exact inverses. (Zeroing `charged_spend`
+  AND adopting would strand `oc` positive forever, breaking conservation the other
+  way — which is why (1)-plus-adoption is incoherent and the chosen fix touches
+  neither `charged_spend` nor `DecommitIntent`.)
+- **DecommitIntent resolution trace (the easy-to-miss half):** the adopted intent
+  keeps `charged_spend=give+bond`; at terminate, `settleRefund → DecommitIntent
+  (owner, give+bond)` resolves `ActiveMandateByGrantee(owner)` to the SAME mandate
+  that adopted it (or its carry-successor), releases `min(oc, give+bond)=give+bond`
+  exactly → `oc -= give+bond`. The refund lands where the charge lives. Proven
+  end-to-end (adopt → over-ceiling reject → terminate → `oc` drops by exactly the
+  adopted figure → now-fitting charge succeeds) by
+  `TestRootToMandatedAdoptionAndSelfCorrection`.
+- **The fix (Construction B — adoption CONFINED to the FRESH branch):**
+  `IssueMandate` seeds the new mandate's `outstanding_commitment`:
+  REPLACE/reissue **inherits** the superseded balance (D-059, byte-identical to
+  before); a **FRESH** issuance (`found==false`) **adopts** `Σ charged_spend` over
+  the grantee's live intents. Orphans cannot exist on the REPLACE branch (a
+  mandate-bound key cannot also submit unmandated root intents, D-017(c)), so
+  every live intent since the FIRST mandate is already in the carried balance —
+  the adoption is correct *only* on FRESH and is guarded there in code
+  (`TestAdoptionConfinedToFreshBranch`: a refactor moving the scan out of
+  `found==false` double-counts and fails the test, the 0.6 registration-order
+  discipline).
+- **The veil↔mandate cycle is broken by dependency inversion, NOT a new import.**
+  `x/veil` already depends on `x/mandate` (`DecommitIntent`); a direct
+  `x/mandate → x/veil` import would cycle and would re-introduce exactly the
+  cross-module edge D-058 kept at app level. Instead the mandate keeper holds an
+  injected `liveExposureFn`, wired in `app.go` (`MandateKeeper.SetLiveExposureFn(
+  VeilKeeper.SumLiveChargedSpendByOwner)`) immediately after the veil keeper
+  exists and BEFORE the keeper value is captured by module/ante wiring — the same
+  post-construction pattern as `SetVeilKeeper` for veil↔session. `nil` ⇒ no
+  adoption (mandate unit tests without veil). `SumLiveChargedSpendByOwner` defines
+  "live" IDENTICALLY to the conservation invariant (every state except
+  EXPIRED/CANCELLED/CONCLUDED) and is deterministic + cold-path (issuance only).
+- **Both invariants hold simultaneously:** (1) **conservation** — `Σ oc ==
+  Σ charged_spend(live)` by construction across the root→mandated transition;
+  (2) **no re-promotion (D-017)** — the fix writes only the `oc` VALUE on the new
+  record; it deletes no record and rewrites no index, so D-017's "index entry
+  never deleted ⇒ key never silently regains root passthrough" property is
+  preserved verbatim.
+- **Severity (honest):** low practical reachability — it needs the
+  controller-binding-loss path (a once-submitting key losing its sigil binding,
+  then being mandated while holding live intents), which the sim reached unforced
+  at seed 7 but which is a narrow key-lifecycle window (exposure self-limited to
+  ≤1 intent TTL). Fixed completely anyway, because it is a genuine §1.1-goal-3
+  weakening by the project's own accounting — the class D-059 took the harder
+  Option X to avoid.
+- **Tests (load-bearing, red-first verified):**
+  `TestAdoptLiveExposureOnFreshIssuance` (FRESH adopts; bounded from issuance —
+  RED without adoption: `oc=∅`, over-ceiling charge wrongly succeeds),
+  `TestAdoptionConfinedToFreshBranch` (scan runs once on FRESH, never on
+  REPLACE/amend), `TestRootToMandatedAdoptionAndSelfCorrection` (the seed-7 shape
+  through real keepers incl. rotation + full adopt/release self-correction — RED
+  without the fix), `TestSumLiveChargedSpendByOwner`. The determinism gate at
+  inv-check=1 passes seed 7 and the full curated vector after the fix; the D-059
+  suite stays green (REPLACE/carry untouched).
+- **Rationale:** the gate (D-063) earned its keep again — it surfaced a real
+  D-059-sibling hole that random seeding had masked, and the dedicated plan-stop
+  caught that the smallest-diff fix (1) reopened the over-commitment gap. Adopting
+  at issuance keeps the bound attached from the instant a key becomes mandated,
+  which is the §1.1-goal-3 contract.
+  CONCLAVE-TODO(phase-1): the Veil `spend_commitment` envelope (§6.3, §8(e)) binds
+  the encrypted-intent commitment to the same `outstanding_commitment`; the
+  root→mandated adoption applies identically to those commitments.

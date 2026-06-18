@@ -308,6 +308,12 @@ func NewConclaveApp(
 	// wire the veil↔session cycle now that both keepers exist (Guard 1): must
 	// run before any block, which app construction guarantees.
 	app.SessionKeeper.SetVeilKeeper(app.VeilKeeper)
+	// wire the veil↔mandate cycle the same way (D-064): IssueMandate adopts a
+	// root->mandated key's live intent exposure at FRESH issuance via this x/veil
+	// scan, so the §1.1-goal-3 bound attaches from issuance. Set BEFORE the
+	// keeper value is captured by RegisterModules/setAnteHandler below, so the
+	// mandate msg-server and ante copies both observe it.
+	app.MandateKeeper.SetLiveExposureFn(app.VeilKeeper.SumLiveChargedSpendByOwner)
 	// x/receipt is the SPEC §6.6 query/proof surface: it READS the receipts
 	// x/session writes (the SessionKeeper, via the SessionReceiptReader
 	// boundary; D-045/D-052) and builds ICS-23 proofs against the committed

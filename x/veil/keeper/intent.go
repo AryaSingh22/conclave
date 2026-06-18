@@ -108,6 +108,35 @@ func (k Keeper) intentIDsInState(ctx sdk.Context, state types.IntentState, maxTT
 	return ids, nil
 }
 
+// SumLiveChargedSpendByOwner returns the total charged_spend over the owner's
+// LIVE (non-terminated) intents — the live exposure a FRESH mandate adopts at
+// issuance so a key transitioning root->mandated is bounded from the instant of
+// issuance, not one intent-TTL later (D-064; extends D-059 Option X to the
+// issuance boundary). "Live" is defined IDENTICALLY to the commitment-
+// conservation invariant (app/invariants.go): every state EXCEPT the three
+// terminal ones (EXPIRED/CANCELLED/CONCLUDED), so the adopted outstanding_
+// commitment equals exactly what that invariant will reconcile against.
+// Owner-keyed (not chamber-filtered) to mirror the invariant's own sum; Phase 0
+// is single-chamber (D-001). The walk is deterministic (IterateIntentRecords is
+// key-ordered, §11.6); it is a cold path (issuance only).
+func (k Keeper) SumLiveChargedSpendByOwner(ctx sdk.Context, _ uint32, owner sdk.AccAddress) (sdk.Coins, error) {
+	ownerStr := owner.String()
+	total := sdk.NewCoins()
+	err := k.IterateIntentRecords(ctx, func(rec types.IntentRecord) bool {
+		switch rec.State {
+		case types.INTENT_STATE_EXPIRED,
+			types.INTENT_STATE_CANCELLED,
+			types.INTENT_STATE_CONCLUDED:
+			return false
+		}
+		if rec.Owner == ownerStr {
+			total = total.Add(rec.ChargedSpend...)
+		}
+		return false
+	})
+	return total, err
+}
+
 // IterateIntentRecords walks every stored intent record in key order
 // (genesis export, queries, invariants).
 func (k Keeper) IterateIntentRecords(ctx sdk.Context, fn func(rec types.IntentRecord) bool) error {

@@ -256,13 +256,29 @@ func (k Keeper) IssueMandate(ctx sdk.Context, controller sdk.AccAddress, terms t
 		}
 	}
 
-	// REPLACE semantics: delete the superseded record; the new mandate
-	// keeps the grantee indexed, so D-017 retention holds. D-059: the new
-	// mandate INHERITS the superseded outstanding_commitment — the grantee's
-	// in-flight intents are still live and their funds still committed, so the
-	// lifetime balance carries across the reissue (only the per-period
-	// window_spent starts fresh). Σ outstanding_commitment == Σ charged_spend
-	// (live intents) therefore holds across the REPLACE.
+	// The new mandate's outstanding_commitment is seeded so that the global
+	// invariant Σ outstanding_commitment == Σ charged_spend(live intents) holds
+	// the instant the mandate exists — and so the §1.1-goal-3 bound attaches
+	// from issuance, never one intent-TTL later:
+	//
+	//   - REPLACE (the grantee already holds a mandate): delete the superseded
+	//     record and INHERIT its outstanding_commitment (D-059). The grantee's
+	//     in-flight intents are still live and committed, so the lifetime balance
+	//     carries across the reissue (only the per-period window_spent starts
+	//     fresh). D-017 retention holds — the 0x02 index is overwritten, never
+	//     deleted. Orphans cannot exist on this branch: a mandate-bound key
+	//     cannot also submit unmandated root intents (D-017(c)), so every live
+	//     intent since the FIRST mandate was already charged into the carried
+	//     balance.
+	//   - FRESH (no prior mandate): the grantee may already hold LIVE intents it
+	//     submitted while unmandated (root/controller ante passthrough — no
+	//     charge was ever recorded). ADOPT that live exposure (Σ charged_spend)
+	//     into the new mandate (D-064; extends D-059 Option X to the issuance
+	//     boundary). charged_spend is UNCHANGED, so DecommitIntent later releases
+	//     the SAME figure from this mandate at terminate — adoption and release
+	//     are exact inverses. The adoption is CONFINED to this branch on purpose
+	//     (TestAdoptionConfinedToFreshBranch guards it): moving it would re-scan
+	//     and over-write on every REPLACE/amend, double-counting the carry.
 	carriedCommitment := sdk.NewCoins()
 	if existing, found, err := k.ActiveMandateByGrantee(ctx, terms.ChamberId, grantee); err != nil {
 		return "", err
@@ -271,6 +287,12 @@ func (k Keeper) IssueMandate(ctx sdk.Context, controller sdk.AccAddress, terms t
 		if err := k.deleteMandate(ctx, existing); err != nil {
 			return "", err
 		}
+	} else if k.liveExposureFn != nil {
+		adopted, err := k.liveExposureFn(ctx, terms.ChamberId, grantee)
+		if err != nil {
+			return "", err
+		}
+		carriedCommitment = adopted
 	}
 
 	seq, err := k.nextIDSequence(ctx)
@@ -421,9 +443,10 @@ func mandateFromTerms(id string, terms types.MandateTerms, height uint64) types.
 		WindowBlocks:       terms.WindowBlocks,
 		WindowSpent:        sdk.NewCoins(),
 		WindowStartHeight:  height,
-		// fresh mandate carries no outstanding commitments; amend/reissue
-		// override this to carry the grantee's still-live intent commitments
-		// (D-059), since those funds stay committed across the term change.
+		// zero by default; the caller overrides it to carry the grantee's
+		// still-live intent commitments — amend/REPLACE inherit the prior
+		// balance (D-059); a FRESH issuance ADOPTS any live root-era exposure
+		// (D-064) — since those funds stay committed across the term change.
 		OutstandingCommitment: sdk.NewCoins(),
 		CounterpartyClass:     terms.CounterpartyClass,
 		FeeSponsor:            terms.FeeSponsor,
