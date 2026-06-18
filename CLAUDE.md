@@ -94,3 +94,28 @@ green and the task is reviewed + committed.
 task): a fresh-context auditor re-runs every acceptance script, re-derives the
 conservation/accounting invariants from scratch (incl. the D-059 lifetime/
 per-period split), sweeps the naming canon, and reads adversarially.
+
+**Phase-0 audit COMPLETE** (2026-06-15, SOUND WITH FINDINGS; F-1 → Task 1.0).
+
+## Phase-1 task ledger (docs/PHASE1_DESIGN.md §5)
+
+One task per session, in order. Mark complete only after `make lint test` is
+green and the task is reviewed + committed.
+
+- [x] 1.0 Determinism harness hardening (F-1) — `a496e7e`, D-063; the hardened
+      gate immediately surfaced a real mandate-commitment bug at seed 7
+- [x] 1.0b Mandate-commitment-conservation fix — `e0f74ee`, D-064; the seed-7
+      break was a root-key-submit → FRESH-mandate adoption (NOT D-063's
+      revoke/reissue guess); FRESH issuance adopts live root-era exposure so the
+      §1.1-goal-3 bound attaches from issuance. The gate (1.0 hardening + 1.0b
+      first-catch) is now trustworthy end-to-end.
+- [ ] 1.1 `spend_commitment` (§4), stub mode — **NEXT.** Envelope field; ante
+      binds `spend_commitment+bond` → `outstanding_commitment` (D-059); Reveal
+      slashes a commitment violation → INVALID; `Encrypt` still identity
+- [ ] 1.2 D8 ratification (docs-only; D-060 already recorded)
+- [ ] 1.3 BLS library wrap behind `ThresholdScheme` + DKG interface revision (offline)
+- [ ] 1.4 Adversarial test harness (offline: t−1 cannot decrypt, t can; corrupt/withheld excluded)
+- [ ] 1.5 DKG epoch lifecycle — transport design sub-review BEFORE code (STOP #1)
+- [ ] 1.6 Vote-extension share transport + Reveal wiring
+- [ ] 1.7 Multi-node adversarial localnet (4 validators) — Phase-1 exit
+- [ ] 1.8 External audit engagement (gates mainnet; not a code task)
