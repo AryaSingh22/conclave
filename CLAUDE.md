@@ -116,7 +116,10 @@ green and the task is reviewed + committed.
       slashes a commitment violation (actual give > commitment in any denom) →
       INVALID (50%); empty=zero, Reveal-slash is the sole enforcement (no
       ErrMissingSpendCommitment); `Encrypt` still identity. Gate byte-identical.
-- [ ] 1.2 D8 ratification (docs-only; D-060 already recorded)
+- [x] 1.2 D8 ratification (docs-only; D-060) — SPEC §14 D8 → RESOLVED
+      (stay-on-v0.50 through Phase 1); fork-site CONCLAVE-TODO re-pointed
+      phase-1 → phase-2 (retirement deferred to the wasmd-2.2 boundary). D-060
+      already complete from planning; no source/proto/logic touched.
 - [ ] 1.3 BLS library wrap behind `ThresholdScheme` + DKG interface revision (offline)
 - [ ] 1.4 Adversarial test harness (offline: t−1 cannot decrypt, t can; corrupt/withheld excluded)
 - [ ] 1.5 DKG epoch lifecycle — transport design sub-review BEFORE code (STOP #1)
