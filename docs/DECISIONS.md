@@ -1539,3 +1539,90 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   CONCLAVE-TODO(phase-1): the Veil `spend_commitment` envelope (§6.3, §8(e)) binds
   the encrypted-intent commitment to the same `outstanding_commitment`; the
   root→mandated adoption applies identically to those commitments.
+
+## D-065 — `spend_commitment` (Task 1.1): a UNIFORM ante valuation (never reads give legs), empty=zero, Reveal-slash as the SOLE enforcement; commitment-derived bond
+
+- **Date:** 2026-06-19 (Phase-1 Task 1.1 — the load-bearing pre-crypto chokepoint task)
+- **SPEC:** §6.3 "Spend commitment", §8(e), §6.2 steps 4–5, §1.1 goal 3, §11.6
+- **RESOLVES** the SPEC §6.3 / §8(e) `spend_commitment` requirement and the
+  CONCLAVE-TODO(phase-1) markers in D-021/D-025/D-040/D-041/D-059/D-064 and the
+  ante's `intentSpend`. **SIMPLIFIES / SUPERSEDES** the encrypted-classification
+  and reject-if-absent framing in the PHASE1_DESIGN §4 draft (recorded loudly as a
+  correction, D-062/D-064 style — not silently reshaped).
+- **The problem (why this lands before encryption, Task 1.6).** Once `ciphertext`
+  is opaque, the `MandateDecorator` (§6.2, the agent-safety chokepoint) cannot read
+  give legs to value spend intent. Without a plaintext commitment a stolen key
+  could submit unbounded-value encrypted intents that pass the ceiling, breaking
+  §1.1 goal 3. The fix is a plaintext `spend_commitment` on the always-plaintext
+  `IntentEnvelope` (repeated Coin, `Coins`), built and proven in stub mode
+  (`Encrypt` stays identity) so the chokepoint logic is exercised against the exact
+  path that ships, while the plaintext payload still lets the Reveal cross-check.
+- **Three pieces (built):**
+  1. **Envelope field** `spend_commitment = 5`. `ValidateEnvelope` checks it
+     **structurally only** (`Coins.Validate()`: sorted, no-dup, non-negative);
+     **empty is a valid zero declaration** (extends D-042).
+  2. **Uniform ante binding.** `MandateDecorator` values `MsgSubmitIntent` as
+     `spend_commitment + bond` **always**, in stub AND encrypted mode, **never
+     reading give legs**. Routes to `outstanding_commitment` (D-059); the per-tx
+     and window-exposure (`outstanding_commitment + window_spent`) ceilings bind to
+     it exactly as they bound `giveLegSpend + bond` before. The `PriceSource` is
+     removed from `MandateDecorator` (now dead there); the veil keeper keeps its
+     own for the Reveal.
+  3. **`charged_spend = spend_commitment + bond`** persisted (D-041), and the
+     **Reveal slash**: after decrypt, value the actual give legs (`giveLegValue`,
+     behind recover, §11.6) and if any per-denom actual give > `spend_commitment`
+     → INVALID + 50% bond slash to the community pool (D-040), no window refund
+     (the charge persists, conservation intact). Over/exact/coin-give-free → OPEN.
+- **Two decisive design forks (resolved with the architect, both pinned here):**
+  - **No per-intent "encrypted" classification; the mechanism is UNIFORM.** There
+    is no encrypted signal in stub mode (`StubScheme` is pure identity), and a
+    stub-vs-encrypted split would make stub testing prove a *different* code path
+    than Task 1.6 ships — defeating the build-in-stub strategy. So the ante's
+    `intentSpend` give-leg read is DELETED and replaced unconditionally with the
+    `spend_commitment` read. Identity across modes is exactly what makes stub
+    testing prove the encrypted-mode chokepoint.
+  - **No `ErrMissingSpendCommitment`; empty = zero; Reveal-slash is the SOLE
+    enforcement.** The `repeated Coin` proto cannot distinguish "absent" from
+    "zero", and a coin-give-free intent (data/svc-only, the F-3 boundary) has a
+    legitimately-empty commitment — so an up-front reject cannot be implemented
+    faithfully and is not needed. An empty commitment that hides a positive coin
+    give is already deterred: the bond is charged and 50% slashed at the Reveal
+    when actual give exceeds the (zero) commitment. Enforcement lives at the one
+    place the give legs are readable.
+- **Bond magnitude is now COMMITMENT-derived, not give-value-derived (a behavior
+  change `RequiredBond` readers must know).** The §6.3 face value feeding the bond
+  is `faceValueScalar(spend_commitment)`. Same uniformity argument as the ante: the
+  msg server is blind to give legs in encrypted mode, so a give-derived bond would
+  size differently in stub mode than the shipping path. Consequence:
+  over-declaration costs a larger bond — correct self-penalizing alignment; an
+  honest declaration sizes the bond exactly as the give-derived bond did before.
+- **The comparison iterates the ACTUAL GIVE coins** against
+  `spend_commitment.AmountOf(denom)` (NOT the commitment coins): a give in a denom
+  the commitment omits compares against 0 and fires, so an undeclared-denom give is
+  itself an under-declaration and cannot be dodged. `Coins.IsAnyGT` is deliberately
+  NOT used — its `!amt.IsZero()` clause misses the empty-commitment case.
+- **F-3 inherited unchanged.** Data/svc give legs value 0 under
+  `FaceValuePriceSource`, so a coin commitment does not bound them and a
+  coin-give-free intent honestly declares zero and opens (never slashes). The
+  D-044 PriceSource swap is the proper fix and stays a separate, non-Phase-1 task;
+  CONCLAVE-TODO(phase-0) marker carries it.
+- **D-059/D-064 accounting untouched.** Ante charge, persisted `charged_spend`, and
+  `DecommitIntent` release are all `commitment + bond`, so they agree and the
+  commitment-conservation crisis invariant holds by construction — only the
+  valuation *source* changed (give legs → declared commitment).
+- **Tests (red-first verified on the slash path):**
+  `TestRevealUnderDeclarationSlashes` (incl. the undeclared-denom variant
+  `TestRevealUndeclaredDenomSlashes`) and `TestFuzzCommitmentDeclaration` were
+  confirmed RED with the cross-check disabled, then green with it; `TestReveal{Over,
+  Exact}DeclarationOpens` and `TestRevealDataOnlyEmptyCommitmentOpens` (the F-3
+  inverse-pin) hold the OPEN side; the §6.2 ante suite, the 0.7/0.11 conservation
+  fuzz, the 0.8 session clearing tests, the 0.9 receipt proofs, and the §1.3 e2e
+  (over-ceiling intent now trips the ceiling via its declared commitment) all green
+  after declaring commitments in their intent builders. `make lint test` EXIT=0;
+  the determinism gate stays byte-identical cross-process (no golden hash). `Encrypt`
+  stays identity.
+- **Rationale:** uniform-across-modes valuation is the property that lets a
+  stub-mode build de-risk the post-crypto chokepoint; pushing all enforcement to
+  the Reveal is forced by the ciphertext being unreadable in ante and by the proto's
+  inability to distinguish absent from zero. The result is strictly simpler than the
+  §4 draft and provably the same code path that ships in Task 1.6.

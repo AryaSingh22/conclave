@@ -13,7 +13,6 @@ import (
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandateante "github.com/AryaSingh22/conclave/x/mandate/ante"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
-	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 )
 
 // HandlerOptions extends the SDK's ante HandlerOptions with Conclave-specific
@@ -23,7 +22,6 @@ type HandlerOptions struct {
 
 	IBCKeeper        *ibckeeper.Keeper
 	MandateKeeper    mandatekeeper.Keeper
-	PriceSource      mandatetypes.PriceSource
 	UnorderedManager unordered.Manager
 }
 
@@ -66,9 +64,6 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 	if options.IBCKeeper == nil {
 		return nil, errors.New("IBC keeper is required for ante builder")
 	}
-	if options.PriceSource == nil {
-		return nil, errors.New("price source is required for ante builder")
-	}
 	if !options.UnorderedManager.Initialized() {
 		return nil, errors.New("unordered manager is required for ante builder")
 	}
@@ -93,7 +88,7 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 		unordered.NewIncrementSequenceDecorator(ante.NewIncrementSequenceDecorator(options.AccountKeeper)),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
 		unordered.NewUnorderedTxDecorator(options.UnorderedManager),
-		mandateante.NewMandateDecorator(options.MandateKeeper, options.PriceSource),
+		mandateante.NewMandateDecorator(options.MandateKeeper),
 		mandateante.NewFeeAbstractionDecorator(options.MandateKeeper),
 	}
 

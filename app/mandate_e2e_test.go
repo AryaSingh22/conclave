@@ -224,7 +224,15 @@ func TestMandateE2ESpec13Steps2And3(t *testing.T) {
 		}
 		payloadBz, err := payload.Marshal()
 		require.NoError(t, err)
-		envBz, err := (&veiltypes.IntentEnvelope{TtlHeight: ttl, FeeBid: "1"}).Marshal()
+		// the ante binds the ceilings to spend_commitment + bond (D-065), so the
+		// declared commitment IS the §6.2 step-4 spend intent; declare it equal
+		// to the give so §1.3 step 3 (600 > 500 USDC) trips the ceiling and the
+		// Reveal opens the under-ceiling intent without slashing.
+		envBz, err := (&veiltypes.IntentEnvelope{
+			TtlHeight:       ttl,
+			FeeBid:          "1",
+			SpendCommitment: sdk.NewCoins(coin),
+		}).Marshal()
 		require.NoError(t, err)
 		return &veiltypes.MsgSubmitIntent{
 			Sender:      session.String(),

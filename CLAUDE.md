@@ -109,9 +109,13 @@ green and the task is reviewed + committed.
       revoke/reissue guess); FRESH issuance adopts live root-era exposure so the
       §1.1-goal-3 bound attaches from issuance. The gate (1.0 hardening + 1.0b
       first-catch) is now trustworthy end-to-end.
-- [ ] 1.1 `spend_commitment` (§4), stub mode — **NEXT.** Envelope field; ante
-      binds `spend_commitment+bond` → `outstanding_commitment` (D-059); Reveal
-      slashes a commitment violation → INVALID; `Encrypt` still identity
+- [x] 1.1 `spend_commitment` (§4), stub mode — D-065. Envelope field; ante binds
+      `spend_commitment+bond` → `outstanding_commitment` (D-059) UNIFORMLY (never
+      reads give legs, stub or encrypted — the property that lets stub testing
+      prove the shipping path); bond magnitude now commitment-derived; Reveal
+      slashes a commitment violation (actual give > commitment in any denom) →
+      INVALID (50%); empty=zero, Reveal-slash is the sole enforcement (no
+      ErrMissingSpendCommitment); `Encrypt` still identity. Gate byte-identical.
 - [ ] 1.2 D8 ratification (docs-only; D-060 already recorded)
 - [ ] 1.3 BLS library wrap behind `ThresholdScheme` + DKG interface revision (offline)
 - [ ] 1.4 Adversarial test harness (offline: t−1 cannot decrypt, t can; corrupt/withheld excluded)

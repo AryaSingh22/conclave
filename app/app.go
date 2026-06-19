@@ -411,12 +411,8 @@ func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) sdk.AnteHandler
 				FeegrantKeeper:  app.FeeGrantKeeper,
 				SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 			},
-			IBCKeeper:     app.IBCKeeper,
-			MandateKeeper: app.MandateKeeper,
-			// CONCLAVE-TODO(phase-0): task 0.8 swaps the face-value source
-			// for the x/session clearing-price implementation (SPEC §6.2
-			// step 4)
-			PriceSource:      mandatetypes.FaceValuePriceSource{},
+			IBCKeeper:        app.IBCKeeper,
+			MandateKeeper:    app.MandateKeeper,
 			UnorderedManager: app.UnorderedManager,
 		},
 	)

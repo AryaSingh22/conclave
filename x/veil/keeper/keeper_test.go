@@ -206,9 +206,13 @@ func payloadBytes(t testingT, give ...sdk.Coin) []byte {
 	return bz
 }
 
-func envelopeBytes(t testingT, ttl uint64, feeBid string) []byte {
+// envelopeBytes builds a plaintext envelope. The optional commitment coins
+// set spend_commitment (D-065): the ante values the intent at commitment +
+// bond, and the Reveal slashes if actual give exceeds it. Call sites that
+// pass no commitment declare zero (a valid declaration).
+func envelopeBytes(t testingT, ttl uint64, feeBid string, commitment ...sdk.Coin) []byte {
 	t.Helper()
-	env := types.IntentEnvelope{TtlHeight: ttl, FeeBid: feeBid}
+	env := types.IntentEnvelope{TtlHeight: ttl, FeeBid: feeBid, SpendCommitment: sdk.NewCoins(commitment...)}
 	bz, err := env.Marshal()
 	require.NoError(t, err)
 	return bz
@@ -231,9 +235,11 @@ func submitMsg(owner sdk.AccAddress, sigilID string, ciphertext, envelope []byte
 func (f *fixture) submitValid(t testingT, owner sdk.AccAddress, sigilID string, ttl uint64) string {
 	t.Helper()
 	f.bank.fund(owner.String(), sdk.NewCoins(sdk.NewInt64Coin(bondDenom, 100_000_000)))
+	// the declared commitment matches the 100-USDC give, so the ante charges
+	// commitment+bond and the Reveal opens it cleanly (actual give == commitment)
 	msg := submitMsg(owner, sigilID,
 		payloadBytes(t, sdk.NewInt64Coin(usdcDenom, 100_000_000)),
-		envelopeBytes(t, ttl, "1.5"), minBond())
+		envelopeBytes(t, ttl, "1.5", sdk.NewInt64Coin(usdcDenom, 100_000_000)), minBond())
 	id, err := f.k.SubmitIntent(f.ctx, msg)
 	require.NoError(t, err)
 	return id
@@ -255,7 +261,7 @@ func TestSubmitIntent(t *testing.T) {
 
 		msg := submitMsg(owner, sigilID,
 			payloadBytes(t, sdk.NewInt64Coin(usdcDenom, 100_000_000)),
-			envelopeBytes(t, 100, "2.5"), minBond())
+			envelopeBytes(t, 100, "2.5", sdk.NewInt64Coin(usdcDenom, 100_000_000)), minBond())
 		id, err := f.k.SubmitIntent(f.ctx, msg)
 		require.NoError(t, err)
 		require.Len(t, id, 64, "ids are 64-char hex (D-009)")
@@ -267,8 +273,8 @@ func TestSubmitIntent(t *testing.T) {
 		require.Equal(t, uint64(1), rec.Intent.SubmitHeight)
 		require.Equal(t, uint64(0), rec.SessionId)
 
-		// charged_spend persists exactly the D-025 ante charge: per-denom
-		// max of give legs + bond
+		// charged_spend persists exactly the ante charge: the declared
+		// spend_commitment + bond (D-025/D-065)
 		require.Equal(t,
 			sdk.NewCoins(sdk.NewInt64Coin(usdcDenom, 100_000_000), minBond()).String(),
 			rec.ChargedSpend.String())
@@ -320,10 +326,11 @@ func TestSubmitIntent(t *testing.T) {
 				submitMsg(owner, sigilID, goodPayload, goodEnv, sdk.NewInt64Coin(bondDenom, 999_999)),
 				types.ErrBondInsufficient},
 			{"bond below bond_bps requirement",
-				// face value 10^12 → bps requirement 10^9 uclv > min_bond
-				submitMsg(owner, sigilID,
-					payloadBytes(t, sdk.NewCoin(usdcDenom, math.NewInt(1_000_000_000_000))),
-					goodEnv, minBond()),
+				// commitment face value 10^12 → bps requirement 10^9 uclv >
+				// min_bond (the bond now derives from the commitment, D-065)
+				submitMsg(owner, sigilID, goodPayload,
+					envelopeBytes(t, 100, "", sdk.NewCoin(usdcDenom, math.NewInt(1_000_000_000_000))),
+					minBond()),
 				types.ErrBondInsufficient},
 		}
 		for _, tc := range cases {
@@ -522,7 +529,7 @@ func TestExpiry(t *testing.T) {
 	f.bank.fund(grantee.String(), sdk.NewCoins(sdk.NewInt64Coin(bondDenom, 10_000_000)))
 	id, err := f.k.SubmitIntent(f.ctx, submitMsg(grantee, sigilID,
 		payloadBytes(t, sdk.NewInt64Coin(usdcDenom, 100_000_000)),
-		envelopeBytes(t, 5, ""), minBond()))
+		envelopeBytes(t, 5, "", sdk.NewInt64Coin(usdcDenom, 100_000_000)), minBond()))
 	require.NoError(t, err)
 
 	rec := f.mustRecord(t, id)

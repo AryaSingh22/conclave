@@ -51,7 +51,12 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 	}
 
 	// SPEC §6.3 bond rules: bond = max(min_bond_param, bond_bps * face_value),
-	// face value per the D-041 Phase-0 scalar
+	// face value per the D-041 Phase-0 scalar. The face value derives from the
+	// declared spend_commitment, NOT the give legs (D-065): the msg server is
+	// blind to give legs once payloads are encrypted, so a give-leg-derived
+	// bond would compute a different magnitude in stub mode than the encrypted
+	// path ships — the same uniformity that makes the ante commitment-bound.
+	// Over-declaration therefore costs a larger bond (correct self-penalty).
 	if err := msg.Bond.Validate(); err != nil {
 		return "", errorsmod.Wrapf(types.ErrInvalidBond, "%s", err)
 	}
@@ -59,8 +64,8 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 		return "", errorsmod.Wrapf(types.ErrInvalidBond,
 			"bond denom %s, want %s", msg.Bond.Denom, params.MinBond.Denom)
 	}
-	giveSpend := k.giveLegSpend(ctx, msg.Ciphertext)
-	required := params.RequiredBond(faceValueScalar(giveSpend))
+	commitment := env.SpendCommitment
+	required := params.RequiredBond(faceValueScalar(commitment))
 	if msg.Bond.Amount.LT(required.Amount) {
 		return "", errorsmod.Wrapf(types.ErrBondInsufficient,
 			"bond %s below required %s", msg.Bond, required)
@@ -90,9 +95,12 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 		State: types.INTENT_STATE_SUBMITTED,
 		Owner: msg.Sender,
 		// persist exactly what the ante charged to the mandate window —
-		// give-leg per-denom max plus bond (D-025) — so every refund path
-		// returns the stored value, never a recomputation (D-041)
-		ChargedSpend: giveSpend.Add(msg.Bond),
+		// the declared spend_commitment plus bond (D-025/D-065) — so every
+		// refund path returns the stored value, never a recomputation
+		// (D-041). The ante values this same commitment+bond, so charge,
+		// persisted charged_spend, and DecommitIntent release all agree and
+		// the D-059/D-064 commitment-conservation invariant is untouched.
+		ChargedSpend: commitment.Add(msg.Bond),
 	}
 	if err := k.setIntentRecord(ctx, rec, types.INTENT_STATE_UNSPECIFIED); err != nil {
 		return "", err
@@ -199,11 +207,28 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 			continue
 		}
 
-		if _, ok := k.revealPayload(rec.Intent.Ciphertext); !ok {
-			if err := k.transitionIntent(ctx, &rec, types.INTENT_STATE_INVALID); err != nil {
+		payload, ok := k.revealPayload(rec.Intent.Ciphertext)
+		if !ok {
+			// §6.3 INVALID path: malformed payload (D-040).
+			if err := k.markInvalid(ctx, &rec, params.InvalidSlashBps, types.InvalidReasonMalformedPayload); err != nil {
 				return err
 			}
-			if err := k.slashInvalid(ctx, rec, params.InvalidSlashBps); err != nil {
+			continue
+		}
+
+		// D-065 commitment cross-check: the ante bound the ceilings to the
+		// declared spend_commitment WITHOUT reading give legs (uniform in stub
+		// and encrypted mode); the Reveal now reads the real give legs and
+		// turns the intent INVALID — exactly like a malformed payload (50%
+		// slash, D-040) — if its actual coin give exceeds the commitment in
+		// ANY denom (under-declaration). Over/exact declaration and coin-give-
+		// free intents (data/svc-only, the F-3 boundary) pass to OPEN.
+		exceeds, err := k.giveExceedsCommitment(ctx, rec, payload)
+		if err != nil {
+			return err
+		}
+		if exceeds {
+			if err := k.markInvalid(ctx, &rec, params.InvalidSlashBps, types.InvalidReasonCommitmentViolation); err != nil {
 				return err
 			}
 			continue
@@ -285,13 +310,27 @@ func (k Keeper) settleRefund(ctx sdk.Context, rec types.IntentRecord, eventType 
 	return nil
 }
 
+// markInvalid transitions an intent to INVALID and applies the §6.3 slash
+// settlement (D-040). reason records the cause (malformed payload vs
+// spend_commitment violation, D-065) for observability; the settlement is
+// identical for both.
+func (k Keeper) markInvalid(ctx sdk.Context, rec *types.IntentRecord, slashBps uint32, reason string) error {
+	if err := k.transitionIntent(ctx, rec, types.INTENT_STATE_INVALID); err != nil {
+		return err
+	}
+	return k.slashInvalid(ctx, *rec, slashBps, reason)
+}
+
 // slashInvalid applies the §6.3 INVALID settlement: invalid_slash_bps of
 // the bond funds the community pool (D-007: 5000 = 50%), the remainder
 // returns to the owner, and the mandate window is deliberately NOT
 // refunded (D-040): §6.2 step 5 and §6.4 step 7 name only expired and
 // cancelled intents, and keeping the charge preserves D-025's bound on
-// malformed-intent spam from a stolen key.
-func (k Keeper) slashInvalid(ctx sdk.Context, rec types.IntentRecord, slashBps uint32) error {
+// malformed-intent spam from a stolen key. The same NO-refund rule bounds a
+// commitment-violation INVALID (D-065): an under-declared intent keeps its
+// charged commitment+bond, so the conservation invariant stays intact and
+// the slash is the deterrent.
+func (k Keeper) slashInvalid(ctx sdk.Context, rec types.IntentRecord, slashBps uint32, reason string) error {
 	owner := sdk.MustAccAddressFromBech32(rec.Owner)
 	slash := rec.Intent.Bond.Amount.MulRaw(int64(slashBps)).QuoRaw(bpsDenominator)
 	remainder := rec.Intent.Bond.Amount.Sub(slash)
@@ -315,6 +354,7 @@ func (k Keeper) slashInvalid(ctx sdk.Context, rec types.IntentRecord, slashBps u
 		sdk.NewAttribute(types.AttributeKeyOwner, rec.Owner),
 		sdk.NewAttribute(types.AttributeKeySlashed, slash.String()),
 		sdk.NewAttribute(types.AttributeKeyRefunded, remainder.String()),
+		sdk.NewAttribute(types.AttributeKeyReason, reason),
 	))
 	return nil
 }
@@ -339,21 +379,44 @@ func (k Keeper) revealPayload(ciphertext []byte) (payload types.IntentPayload, o
 	return payload, true
 }
 
-// giveLegSpend mirrors the ante handler's SPEC §6.2 step 4 valuation
-// exactly (per-denom max of give legs via the PriceSource, behind recover;
-// malformed payloads value zero per D-021) — what it returns plus the bond
-// is what the ante charged, persisted as charged_spend (D-041).
-func (k Keeper) giveLegSpend(ctx sdk.Context, ciphertext []byte) (spend sdk.Coins) {
+// giveExceedsCommitment reports whether a revealed intent's ACTUAL coin give
+// legs exceed its declared spend_commitment in any denom — the D-065 Reveal
+// cross-check. The comparison iterates the ACTUAL give coins and checks each
+// against commitment.AmountOf(denom): a give in a denom the commitment does
+// not mention compares against 0 and therefore fires (an undeclared-denom
+// give is itself an under-declaration). Both sides are valued in the same
+// FaceValuePriceSource units, so the comparison is apples-to-apples;
+// non-coin (data/svc) give legs value 0 and never appear in `give`, so a
+// coin-give-free intent is correctly unbounded by a coin commitment (the
+// inherited F-3 boundary — CONCLAVE-TODO(phase-0): the D-044 price-source
+// swap values data/svc legs and would bound them).
+func (k Keeper) giveExceedsCommitment(ctx sdk.Context, rec types.IntentRecord, payload types.IntentPayload) (bool, error) {
+	var env types.IntentEnvelope
+	if err := env.Unmarshal(rec.Intent.Envelope); err != nil {
+		// the envelope was validated at submission/genesis import, so a decode
+		// failure here is state corruption, not user input.
+		return false, errorsmod.Wrapf(types.ErrInvalidEnvelope,
+			"stored envelope of intent %s undecodable: %s", rec.Intent.Id, err)
+	}
+	give := k.giveLegValue(ctx, payload)
+	for _, c := range give {
+		if c.Amount.GT(env.SpendCommitment.AmountOf(c.Denom)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// giveLegValue values a decoded payload's give legs per SPEC §6.2 step 4 (the
+// per-denom max of give legs via the PriceSource), behind recover so a crafted
+// payload can never panic the chain (§11.6). It is the actual-give valuation
+// the D-065 Reveal cross-check compares against the declared spend_commitment.
+func (k Keeper) giveLegValue(ctx sdk.Context, payload types.IntentPayload) (spend sdk.Coins) {
 	defer func() {
 		if r := recover(); r != nil {
 			spend = sdk.NewCoins()
 		}
 	}()
-
-	var payload types.IntentPayload
-	if err := payload.Unmarshal(ciphertext); err != nil {
-		return sdk.NewCoins()
-	}
 
 	maxSpend := sdk.NewCoins()
 	for i := range payload.Give {

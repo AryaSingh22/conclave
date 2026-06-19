@@ -38,6 +38,20 @@ message IntentEnvelope {
   bool allow_partial = 3;
   // chamber_id is fixed 0 until Phase 3.
   uint32 chamber_id = 4;
+  // spend_commitment is the agent's declared upper bound on give-leg value,
+  // in the denoms the mandate ceilings use (SPEC §6.3 "Spend commitment",
+  // §8(e); D-065). The MandateDecorator binds the per-tx and window ceilings
+  // to spend_commitment + bond UNIFORMLY — it never reads give legs, in stub
+  // or encrypted mode — and at the Reveal an intent whose actual coin give
+  // legs exceed this commitment in any denom is INVALID (50% bond slash),
+  // exactly like a malformed payload. Empty = a commitment of zero (a valid
+  // declaration, enforced at the Reveal); validated structurally only at
+  // submission (non-negative Coins, D-042).
+  repeated cosmos.base.v1beta1.Coin spend_commitment = 5 [
+    (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
 }
 
 // IntentPayload is the encrypted part (plaintext in Phase 0) — SPEC §5.1.

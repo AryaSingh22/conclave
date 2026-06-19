@@ -31,19 +31,13 @@ func TestFuzzRevealNeverPanics(t *testing.T) {
 		params, err := f.k.GetParams(f.ctx)
 		require.NoError(rt, err)
 
-		// fund exactly what the §6.3 formula demands so submit always
-		// succeeds regardless of how large the fuzzed give legs decode;
-		// fuzzed payloads demanding an unpayable bond (beyond any real
-		// balance) must reject cleanly instead
-		bond := params.RequiredBond(faceValueScalar(f.k.giveLegSpend(f.ctx, ct)))
-		fundCap := math.NewIntWithDecimal(1, 30)
-		if bond.Amount.GT(fundCap) {
-			f.bank.fund(owner.String(), sdk.NewCoins(sdk.NewCoin(bondDenom, fundCap)))
-			_, err := f.k.SubmitIntent(f.ctx, submitMsg(owner, sigilID, ct,
-				envelopeBytes(rt, 1000, ""), bond))
-			require.Error(rt, err, "an unpayable bond must reject, never panic")
-			return
-		}
+		// the envelope declares an EMPTY spend_commitment (a valid zero
+		// declaration), so the bond is the min_bond floor (commitment-derived,
+		// D-065) — always payable — and ANY positive coin give leg exceeds the
+		// zero commitment, so the Reveal turns the intent INVALID (a commitment
+		// violation) just as a malformed payload does. Both INVALID causes are
+		// exercised under fuzz; neither panics.
+		bond := params.RequiredBond(faceValueScalar(sdk.NewCoins()))
 		initial := bond.Amount.AddRaw(1_000_000)
 		f.bank.fund(owner.String(), sdk.NewCoins(sdk.NewCoin(bondDenom, initial)))
 
@@ -57,8 +51,13 @@ func TestFuzzRevealNeverPanics(t *testing.T) {
 		f.beginBlock(rt, 4)
 
 		rec := f.mustRecord(rt, id)
+		// INVALID iff the payload is malformed OR (it decodes and any actual
+		// coin give leg exceeds the zero commitment); else OPEN.
 		var payload types.IntentPayload
 		expectInvalid := payload.Unmarshal(ct) != nil
+		if !expectInvalid && !f.k.giveLegValue(f.ctx, payload).IsZero() {
+			expectInvalid = true
+		}
 		if expectInvalid {
 			require.Equal(rt, types.INTENT_STATE_INVALID, rec.State)
 		} else {
@@ -357,11 +356,16 @@ func TestFuzzWindowAccountingConservation(t *testing.T) {
 				}
 				a := agents[p.agent]
 				ct := payloadBytes(rt, sdk.NewInt64Coin(usdcDenom, 100_000_000))
+				// the declared commitment (= the give) is what the ante values
+				// and the keeper persists as charged_spend (D-065); a malformed
+				// payload still carries the same commitment, so the charge is
+				// identical regardless of payload validity.
+				commitment := sdk.NewCoins(sdk.NewInt64Coin(usdcDenom, 100_000_000))
 				if p.malformed {
 					ct = []byte{0xDE, 0xAD, 0xBE, 0xEF}
 				}
-				msg := submitMsg(a.grantee, a.sigilID, ct, envelopeBytes(rt, p.ttl, ""), minBond())
-				charged := f.k.giveLegSpend(f.ctx, ct).Add(minBond())
+				msg := submitMsg(a.grantee, a.sigilID, ct, envelopeBytes(rt, p.ttl, "", commitment...), minBond())
+				charged := commitment.Add(minBond())
 				m, found, err := f.mandate.ActiveMandateByGrantee(f.ctx, 0, a.grantee)
 				require.NoError(rt, err)
 				require.True(rt, found)

@@ -202,7 +202,16 @@ func (f *fixture) submitOpen(t *testing.T, owner sdk.AccAddress, sigilID string,
 	p := veiltypes.IntentPayload{Give: give, Want: want}
 	pbz, err := p.Marshal()
 	require.NoError(t, err)
-	env := veiltypes.IntentEnvelope{TtlHeight: ttl}
+	// declare spend_commitment = the coin give value so the Reveal opens the
+	// intent rather than slashing it as an under-declaration (D-065); svc/data
+	// give legs value 0, so a non-coin give honestly declares zero.
+	commitment := sdk.NewCoins()
+	for i := range give {
+		if c := give[i].GetCoin(); c != nil && c.IsValid() && !c.IsZero() {
+			commitment = commitment.Max(sdk.NewCoins(*c))
+		}
+	}
+	env := veiltypes.IntentEnvelope{TtlHeight: ttl, SpendCommitment: commitment}
 	ebz, err := env.Marshal()
 	require.NoError(t, err)
 	id, err := f.veil.SubmitIntent(f.ctx, &veiltypes.MsgSubmitIntent{

@@ -340,53 +340,95 @@ message IntentEnvelope {
 `spend_commitment` is the agent's declared **upper bound on give-leg value**, in
 the denoms the mandate ceilings use (native + uusdc, per the current
 `FaceValuePriceSource`). Validated in `MsgSubmitIntent` envelope validation
-(extends D-042): for an encrypted intent it must be **present and non-negative**.
-Phase 0 ignores it (already specified, §6.3 / D-025).
+(extends D-042) **structurally only**: it must be well-formed, non-negative
+`Coins`. **An empty commitment is a valid declaration of zero** — there is no
+presence/absence gate and no `ErrMissingSpendCommitment` (see the resolution
+note below and **D-065**). The agent's truthfulness is enforced at the Reveal,
+not at submission, because the msg server cannot read give legs to cross-check a
+commitment once payloads are encrypted — and need not.
 
-**(2) Ante binding.** §6.2 step 4 today reads plaintext give legs via the
-PriceSource. In Phase 1 the payload is opaque, so for `MsgSubmitIntent` the spend
-intent becomes **`spend_commitment + bond`** (D-025 keeps the bond in the sum;
-the bond is plaintext on `SealedIntent.bond`). This routes to
-**`outstanding_commitment`** (D-059 — a refundable lifetime commitment, not
-per-period settled spend). The per-tx ceiling and the window-exposure ceiling
-(`outstanding_commitment + window_spent`) bind to `spend_commitment + bond`
-exactly as they bind to `giveLegSpend + bond` today. A clean swap of the
-valuation source; the D-059 accounting is untouched.
+**(2) Ante binding — UNIFORM, never reads give legs.** §6.2 step 4 in Phase 0
+read plaintext give legs via the PriceSource. From Task 1.1 the
+`MandateDecorator` values `MsgSubmitIntent` as **`spend_commitment + bond`**
+**always** — identically in stub and encrypted mode, never reading give legs
+(D-025 keeps the bond in the sum; the bond is plaintext on `SealedIntent.bond`).
+This routes to **`outstanding_commitment`** (D-059 — a refundable lifetime
+commitment, not per-period settled spend). The per-tx ceiling and the
+window-exposure ceiling (`outstanding_commitment + window_spent`) bind to
+`spend_commitment + bond` exactly as they bound `giveLegSpend + bond` before; the
+D-059 accounting is untouched. **The uniformity is the whole point:** if the ante
+read give legs in stub mode and the commitment in encrypted mode, stub testing
+would prove a *different* code path than the one that ships in Task 1.6. Making
+the ante's behavior identical across stub/encrypted is precisely what lets stub
+testing prove the encrypted-mode chokepoint. The `PriceSource` is therefore
+removed from the `MandateDecorator` entirely (the give-leg valuation moves to the
+Reveal cross-check, which keeps its own `PriceSource`).
 
 **(3) `charged_spend` persistence + Reveal-time slash.**
 
 - Persist `charged_spend = spend_commitment + bond` (D-041 — every refund path
   returns the stored value via `DecommitIntent`, never recomputes; INVALID still
-  persists the charge, D-040).
+  persists the charge, D-040). Because the ante values the same `commitment +
+  bond`, the ante charge, the persisted `charged_spend`, and the `DecommitIntent`
+  release all agree, so the D-059/D-064 commitment-conservation invariant is
+  untouched.
+- **Bond magnitude is also commitment-derived** (not give-value-derived, a
+  behavior change recorded in D-065): the §6.3 face value feeding
+  `RequiredBond` is `faceValueScalar(spend_commitment)`. Same uniformity argument
+  — the msg server is blind to give legs in encrypted mode, so a give-derived
+  bond would size differently in stub mode than the shipping path. Over-declaring
+  therefore costs a larger bond (correct self-penalizing incentive).
 - At the Reveal (`BeginBlock` decrypt), after recovering the real payload, value
-  the actual give legs (`giveLegSpend`, already implemented). **If actual give
-  value > `spend_commitment` for any denom → the intent is a commitment violation
-  → INVALID**, 50% bond slash to the community pool, exactly like a malformed
-  payload (D-040). The intent never reaches OPEN/matching. This makes the declared
-  bound truthful: under-declare to dodge the ceiling → slashed, no trade.
+  the actual give legs (`giveLegValue`). **If actual give value > `spend_commitment`
+  for any denom → the intent is a commitment violation → INVALID**, 50% bond slash
+  to the community pool, exactly like a malformed payload (D-040). The intent
+  never reaches OPEN/matching. This makes the declared bound truthful: under-
+  declare to dodge the ceiling → slashed, no trade. **This Reveal slash is the
+  SOLE enforcement** — the ante cannot cross-check a ciphertext, and an up-front
+  reject cannot be done correctly (the proto cannot distinguish absent from zero),
+  so enforcement lives at the one place the give legs are readable.
 
 **Edge cases (designed):**
 
-- **Absent `spend_commitment` on an encrypted intent → reject at
-  `MsgSubmitIntent`** (`ErrMissingSpendCommitment`). Do not default to zero (zero
-  would pass the ceiling then slash at Reveal — a wasteful spam vector). Reject up
-  front.
+- **Empty `spend_commitment` = a commitment of zero.** No up-front reject (the
+  `repeated Coin` proto cannot distinguish absent from zero, and a zero
+  declaration is legitimate for a coin-give-free intent). The spam vector an
+  up-front reject would have addressed — declare zero, give a large coin amount —
+  is already deterred: the bond is charged and 50% slashed at the Reveal when the
+  give exceeds the (zero) commitment.
+- **Under-declaration is the violation, including by undeclared denom.** The
+  comparison iterates the **actual give coins** and checks each against
+  `spend_commitment.AmountOf(denom)`, so a give in a denom the commitment does not
+  mention compares against 0 and fires — omitting a denom cannot dodge the bound.
 - **Over-declaration** (commitment > actual): allowed and self-penalizing
-  (consumes more ceiling than needed); **no slash.** Only **under-declaration**
-  (actual > commitment) slashes.
+  (consumes more ceiling and a larger bond); **no slash.**
 - **`allow_partial`:** the commitment bounds the full give; partial fills are ≤
   full, so still bounded.
 - **Unit consistency (inherited boundary).** The Reveal compares per-denom actual
-  give amount ≤ per-denom `spend_commitment`, in the same denom-blind base units
-  the ante charged (D-041 scalar). **Data/svc give legs value 0** under
-  `FaceValuePriceSource` (AUDIT F-2/F-3), so a coin-denominated commitment does
-  not bound data/svc legs — this is the existing Phase-0 boundary (F-3), inherited
-  unchanged. The D-044 PriceSource swap is the proper fix and remains a separate,
-  non-Phase-1 task. Documented, not silently expanded.
+  give amount ≤ per-denom `spend_commitment`, both valued by the same
+  `FaceValuePriceSource` the commitment is declared in. **Data/svc give legs value
+  0** under `FaceValuePriceSource` (AUDIT F-2/F-3), so a coin-denominated
+  commitment does not bound data/svc legs and a coin-give-free intent honestly
+  declares zero (opens cleanly, never slashes) — the existing Phase-0 boundary
+  (F-3), inherited unchanged. The D-044 PriceSource swap is the proper fix and
+  remains a separate, non-Phase-1 task. Documented, not silently expanded.
+
+**Resolution note (supersedes this section's earlier framing — D-065).** The
+draft above originally conditioned the mechanism on a per-intent "encrypted"
+classification and rejected an absent commitment up front
+(`ErrMissingSpendCommitment`). Both were dropped during Task 1.1: there is no
+per-intent encrypted signal in stub mode (the `StubScheme` is pure identity), the
+classification would split stub-mode from encrypted-mode behavior (defeating the
+build-in-stub strategy), and the `repeated Coin` type cannot distinguish "absent"
+from "zero" — so an up-front reject cannot be implemented faithfully and is not
+needed. The mechanism is **uniform** (always commitment + bond, in both modes)
+and **empty = zero, enforced solely at the Reveal**. Recorded loudly in D-065.
 
 **Where it is built:** entirely in **stub mode** — `Encrypt` stays identity while
-the field, ante binding, and Reveal slash are wired and tested. This is why it is
-an early task (1.1): it de-risks the chokepoint independent of the crypto.
+the field, the uniform ante binding, the commitment-derived bond, and the Reveal
+slash are wired and tested. This is why it is an early task (1.1): it de-risks the
+chokepoint independent of the crypto, and proves the exact code path that ships in
+Task 1.6 against plaintext the Reveal can still cross-check.
 
 ---
 

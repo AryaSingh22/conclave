@@ -204,12 +204,25 @@ func payloadBytes(t testingT, give, want []veiltypes.IntentLeg, counterparty str
 	return bz
 }
 
-func envelopeBytes(t testingT, ttl uint64, allowPartial bool) []byte {
+func envelopeBytes(t testingT, ttl uint64, allowPartial bool, commitment ...sdk.Coin) []byte {
 	t.Helper()
-	env := veiltypes.IntentEnvelope{TtlHeight: ttl, AllowPartial: allowPartial}
+	env := veiltypes.IntentEnvelope{TtlHeight: ttl, AllowPartial: allowPartial, SpendCommitment: sdk.NewCoins(commitment...)}
 	bz, err := env.Marshal()
 	require.NoError(t, err)
 	return bz
+}
+
+// coinGiveValue is the per-denom coin value of a give-leg set under
+// FaceValuePriceSource (svc/data legs value 0) — the honest spend_commitment
+// for those legs, so the Reveal opens the intent instead of slashing (D-065).
+func coinGiveValue(give []veiltypes.IntentLeg) sdk.Coins {
+	commitment := sdk.NewCoins()
+	for i := range give {
+		if c := give[i].GetCoin(); c != nil && c.IsValid() && !c.IsZero() {
+			commitment = commitment.Max(sdk.NewCoins(*c))
+		}
+	}
+	return commitment
 }
 
 func minBond() sdk.Coin { return sdk.NewInt64Coin(bondDenom, 1_000_000) }
@@ -224,7 +237,7 @@ func (f *fixture) submitOpen(t testingT, owner sdk.AccAddress, sigilID string, g
 		Sender:      owner.String(),
 		SenderSigil: sigilID,
 		Ciphertext:  payloadBytes(t, give, want, counterparty),
-		Envelope:    envelopeBytes(t, ttl, false),
+		Envelope:    envelopeBytes(t, ttl, false, coinGiveValue(give)...),
 		Bond:        minBond(),
 	}
 	id, err := f.veil.SubmitIntent(f.ctx, msg)

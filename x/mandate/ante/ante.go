@@ -23,13 +23,17 @@ import (
 // DeliverTx (the optimistic window charge in both modes is what bounds a
 // stolen key across many parallel unordered txs in one block).
 type MandateDecorator struct {
-	keeper      keeper.Keeper
-	priceSource types.PriceSource
+	keeper keeper.Keeper
 }
 
-// NewMandateDecorator creates the SPEC §6.2 ante decorator.
-func NewMandateDecorator(k keeper.Keeper, ps types.PriceSource) MandateDecorator {
-	return MandateDecorator{keeper: k, priceSource: ps}
+// NewMandateDecorator creates the SPEC §6.2 ante decorator. It no longer
+// takes a PriceSource: the spend intent of a MsgSubmitIntent is now the
+// declared spend_commitment + bond (D-065), read from the plaintext
+// envelope, so the ante never values give legs — uniformly in stub and
+// encrypted mode. The give-leg valuation moved to the Reveal cross-check
+// (x/veil), which keeps its own PriceSource.
+func NewMandateDecorator(k keeper.Keeper) MandateDecorator {
+	return MandateDecorator{keeper: k}
 }
 
 var _ sdk.AnteDecorator = MandateDecorator{}
@@ -188,52 +192,48 @@ func (d MandateDecorator) spendIntent(ctx sdk.Context, msg sdk.Msg) (commit, set
 	}
 }
 
-// intentSpend values a MsgSubmitIntent: the per-denom max of give legs
-// PLUS the intent bond (D-025). The bond counts because it is slashable —
-// 50% on INVALID (§6.3) — so unbounded bond spend would be an unbounded
-// burn for a stolen key, the exact threat Mandates cap. Consequence: a
-// mandate permitting MsgSubmitIntent must list a native-denom ceiling
-// covering bonds (D-019 deny-by-default).
+// intentSpend values a MsgSubmitIntent as the declared spend_commitment
+// PLUS the intent bond (D-025/D-065). The ante reads the agent's plaintext
+// spend_commitment from the envelope and NEVER reads give legs — uniformly
+// in stub and encrypted mode. This is the load-bearing pre-crypto property:
+// once payloads are opaque (Task 1.6) the ante cannot value give legs, so
+// binding the ceilings to the commitment is the only way the §6.2
+// chokepoint stays sighted; building it in stub mode proves the exact path
+// that ships, against plaintext the Reveal can still cross-check (D-065).
 //
-// The give legs are valued behind recover — the chain must never panic on
-// user input (SPEC §11.6). A payload that fails to unmarshal contributes
-// zero give-leg spend (D-021) — it can never match; the Reveal marks it
-// INVALID — but its bond still charges the window, which is what bounds
-// the malformed-intent burn attack.
-//
-// CONCLAVE-TODO(phase-1): real ciphertexts cannot be parsed in ante; ante
-// then binds the IntentEnvelope's plaintext spend_commitment instead and
-// the Reveal slashes commitment violations (SPEC §6.3 "Spend commitment",
-// §8 hard requirement (e)).
-func (d MandateDecorator) intentSpend(ctx sdk.Context, msg *veiltypes.MsgSubmitIntent) sdk.Coins {
-	spend := d.giveLegSpend(ctx, msg.Ciphertext)
+// The bond counts because it is slashable — 50% on INVALID (§6.3) — so
+// unbounded bond spend would be an unbounded burn for a stolen key, the
+// exact threat Mandates cap. Consequence: a mandate permitting
+// MsgSubmitIntent must list a native-denom ceiling covering bonds (D-019
+// deny-by-default). An under-declared commitment passes the ceiling here
+// but is slashed at the Reveal (actual give > commitment → INVALID), so the
+// declaration is truthful by deterrent, not by an ante cross-check it
+// cannot perform on a ciphertext.
+func (d MandateDecorator) intentSpend(_ sdk.Context, msg *veiltypes.MsgSubmitIntent) sdk.Coins {
+	spend := spendCommitment(msg.Envelope)
 	if !msg.Bond.IsNil() && msg.Bond.IsValid() && msg.Bond.IsPositive() {
 		spend = spend.Add(msg.Bond)
 	}
 	return spend
 }
 
-// giveLegSpend values the payload's give legs per SPEC §6.2 step 4: "the
-// max of give legs", taken per denom — under face-value pricing legs of
-// different denoms are incomparable, and the per-denom max is the
-// conservative reading against Coins ceilings.
-func (d MandateDecorator) giveLegSpend(ctx sdk.Context, ciphertext []byte) (spend sdk.Coins) {
+// spendCommitment reads the plaintext spend_commitment from a MsgSubmitIntent
+// envelope, behind recover so a malformed envelope can never panic the ante
+// (SPEC §11.6). A malformed/undecodable envelope contributes a zero
+// commitment here (its bond still charges); the msg server rejects it at
+// execution via ValidateEnvelope, so it never reaches the Veil.
+func spendCommitment(envelope []byte) (commitment sdk.Coins) {
 	defer func() {
 		if r := recover(); r != nil {
-			spend = sdk.NewCoins()
+			commitment = sdk.NewCoins()
 		}
 	}()
 
-	var payload veiltypes.IntentPayload
-	if err := payload.Unmarshal(ciphertext); err != nil {
+	var env veiltypes.IntentEnvelope
+	if err := env.Unmarshal(envelope); err != nil {
 		return sdk.NewCoins()
 	}
-
-	maxSpend := sdk.NewCoins()
-	for i := range payload.Give {
-		maxSpend = maxSpend.Max(d.priceSource.GiveLegValue(ctx, &payload.Give[i]))
-	}
-	return maxSpend
+	return env.SpendCommitment
 }
 
 // deny emits the SPEC §6.2 mandate_enforced event in CheckTx for operator

@@ -83,14 +83,21 @@ func svcLeg(schema string, units int64) types.IntentLeg {
 	return types.IntentLeg{Asset: &types.IntentLeg_Svc{Svc: &types.ServiceVoucher{Schema: schema, Units: math.NewInt(units)}}}
 }
 
-// buildIntent marshals a give/want payload and a ttl envelope.
-func buildIntent(give, want []types.IntentLeg, ttl uint64) (ciphertext, envelope []byte, err error) {
+// buildIntent marshals a give/want payload and a ttl envelope. The envelope
+// declares spend_commitment = coinGive (the give value the sim sizes the bond
+// and ceilings on, D-065): the ante binds the ceilings to commitment + bond
+// without reading give legs, and the Reveal opens the intent only because the
+// actual give equals the declared commitment — a value mismatch would slash.
+func buildIntent(give, want []types.IntentLeg, ttl uint64, coinGive *sdk.Coin) (ciphertext, envelope []byte, err error) {
 	payload := types.IntentPayload{Give: give, Want: want}
 	ciphertext, err = payload.Marshal()
 	if err != nil {
 		return nil, nil, err
 	}
 	env := types.IntentEnvelope{TtlHeight: ttl}
+	if coinGive != nil {
+		env.SpendCommitment = sdk.NewCoins(*coinGive)
+	}
 	envelope, err = env.Marshal()
 	if err != nil {
 		return nil, nil, err
@@ -212,7 +219,7 @@ func SimulateMatchableCycle(txGen client.TxConfig, ak simutil.AccountKeeper, bk 
 // coin used to size the bond.
 func submitOne(r *rand.Rand, app *baseapp.BaseApp, txGen client.TxConfig, ctx sdk.Context, ak simutil.AccountKeeper, k keeper.Keeper,
 	signer simtypes.Account, sigilID string, give, want []types.IntentLeg, ttl uint64, coinGive *sdk.Coin) bool {
-	ct, env, err := buildIntent(give, want, ttl)
+	ct, env, err := buildIntent(give, want, ttl, coinGive)
 	if err != nil {
 		return false
 	}
@@ -279,7 +286,7 @@ func SimulateMandatedIntent(txGen client.TxConfig, ak simutil.AccountKeeper, bk 
 		ttl := height + 3 + uint64(r.Intn(10)) // short → usually expires unmatched
 		// want a coin unlikely to be filled, so it expires (exercises refund)
 		want := sdk.NewCoin(denomCLV, math.NewInt(1+int64(r.Intn(1_000))))
-		ct, env, err := buildIntent([]types.IntentLeg{coinLeg(give)}, []types.IntentLeg{coinLeg(want)}, ttl)
+		ct, env, err := buildIntent([]types.IntentLeg{coinLeg(give)}, []types.IntentLeg{coinLeg(want)}, ttl, &give)
 		if err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgSubmitIntent{}), "build"), nil, nil
 		}

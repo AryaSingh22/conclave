@@ -167,7 +167,7 @@ var nextOK sdk.AnteHandler = func(ctx sdk.Context, _ sdk.Tx, _ bool) (sdk.Contex
 
 func (f *fixture) runMandateDecorator(t testing.TB, tx sdk.Tx) error {
 	t.Helper()
-	d := NewMandateDecorator(f.k, types.FaceValuePriceSource{})
+	d := NewMandateDecorator(f.k)
 	_, err := d.AnteHandle(f.ctx, tx, false, nextOK)
 	return err
 }
@@ -203,10 +203,23 @@ func (f *fixture) submitIntentMsg(t testing.TB, give ...sdk.Coin) *veiltypes.Msg
 	}
 	bz, err := payload.Marshal()
 	require.NoError(t, err)
+	// the ante values the intent at spend_commitment + bond and never reads
+	// give legs (D-065); the test declares the honest commitment — the
+	// per-denom max of the give legs, exactly what giveLegValue computes at
+	// the Reveal — so the §6.2 step-4 charge is the give value + bond, as
+	// before, and the Reveal would not slash it.
+	commitment := sdk.NewCoins()
+	for i := range give {
+		commitment = commitment.Max(sdk.NewCoins(give[i]))
+	}
+	env := veiltypes.IntentEnvelope{SpendCommitment: commitment}
+	envBz, err := env.Marshal()
+	require.NoError(t, err)
 	return &veiltypes.MsgSubmitIntent{
 		Sender:      f.grantee.String(),
 		SenderSigil: f.sigilID,
 		Ciphertext:  bz,
+		Envelope:    envBz,
 		Bond:        sdk.NewInt64Coin("uclv", 1),
 	}
 }
