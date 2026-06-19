@@ -120,7 +120,21 @@ green and the task is reviewed + committed.
       (stay-on-v0.50 through Phase 1); fork-site CONCLAVE-TODO re-pointed
       phase-1 → phase-2 (retirement deferred to the wasmd-2.2 boundary). D-060
       already complete from planning; no source/proto/logic touched.
-- [ ] 1.3 BLS library wrap behind `ThresholdScheme` + DKG interface revision (offline)
+- [x] 1.3 BLS library wrap behind `ThresholdScheme` + DKG interface revision
+      (offline) — D-066. `crypto/threshold`: the published drand **tlock**
+      construction (IBE-over-threshold-BLS, hybrid KEM/DEM) on `drand/kyber`
+      v1.3.1 + `kyber-bls12381` v0.3.1 (pinned pre-v0.3.4 — NO go-1.24 toolchain
+      bump, `golang.org/x/*` unchanged; tlock root + age/drand-v2 avoided by
+      importing `encrypt/ibe` directly; DEM = stdlib AES-256-GCM). Authored
+      surface = KEM/DEM wrapper + `id = H(DST‖C_dem)` derivation + the
+      `ThresholdScheme` adapter + share-gating; everything else is library. Per-
+      share proof = the INTRINSIC pairing check (`tbls.VerifyPartial`), no NIZK.
+      Two barriers: gate = liveness/robustness, IBE FO check = integrity (corrupt
+      share RED-without-gate, proven). `EpochSetup` REMOVED from the consuming
+      interface (D-062) → multi-round `DKGParticipant`, shares node-local.
+      Round-trip t-of-n, t-1-cannot/t-can (info-theoretic), deterministic Combine.
+      StubScheme stays the live scheme; no consensus wiring. `make lint test` +
+      determinism vector green. 1.8 audit obligations recorded in D-066.
 - [ ] 1.4 Adversarial test harness (offline: t−1 cannot decrypt, t can; corrupt/withheld excluded)
 - [ ] 1.5 DKG epoch lifecycle — transport design sub-review BEFORE code (STOP #1)
 - [ ] 1.6 Vote-extension share transport + Reveal wiring

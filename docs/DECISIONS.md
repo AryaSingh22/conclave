@@ -1626,3 +1626,135 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   the Reveal is forced by the ciphertext being unreadable in ante and by the proto's
   inability to distinguish absent from zero. The result is strictly simpler than the
   §4 draft and provably the same code path that ships in Task 1.6.
+
+## D-066 — Task 1.3: BLS threshold-encryption construction = tlock (IBE-over-threshold-BLS); library/version selection; `EpochSetup` redesigned to a DKG sub-protocol
+
+- **Date:** 2026-06-19 (Phase-1 Task 1.3)
+- **SPEC:** §8 (the Veil for real), §6.3 ThresholdScheme, §11.6 determinism;
+  PHASE1_DESIGN §2/§3 (FLAGS I/II/III); resolves the construction left open by
+  **D-061** and the interface revision mandated by **D-062**. OFFLINE task — no
+  consensus wiring; the live chain keeps `reveal.StubScheme` until Task 1.6.
+- **Construction (the §8(d)/Task-1.8 audit unit):** **drand `tlock` timelock
+  encryption** (Gailly–Melissaris et al., a published, network-deployed scheme —
+  adopted, NOT authored). Hybrid KEM/DEM: a random DEK encrypts the payload
+  (AES-256-GCM, the DEM); the DEK is Boneh–Franklin-IBE-wrapped to a per-
+  ciphertext identity (the KEM); the IBE decryption key for that identity is a
+  **threshold BLS signature** on it. Per-share validity proof = the **intrinsic
+  pairing check** `e(σ_i,g2)==e(H(id),PK_i)` (`tbls.VerifyPartial`) — no separate
+  NIZK (FLAG III satisfied by construction; the share IS the proof).
+  - **Group orientation:** signatures / IBE-decryption-keys on **G1**, public
+    keys / epoch master on **G2** (the drand "sigs-on-G1" scheme). Matched pair:
+    `ibe.EncryptCCAonG2(master∈G2, id, dek)` ⇄ `ibe.DecryptCCAonG2(σ∈G1, ·)`,
+    where `σ = s·H_G1(id)` is exactly the BLS signature on `id` under
+    `master = s·G2`. The recovered threshold signature on `id` IS the IBE
+    decryption key. The SAME pairing suite drives IBE and tBLS so the G1
+    hash-to-curve DST matches (the `id` bytes IBE hashes are the bytes tBLS signs).
+- **Authored vs library boundary (held literally — the audit contract):**
+  - **LIBRARY** (`github.com/drand/kyber` + `github.com/drand/kyber-bls12381`):
+    pairing groups + hash-to-curve, secret sharing & Lagrange (`share`), threshold
+    BLS sign/verify (`sign/tbls`), the Pedersen **DKG** (`share/dkg`), and the
+    **BF-IBE** primitive (`encrypt/ibe`).
+  - **AUTHORED** (`crypto/threshold`): (1) the KEM/DEM hybrid wrapper (stdlib
+    AES-256-GCM, zero new dep); (2) the **identity-derivation** rule (see below);
+    (3) the `reveal.ThresholdScheme` adapter; (4) the share-verification **gating**
+    before recovery. No novel cryptographic primitive is authored.
+- **Identity derivation (AUTHORED, security-relevant — a documented divergence
+  from tlock):** `id = SHA-256(DST ‖ C_dem)`, `DST = "conclave/veil/ibe-identity/v1"`.
+  tlock's identity is an EXTERNAL label (a future beacon round the client knows in
+  advance, via `scheme.DigestBeacon`). Conclave clients **cannot predict their
+  future ordering position** at encryption time, so the identity instead binds to
+  the **DEM body** (fixed before KEM encapsulation — which also breaks the
+  circularity, since the KEM output depends on the identity). This is forced by
+  Conclave's architecture, not an improvisation of tlock's hashing: the identity's
+  hash-to-curve is still performed inside the library IBE with its own domain
+  separation; only the *preimage bytes* differ (DEM body vs. round), which they
+  must. Per-ciphertext identity ⇒ revealing one ciphertext's shares cannot decrypt
+  another. **Flagged for the Task-1.8 audit** as the one authored, security-bearing
+  choice that diverges from the reference.
+- **Two INDEPENDENT barriers (gate = liveness, IBE FO check = integrity),
+  proven.** `Combine` runs `VerifyPartial` over every share and excludes any that
+  fails BEFORE recovery; recovery uses the **raw, non-verifying** Lagrange
+  primitive (`share.RecoverCommit`), NOT `tbls.Recover` (which self-filters bad
+  shares and would mask the gate's role). Empirically, bypassing the gate makes
+  `Combine` **ERROR** (`"invalid proof: rP check failed"`) on a forged-but-valid-
+  point share — RED-without-gate, demonstrated not asserted. The precise division
+  of labour: the **gate is the LIVENESS/ROBUSTNESS barrier** — it excludes
+  adversarial shares in O(n) so recovery succeeds from ANY t honest shares;
+  without it one bad share poisons the first-t Lagrange set and forces retry →
+  CANCEL of a decryptable intent (a single-bad-validator DoS) — this robustness
+  is what FLAG III buys. The **library IBE FO/CCA rP check is the INDEPENDENT
+  INTEGRITY barrier** — a wrong recovered signature deterministically ERRORS,
+  never silently corrupts into a plausible wrong plaintext. (An earlier draft
+  called the gate the "sole guard against a poisoned recovery"; that overstated
+  it — integrity rests on the audited library FO check, not the authored gate,
+  which is the safer division and the corrected claim.)
+- **t-1 boundary is information-theoretic, not an early reject.** At the raw
+  primitive, t-1 shares make `share.RecoverCommit` ERROR ("not enough good public
+  shares") — there is NO "wrong σ" to compute, because t-1 points underdetermine
+  a degree-(t-1) polynomial (Shamir perfect secrecy: t-1 shares reveal zero about
+  σ). The "not yet vs. rejected" liveness semantic is delivered at the `Combine`
+  API: t-1 *valid* shares → `ErrInsufficientShares` (retry next block), distinct
+  from the malformed/INVALID path; and because the gate runs FIRST, (t-1 genuine
+  + 1 forged) collapses to t-1 valid → retry — a bad share cannot fake progress
+  to t.
+- **`EpochSetup` redesign (D-062 / FLAG II):** the Phase-0 single-caller
+  `EpochSetup(valset) ([]KeyShare)` is REMOVED from `reveal.ThresholdScheme`
+  (which trims to the pure consuming surface: Encrypt / PartialReveal / Combine /
+  Threshold). Key generation becomes a multi-round **`DKGParticipant`** (wrapping
+  `share/dkg`: `Round1Deal → Round2Response → Finalize`) producing node-local
+  `EpochKeyMaterial` — the secret share NEVER aggregates at one node. The offline
+  `RunDKGInProcess(n,t)` harness drives the rounds in-process passing only public
+  bundles (Tasks 1.3/1.4); real transport is the Task-1.5 design sub-review.
+  `StubScheme` keeps satisfying the trimmed interface; the chain is untouched.
+- **Determinism (§11.6):** `Encrypt` is client-side/off-chain (`crypto/rand`).
+  The on-chain paths take NO fresh randomness — a BLS signature share is
+  deterministic (`σ_i = sk_i·H(id)`), the gate is a deterministic pairing check
+  over a sorted/deduped share set (no map-iteration into output), and Lagrange +
+  IBE/AEAD decryption are deterministic given `(shares, ct)`. Verified by
+  `TestCombineDeterministic` (identical plaintext across orderings/repeats) and
+  `TestThresholdExactBoundary` (t-1 genuinely cannot recover at the raw primitive;
+  t can). The DKG's `crypto/rand` is off-chain (a validator protocol), per D-061.
+- **Library/version selection + footprint (the D-061 evaluation, recorded):**
+  - `github.com/drand/kyber v1.3.1` (the drand fork — it, NOT `go.dedis.ch/kyber/v3`,
+    carries `encrypt/ibe`) and `github.com/drand/kyber-bls12381 v0.3.1`. Both go
+    directive `1.18`. **License:** MPL-2.0 (file-level copyleft — fine for linking
+    a Go binary, per D-061); verify on bump. **Maintenance/audit:** drand-
+    production, externally-audited-adjacent threshold stack.
+  - **`drand/tlock` is NOT imported.** Its IBE primitive lives in
+    `drand/kyber/encrypt/ibe` (importable in isolation); tlock's ROOT package drags
+    in `filippo.io/age` + `github.com/drand/drand/v2` (the live drand node) and is
+    avoided. The DEM is **stdlib AES-256-GCM** (no `golang.org/x/crypto` dep).
+  - **Footprint measured (Q1 condition):** pinning the pre-`v0.3.4` versions keeps
+    the **go directive at 1.23 — NO toolchain bump** and **`golang.org/x/*`
+    unchanged**; module count 761→~772 (kyber, kyber-bls12381, and small pure-Go
+    transitives: circl, clockwork, edwards25519). `kyber-bls12381@latest` (v0.3.4)
+    would have forced go 1.24 + x/* churn — hence the pin. Footprint is ACCEPTABLE;
+    no hand-rolled BF-IBE KEM was needed (which would have required explicit
+    sign-off).
+- **Task-1.8 audit obligations (authored surface — scope made explicit, not
+  left to be rediscovered):**
+  - **(a) Composed KEM/DEM IND-CCA under attacker-CHOSEN identity.** Unlike tlock
+    (identity = a fixed external beacon round), Conclave's identity is
+    `id = H(DST‖C_dem)` — a hash of attacker-chosen ciphertext bytes. The
+    mix-and-match closure argument (swap `C_dem` → the IBE FO `rP` check rejects;
+    swap `C_kem` → the AES-256-GCM tag rejects; only a fresh self-consistent
+    triple is constructible, i.e. "submit a new intent") is **INFORMAL**. A
+    formal IND-CCA proof of the composed BF-IBE-KEM + AES-256-GCM-DEM under
+    adversarial identity is an audit deliverable.
+  - **(b) DST-uniqueness check.** Confirm `"conclave/veil/ibe-identity/v1"` is
+    unique across the codebase's SHA-256 preimage tags (no collision with another
+    hash/signing domain), and that the library G1 hash-to-curve DST is shared by
+    the IBE and tBLS paths (holds by construction via one `newSuite()`, but
+    verify under audit). **Pre-mainnet checklist item** (a simple grep + a suite-
+    identity assertion).
+  - **(c) The four authored pieces** (KEM/DEM wrapper, `deriveIdentity`, the
+    `reveal.ThresholdScheme` adapter, the share-gating) are the ENTIRE authored
+    surface. Everything else — pairing groups + hash-to-curve, `share` Lagrange,
+    `sign/tbls`, `share/dkg`, and `encrypt/ibe` — is library code adopted from the
+    published drand tlock construction, not authored here.
+- **Acceptance (offline, all green):** `make lint test` EXIT=0 incl.
+  `crypto/threshold`; round-trip `Encrypt→PartialReveal→Combine` recovers t-of-n
+  (n∈{4,5,7,10}, t=⌊2n/3⌋+1); corrupt share deterministically rejected (RED
+  without the gate, proven); t-1 cannot / t can (at the raw primitive); `Combine`
+  deterministic; DKG shares node-local. SPIKES were throwaway and not committed;
+  StubScheme remains the live scheme; no consensus wiring.

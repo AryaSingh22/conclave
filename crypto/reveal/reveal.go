@@ -1,20 +1,17 @@
 // Package reveal defines the ThresholdScheme interface behind the Veil's
 // Reveal (SPEC §6.3, §8). Phase 0 ships StubScheme (identity); Phase 1
-// replaces the implementation with BLS12-381 threshold encryption behind
-// this exact interface — the consuming state machines never change.
-package reveal
-
-// Validator is the minimal validator identity a DKG epoch setup needs.
-// Phase 0 carries it only to pin the §6.3 interface shape.
+// supplies a BLS12-381 threshold-encryption implementation (crypto/threshold)
+// behind this exact interface — the CONSUMING state machines (Encrypt,
+// PartialReveal, Combine, Threshold) never change their signatures.
 //
-// CONCLAVE-TODO(phase-1): align with CometBFT validator updates when the
-// epoch DKG lands (SPEC §8: epochs reuse validator-set update triggers).
-type Validator struct {
-	// Address is the validator's consensus address bytes.
-	Address []byte
-	// Power is the validator's voting power.
-	Power int64
-}
+// Key GENERATION is deliberately NOT on this interface. The Phase-0 stub
+// carried an EpochSetup(valset) ([]KeyShare) method, but a real distributed
+// DKG never returns all key shares to a single caller (that defeats the
+// threshold model). Per D-062 / PHASE1_DESIGN §3 (FLAG II), epoch key
+// generation is a multi-round DKG sub-protocol with node-local shares; it
+// lives in crypto/threshold (DKGParticipant), not here. This interface is
+// the pure CONSUMING surface.
+package reveal
 
 // EpochPubKey is the epoch-wide threshold public key intents encrypt to.
 type EpochPubKey []byte
@@ -32,8 +29,6 @@ type RevealShare []byte
 // impossibility is enforced by the x/veil state machine instead of by
 // cryptography, against the same interface.
 type ThresholdScheme interface {
-	// EpochSetup runs the epoch DKG over the validator set (Phase 1).
-	EpochSetup(valset []Validator) (EpochPubKey, []KeyShare, error)
 	// Encrypt encrypts an intent payload to the epoch key (client side).
 	Encrypt(epk EpochPubKey, payload []byte) ([]byte, error)
 	// PartialReveal produces one validator's reveal share for a ciphertext.

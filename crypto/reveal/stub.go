@@ -12,11 +12,6 @@ type StubScheme struct{}
 
 var _ ThresholdScheme = StubScheme{}
 
-// EpochSetup is a no-op in stub mode: there is no epoch key material.
-func (StubScheme) EpochSetup(valset []Validator) (EpochPubKey, []KeyShare, error) {
-	return EpochPubKey{}, make([]KeyShare, len(valset)), nil
-}
-
 // Encrypt is the identity: the "ciphertext" is the plaintext payload.
 func (StubScheme) Encrypt(_ EpochPubKey, payload []byte) ([]byte, error) {
 	return payload, nil
