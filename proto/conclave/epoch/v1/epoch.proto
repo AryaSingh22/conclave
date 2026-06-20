@@ -1,0 +1,94 @@
+syntax = "proto3";
+package conclave.epoch.v1;
+
+import "amino/amino.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/epoch/types";
+
+// EpochStatus is the lifecycle of one DKG epoch (PHASE1_DESIGN §2(b), D-068).
+// FORMING → ACTIVE → DRAINING → RETIRED is the success path; FAILED is the
+// graceful-degradation terminus when the DKG does not reach agreement (the
+// chain never halts; the prior ACTIVE epoch's key stays the encryption target).
+enum EpochStatus {
+  option (gogoproto.goproto_enum_prefix) = false;
+
+  // EPOCH_STATUS_UNSPECIFIED is the zero value and never stored.
+  EPOCH_STATUS_UNSPECIFIED = 0;
+  // EPOCH_STATUS_FORMING: the on-chain DKG transport windows are open; this
+  // epoch is not yet an encryption target.
+  EPOCH_STATUS_FORMING = 1;
+  // EPOCH_STATUS_ACTIVE: DKG succeeded; this epoch's key is the CURRENT
+  // encryption target (clients fetch it to Encrypt).
+  EPOCH_STATUS_ACTIVE = 2;
+  // EPOCH_STATUS_DRAINING: a successor epoch is ACTIVE, but this epoch still
+  // has in-flight (sealed-but-unrevealed) ciphertexts; its key material is
+  // retained so those drain (PHASE1_DESIGN §2(b) drain-before-rotate).
+  EPOCH_STATUS_DRAINING = 3;
+  // EPOCH_STATUS_RETIRED: fully drained; key material may be dropped and this
+  // epoch is no longer decryptable.
+  EPOCH_STATUS_RETIRED = 4;
+  // EPOCH_STATUS_FAILED: the DKG did not reach >= t agreement before the
+  // confirm window closed; no key was published (degraded — no rotation).
+  EPOCH_STATUS_FAILED = 5;
+}
+
+// CommitteeMember is one validator in an epoch's DKG committee, snapshotted from
+// the bonded validator set at the epoch boundary (deterministic order: by
+// valoper address ascending; dkg_index is the position in that order).
+message CommitteeMember {
+  // dkg_index is the DKG participant index (0-based, by sorted valoper).
+  uint32 dkg_index = 1;
+  // valoper is the validator operator address (concvaloper1...).
+  string valoper = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+}
+
+// Epoch is one DKG epoch's chain-visible record. It holds NO secret material —
+// the per-validator secret share is node-local and never enters chain state
+// (D-062/D-068); only the public master key + verification polynomial appear.
+message Epoch {
+  // id is the monotonically increasing epoch number.
+  uint64 id = 1;
+  // status is the lifecycle state.
+  EpochStatus status = 2;
+  // epoch_pub_key is the threshold master public key (BLS12-381 G2, marshaled);
+  // empty until ACTIVE. This is what clients Encrypt to (PHASE1_DESIGN §2 perf
+  // FLAG: EpochPubKey distribution via queryable state).
+  bytes epoch_pub_key = 3;
+  // commits is the public verification polynomial (G2 coefficients, marshaled);
+  // commits[0] == epoch_pub_key. Empty until ACTIVE. The material the Task-1.6
+  // Reveal and clients use to verify shares.
+  repeated bytes commits = 4;
+  // committee is the DKG committee, sorted by valoper ascending.
+  repeated CommitteeMember committee = 5 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // threshold is t = floor(2n/3)+1 for this epoch's committee size n.
+  uint32 threshold = 6;
+  // formed_height is the boundary height this epoch opened FORMING.
+  uint64 formed_height = 7;
+  // deal_deadline is the height the deal window closes (exclusive); the
+  // response window runs [deal_deadline, confirm_deadline).
+  uint64 deal_deadline = 8;
+  // confirm_deadline is the height the confirm window closes (exclusive) and
+  // finalize runs (success → ACTIVE+rotate, else FAILED).
+  uint64 confirm_deadline = 9;
+}
+
+// Params are the governable x/epoch parameters (PHASE1_DESIGN §2(b), D-068).
+message Params {
+  // epoch_length_blocks is the epoch cadence — the boundary fires when
+  // height % epoch_length_blocks == 0 (dev default ~1 day of blocks).
+  uint64 epoch_length_blocks = 1;
+  // deal_window_blocks is the Round-1 (deal) collection window length.
+  uint64 deal_window_blocks = 2;
+  // response_window_blocks is the Round-2 (response) collection window length.
+  uint64 response_window_blocks = 3;
+  // confirm_window_blocks is the Round-3 (key-confirmation) window length;
+  // finalize runs at its close.
+  uint64 confirm_window_blocks = 4;
+  // min_committee_size is the smallest bonded set that can run a DKG; below it
+  // the boundary does not open an epoch (degraded — keeps the prior key).
+  uint32 min_committee_size = 5;
+  // max_bundle_bytes caps one DKG transport message (DoS bound on VE/tx size).
+  uint32 max_bundle_bytes = 6;
+}

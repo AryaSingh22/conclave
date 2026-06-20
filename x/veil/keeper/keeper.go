@@ -40,6 +40,12 @@ type Keeper struct {
 	sessionKeeper types.SessionKeeper
 	priceSource   types.PriceSource
 
+	// epochKeeper is wired AFTER construction via SetEpochKeeper to break the
+	// veil↔epoch cycle (veil needs IsDecryptableEpoch for submit-time epoch-tag
+	// validation; epoch needs HasInFlightForEpoch for drain-before-rotate). nil
+	// ⇒ no epoch system is wired (stub mode) and the epoch-tag check is skipped.
+	epochKeeper types.EpochKeeper
+
 	// authority is the address allowed to update params (gov module account).
 	authority string
 }
@@ -73,6 +79,13 @@ func NewKeeper(
 		authority:     authority,
 	}
 }
+
+// SetEpochKeeper wires the x/epoch keeper after both keepers exist (the
+// veil↔epoch cycle, D-068). App construction MUST call this before the veil
+// AppModule is captured by RegisterModules so the msg-server copy observes it
+// (mirrors mandate.SetLiveExposureFn). When unset (veil unit tests), the
+// submit-time epoch-tag check is skipped and epoch_id==0 stub intents pass.
+func (k *Keeper) SetEpochKeeper(ek types.EpochKeeper) { k.epochKeeper = ek }
 
 // GetAuthority returns the module's authority address.
 func (k Keeper) GetAuthority() string {

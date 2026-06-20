@@ -31,6 +31,18 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 		return "", err
 	}
 
+	// D-068 epoch-tag validation (both edges). A non-zero envelope epoch_id must
+	// reference a CURRENTLY-DECRYPTABLE epoch (ACTIVE or DRAINING): this rejects
+	// both a RETIRED epoch (past edge) and a not-yet-published epoch (future edge
+	// the client could not have fetched to encrypt to), so the Reveal can always
+	// select a live share set for an accepted ciphertext. epoch_id==0 is the
+	// stub/unset path (always allowed); a nil epochKeeper means no epoch system
+	// is wired (stub mode) — the check is skipped so stub-mode behavior is
+	// uniform with Phase 0.
+	if env.EpochId != 0 && k.epochKeeper != nil && !k.epochKeeper.IsDecryptableEpoch(ctx, env.EpochId) {
+		return "", errorsmod.Wrapf(types.ErrEpochNotDecryptable, "epoch_id %d", env.EpochId)
+	}
+
 	owner, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return "", err

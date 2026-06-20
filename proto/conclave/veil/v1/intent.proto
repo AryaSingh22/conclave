@@ -52,6 +52,15 @@ message IntentEnvelope {
     (gogoproto.nullable) = false,
     (amino.dont_omitempty) = true
   ];
+  // epoch_id tags which DKG epoch's key this intent's ciphertext was encrypted
+  // to (PHASE1_DESIGN §2(b), D-068). The Reveal selects that epoch's share set,
+  // so an epoch-e ciphertext stays decryptable across a valset-change rotation
+  // (drain-before-rotate). Validated at submission against the currently-
+  // decryptable epochs: 0 means "stub/unset" (the StubScheme path, always
+  // allowed in Phase-0/stub mode); a non-zero id must reference an ACTIVE or
+  // DRAINING epoch — rejecting BOTH a RETIRED (past) epoch and a not-yet-
+  // published (future) epoch the client could not have fetched to encrypt to.
+  uint64 epoch_id = 6;
 }
 
 // IntentPayload is the encrypted part (plaintext in Phase 0) — SPEC §5.1.

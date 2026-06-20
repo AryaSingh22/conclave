@@ -1861,3 +1861,177 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   (test-only change, no source/sim touched). `StubScheme` remains the live scheme;
   no consensus wiring. Next: Task 1.5 (DKG epoch lifecycle) — transport design
   sub-review BEFORE code (STOP #1), inheriting seams (a)/(b)/(c) above.
+
+## D-068 — Task 1.5: DKG epoch lifecycle — new `x/epoch` module; on-chain-tx DKG transport (Candidate A, STOP #1 approved); height-based boundary + staking-snapshot committee; drain-before-rotate; failed-DKG degradation
+
+- **Date:** 2026-06-20 (Phase-1 Task 1.5)
+- **SPEC:** §8 (the Veil for real), §6.3 ThresholdScheme, §11.6 determinism;
+  PHASE1_DESIGN §2(b) (epoch boundary / EpochPubKey publication / drain-before-
+  rotate / CANCEL-as-drain-terminus / grace-window fallback) and §5 (Task 1.5
+  carries a transport design sub-review as its own stop); builds on **D-066**
+  (the tlock construction + `DKGParticipant`) and **D-067** (the three seams
+  (a)/(b)/(c) carried forward). The live x/veil Reveal stays on `StubScheme`
+  until Task 1.6; 1.5 establishes the epoch KEY lifecycle + its queryable chain-
+  state representation, NOT the per-block share transport (that is 1.6).
+- **TWO MANDATORY STOPS (like 0.8).** STOP #1 reviewed the overall plan AND the
+  DKG-message-TRANSPORT design in isolation BEFORE any transport code (the single
+  most unspecified, highest-risk Phase-1 decision, the §2(b) FLAG); STOP #2 was
+  the pre-commit review. Both passed.
+- **TRANSPORT = on-chain transactions (Candidate A), APPROVED at STOP #1.**
+  Committee validators submit DKG round bundles as txs; the chain is a
+  DETERMINISTIC RELAY keyed by `(epoch id, dkg index)` and NEVER interprets a
+  bundle — only validators (off-chain, a protocol, D-061) serialize/deserialize
+  and run the kyber DKG, so consensus code stays crypto-free. Rejected
+  alternatives: **vote-extension-injected** (pulls 1.6's VE surface forward into
+  1.5, and VE's per-height one-shot model fits a windowed multi-round DKG
+  poorly); **side channel** (needs a new p2p reactor — 1.7 infra — and does NOT
+  remove the on-chain agreement step). The KEY INSIGHT recorded at STOP #1:
+  Candidate A's deal-window/response-window/declare-FAILED IS the §2(b) grace-
+  window/seam-(b) fallback in its natural form — transport and failure-handling
+  are ONE mechanism, not two.
+- **Module placement = a NEW `x/epoch` module** (codespace 16xx). Clean long-term
+  seam: it owns boundary detection, the DKG msg transport, EpochPubKey
+  publication to queryable state, and the staking→veil bridge; 1.6 sources epoch
+  material from `x/epoch`, not veil internals. It holds NO module account (no coin
+  custody) and writes NO secret material — per-validator secret shares are node-
+  local (D-062).
+- **The DKG transport, end to end (three windows, three msg types).** A FORMING
+  epoch runs `deal → response → confirm` windows in sequence within the epoch:
+  - `MsgSubmitDeal` / `MsgSubmitResponse` carry the kyber `DealBundle` /
+    `ResponseBundle` as OPAQUE bytes (authored serde lives in
+    `crypto/threshold/transport.go`, off-chain validator-side — kyber ships no
+    bundle serializer; drand serializes in its own repo). Round-trip is byte-
+    stable so a deserialized deal bundle's `Hash()` still verifies the dealer
+    signature in `ProcessDeals`.
+  - `MsgConfirmEpochKey` carries a node's LOCALLY finalized `(epoch_pub_key,
+    commits)`. The chain CANNOT compute the public key itself (that needs node-
+    local DKG state, and re-deriving it outside kyber would be authored crypto in
+    consensus — rejected), so it AGREES by counting: finalize publishes the value
+    that **≥ t committee members confirm byte-identically**, else FAILED. This is
+    deterministic — counting over committed bytes, no crypto in BeginBlock/
+    EndBlock.
+  - **Division of labour + security basis (STOP #2 Q2, named explicitly).** Nodes
+    run the kyber `Finalize` OFF-CHAIN; consensus only COUNTS byte-identical
+    confirmation strings (a trivially deterministic op) — keeping kyber out of the
+    consensus path entirely, the cleaner realization of "only public bundles
+    transit state" than recompute-in-consensus would have been. The NEW security
+    basis this introduces, named because it differs from recompute-by-
+    construction: **the published key's correctness rests on the honest-threshold
+    assumption** (≥ t honest nodes will not confirm a wrong key), NOT on
+    consensus recomputation. This is the standard threshold assumption and is
+    acceptable, but it is the basis — a t-of-n confirmation quorum, not a
+    consensus-recomputed value. (Cross-node agreement on the SAME key is the
+    DKG's own guarantee; the chain trusts the ≥ t identical confirmations.)
+  - **Justification round DEFERRED (STOP #1 + #2 approved — do NOT pull
+    forward), CONSEQUENCE + forward seam framed precisely:** 1.5 does NOT
+    implement kyber's faulty-dealer justification round. The threat to close is
+    **"a dealer submits a faulty deal repeatedly to force the epoch to FAILED"**;
+    the justification round EXCLUDES that dealer (and proceeds with the remaining
+    qualified dealers) rather than failing the whole epoch. Until then, such a
+    dealer can DENY ROTATION (force the prior key to stay active each epoch) — a
+    bounded, survivable liveness-grief (the chain never halts, encryption
+    continues under the prior key; proven by `TestFailedDKGDegradesNoRotation`).
+    Pulling the full justification round forward would stack two hard things on
+    the phase's highest-risk task, so it is Task 1.6/1.7 work. Linked to seam (b).
+- **Epoch boundary = HEIGHT-BASED + staking-snapshot committee (resolves the
+  §2(b) underspecification).** The boundary fires at `height %
+  epoch_length_blocks == 0` (mirroring the proven `x/session SessionBoundary`),
+  and the committee is the bonded set snapshotted from staking, sorted by valoper
+  ascending (dkg_index = sorted position). Reacting to raw ABCI `ValidatorUpdate`
+  DIFFS would be nondeterministic to reconstruct; a height boundary with the
+  staking-finalized bonded set is deterministic AND is exactly the set CometBFT
+  will use — the honest reading of §2(b)'s "valset-update trigger." LOAD-BEARING
+  ORDERING: `x/epoch`'s EndBlocker is registered AFTER staking's in
+  `app_config.go` so the snapshot reads the set staking has committed for the
+  block (asserted in code comments + `TestBoundaryDetectionDeterministic`).
+  Mid-epoch joins wait (the committee is frozen for the epoch).
+- **EpochPubKey publication.** The epoch master public key (G2) + the public
+  `commits` (the verification polynomial 1.6/clients need) are published to
+  queryable state on the ACTIVE epoch record (`Query/CurrentEpoch`, epoch-tagged)
+  — the §2 perf FLAG (EpochPubKey distribution). Secret shares NEVER touch chain
+  state.
+- **Status machine + drain-before-rotate (seams a/c against real chain state).**
+  `FORMING → ACTIVE → DRAINING → RETIRED` (success) | `FORMING → FAILED`
+  (degraded). On DKG success the successor goes ACTIVE IMMEDIATELY (the new
+  encryption target) and the prior ACTIVE epoch goes DRAINING — RETAINED, still
+  reveal-capable — NOT dropped. Clients tag each ciphertext with its `epoch_id`
+  (new `IntentEnvelope.epoch_id` field) so the Reveal selects the matching share
+  set across the overlap. A DRAINING epoch RETIRES only once it has no in-flight
+  (sealed-but-unrevealed) ciphertext tagged to it (`x/veil
+  HasInFlightForEpoch`) — the "rotation release" gated on drain. **Seam (a)
+  CANCEL-releases-rotation:** a stuck session that CANCELs (or OPENs-and-clears)
+  leaves `SEALED_IN_SESSION`, so it stops counting as in-flight → the epoch can
+  retire; it cannot stall retirement forever. **Seam (c) partial-overlap:** the
+  retained-share selection keys by EPOCH id, not validator identity, so a
+  committee that partially overlaps the prior one (1.4 only modeled FULL
+  independence) still isolates — proven by `TestPartialOverlapResharing` (two
+  chain-driven DKGs with overlapping committees yield independent keys; an
+  epoch-e ct decrypts under epoch-e material and NOT under epoch-(e+1) material).
+- **Epoch-tag validation = BOTH edges (D-068, STOP #1 confirmation).**
+  `MsgSubmitIntent` rejects an `epoch_id` that is not CURRENTLY DECRYPTABLE
+  (`IsDecryptableEpoch` ⇒ ACTIVE or DRAINING): a RETIRED epoch (PAST edge) AND a
+  not-yet-published FORMING/FAILED/unknown epoch (FUTURE edge the client could
+  not have fetched) both reject through the one gate. `epoch_id == 0` is the
+  stub/unset path (always allowed); a nil `epochKeeper` (veil unit tests) skips
+  the check so stub-mode behavior stays uniform with Phase 0. Chain-stamping at
+  seal was REJECTED — the tag must reflect the key the client actually encrypted
+  to, which a seal-time stamp could disagree with.
+- **Failed-DKG degradation (chain never halts).** Every degraded path keeps the
+  chain live and the prior key the encryption target: too few bonded validators
+  (< `min_committee_size`) opens NO epoch; a sub-threshold DKG is FAILED with NO
+  rotation; a stuck drain just keeps the epoch DRAINING. Proven by
+  `TestFailedDKGDegradesNoRotation` and the boundary test's min-committee branch.
+- **Determinism (§11.6).** All CHAIN-STATE transitions are deterministic
+  functions of committed inputs — boundary detection, the sorted committee
+  snapshot, opaque-bundle collection, confirmation tally (group by bytes over a
+  SORTED key list — no map iteration into output), publication, rotation,
+  retirement. The DKG COMPUTATION (dealing) uses `crypto/rand` locally per
+  validator (off-chain, D-061), but its chain-visible output (published key,
+  epoch id, status) is a deterministic function of the agreed committed bundles.
+  `epoch_length_blocks` defaults to 17280 (~1 day) — far larger than the 500-
+  block determinism sim — so `x/epoch` is INERT in the sim (genesis params only,
+  no per-block writes, no boundary). The determinism vector stays REPRODUCIBLE
+  (the D-063 gate is cross-process reproducibility, not a frozen golden hash; the
+  new module legitimately changes the app hash but identically across runs — 5
+  seeds byte-identical across two independent processes, re-verified at 1.5).
+- **Determinism coverage of the new chain-state surface (STOP #2 verification —
+  named, not assumed).** Because the 500-block app sim does NOT reach an epoch
+  boundary, the new transitions (boundary detection, committee snapshot,
+  transport collection, confirmation tally, publication, rotation, drain) are
+  determinism-covered by: (1) **`TestEpochChainStateDeterministic`** — REPLAYS one
+  fixed DKG transcript (identical committee + identical opaque bundle/confirmation
+  bytes) into two INDEPENDENT keepers through identical block heights across two
+  epoch boundaries + a rotation, and asserts the full epoch chain state is
+  byte-identical (isolating deterministic chain state from the off-chain DKG
+  randomness); (2) **`TestDKGLifecyclePublishesConsistentKey`** — cross-NODE
+  agreement (every validator's locally finalized key is byte-identical and equals
+  the chain-published key); (3) the boundary/rotation/tally unit tests, which are
+  deterministic by construction (sorted committee, sorted-key tally — no map
+  iteration into output). **NAMED FORWARD GAP:** no test drives a real epoch
+  boundary inside the full multi-validator APP sim (epoch_length is realistically
+  ~1 day); **Task 1.7's multi-node adversarial localnet must exercise a real
+  boundary + rotation end-to-end** — recorded here so it is not silently assumed
+  covered.
+- **Epoch-0 genesis bootstrap = a RECORDED FORWARD SEAM to Task 1.6.** Genesis
+  ships no ACTIVE epoch and no key (`current_epoch_id = 0`); since the live
+  encryption path is `StubScheme` until 1.6, epoch-0 bootstrap (a genesis-
+  provisioned key vs. first-successful DKG) is correctly deferred — recorded,
+  not lost.
+- **Acceptance (all green):** `make lint test` EXIT=0 (whole app builds + boots;
+  module-manager ordering with `x/epoch` after staking in EndBlockers / in the
+  InitGenesis order); `crypto/threshold` transport serde + DKG-via-transport
+  consistency (`TestDealBundleSerdeRoundTrip`, `TestDKGViaTransportConsistentKey`);
+  `x/epoch/keeper` lifecycle (`TestDKGLifecyclePublishesConsistentKey` — the
+  multi-validator DKG completes through the on-chain transport and the published
+  EpochPubKey is byte-consistent across all nodes AND decrypts a t-of-n reveal;
+  `TestDrainBeforeRotateAndCancelReleases` — seam (a); `TestPartialOverlapResharing`
+  — seam (c); `TestFailedDKGDegradesNoRotation`; `TestBoundaryDetectionDeterministic`;
+  `TestIsDecryptableEpochBothEdges`); `x/veil` `TestSubmitIntentEpochTagBothEdges`;
+  determinism vector reproducible over the new chain-state surface. NO
+  Reveal/ExtendVote per-block share wiring (1.6); `StubScheme` remains the live
+  scheme. Seam (b) grace-window: its crypto basis is proven (D-067) and its
+  natural chain form (FAILED → no rotation → prior key stays) ships here; an
+  explicit bounded-retention WINDOW knob remains available if 1.5/1.6 harnesses
+  show liveness stalls. Next: Task 1.6 (vote-extension share transport + Reveal
+  wiring) — sources epoch material from `x/epoch`, closes the justification-round
+  liveness-grief, and handles epoch-0 bootstrap.

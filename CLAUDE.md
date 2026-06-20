@@ -152,8 +152,24 @@ green and the task is reviewed + committed.
       by name, not vacuously. Three seams carried to 1.5 (D-067): (a) CANCEL-releases-
       rotation session-state, (b) grace-window mechanism, (c) partial-overlap resharing.
       `make lint test` + determinism vector green; StubScheme stays live; no consensus wiring.
-- [ ] 1.5 DKG epoch lifecycle — transport design sub-review BEFORE code (STOP #1)
-      — inherits D-067 seams (a) CANCEL-releases-rotation, (b) grace-window, (c) partial-overlap reshare
+- [x] 1.5 DKG epoch lifecycle — D-068. New `x/epoch` module (codespace 16xx).
+      STOP #1 approved transport = **on-chain txs** (Candidate A: chain is a
+      deterministic relay of OPAQUE deal/response bundle bytes; only validators
+      run the DKG off-chain; finalize = count ≥t byte-identical key confirmations
+      — VE rejected as pulling 1.6 forward, side-channel as 1.7 infra). Boundary =
+      height-based (`height % epoch_length`) + staking-snapshot committee (epoch
+      EndBlocker AFTER staking — load-bearing); EpochPubKey+commits published to
+      queryable state, secret shares node-local. Status FORMING→ACTIVE→DRAINING→
+      RETIRED | FAILED. Drain-before-rotate REAL: successor ACTIVE immediately,
+      prior epoch DRAINS (retained) until no in-flight `epoch_id`-tagged ct, then
+      RETIRES — seam (a) CANCEL/OPEN releases it; seam (c) partial-overlap isolates
+      by epoch id not validor identity (both tested). New `IntentEnvelope.epoch_id`
+      + submit-time BOTH-edge gate (reject RETIRED past + not-yet-published future;
+      0=stub). Failed-DKG degrades (no rotation, prior key stays, chain never
+      halts). Justification round + epoch-0 bootstrap = recorded forward seams to
+      1.6 (single faulty dealer can deny rotation = bounded liveness-grief). Bundle
+      serde = `crypto/threshold/transport.go` (off-chain). `make lint test` +
+      determinism vector green; `StubScheme` stays live; no Reveal/VE wiring.
 - [ ] 1.6 Vote-extension share transport + Reveal wiring
 - [ ] 1.7 Multi-node adversarial localnet (4 validators) — Phase-1 exit
 - [ ] 1.8 External audit engagement (gates mainnet; not a code task)

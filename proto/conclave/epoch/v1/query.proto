@@ -1,0 +1,51 @@
+syntax = "proto3";
+package conclave.epoch.v1;
+
+import "amino/amino.proto";
+import "conclave/epoch/v1/epoch.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/epoch/types";
+
+// Query is the x/epoch query service. Clients fetch the CURRENT epoch's public
+// key here to Encrypt (PHASE1_DESIGN §2 perf FLAG: EpochPubKey distribution via
+// queryable chain state, epoch-tagged).
+service Query {
+  // CurrentEpoch returns the current ACTIVE epoch (the encryption target).
+  rpc CurrentEpoch(QueryCurrentEpochRequest) returns (QueryCurrentEpochResponse) {
+    option (google.api.http).get = "/conclave/epoch/v1/current";
+  }
+
+  // Epoch returns an epoch record by id.
+  rpc Epoch(QueryEpochRequest) returns (QueryEpochResponse) {
+    option (google.api.http).get = "/conclave/epoch/v1/epochs/{id}";
+  }
+
+  // Params returns the module parameters.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/conclave/epoch/v1/params";
+  }
+}
+
+message QueryCurrentEpochRequest {}
+
+message QueryCurrentEpochResponse {
+  // epoch is the ACTIVE epoch; its id is 0 when none is active yet (the 1.6
+  // bootstrap seam).
+  Epoch epoch = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryEpochRequest {
+  uint64 id = 1;
+}
+
+message QueryEpochResponse {
+  Epoch epoch = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryParamsRequest {}
+
+message QueryParamsResponse {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}

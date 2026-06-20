@@ -117,12 +117,20 @@ func (p *DKGParticipant) Finalize(resps []*dkg.ResponseBundle) (*EpochKeyMateria
 	}, nil
 }
 
-// RunDKGInProcess runs the full multi-round DKG across n simulated participants
-// IN-PROCESS, passing ONLY the public bundles between them — no participant ever
-// observes another's secret share (D-062). It returns each participant's local
-// EpochKeyMaterial (all sharing the same EpochPub / Commits). This is the
-// offline test/harness driver for Tasks 1.3 and 1.4; real transport is 1.5/1.6.
-func RunDKGInProcess(n, t int) ([]*EpochKeyMaterial, error) {
+// NewInProcessCommittee performs the shared public SETUP for a fresh epoch DKG
+// and returns the n participant handles, so a TRANSPORT layer can drive the
+// rounds itself (serialize each bundle, route it through chain state,
+// deserialize) rather than passing bundles directly in-process. The setup all
+// participants must agree on — the long-term keypairs, the dkg.Node roster, and
+// the shared nonce — is done here once; the secret shares are still produced
+// node-locally inside each participant's Finalize (D-062), never aggregated.
+//
+// This is the offline validator-setup driver for the Task-1.5 on-chain DKG
+// transport harness (D-068); RunDKGInProcess builds on it for the simpler
+// in-process path. The DKG runs over the BLS12-381 G2 group (where epoch public
+// keys live). Real per-validator long-term key custody + roster derivation from
+// the on-chain committee snapshot is Task 1.6.
+func NewInProcessCommittee(n, t int) ([]*DKGParticipant, error) {
 	if n <= 0 || t <= 0 || t > n {
 		return nil, fmt.Errorf("threshold: invalid (n=%d, t=%d)", n, t)
 	}
@@ -144,6 +152,19 @@ func RunDKGInProcess(n, t int) ([]*EpochKeyMaterial, error) {
 			return nil, err
 		}
 		parts[i] = p
+	}
+	return parts, nil
+}
+
+// RunDKGInProcess runs the full multi-round DKG across n simulated participants
+// IN-PROCESS, passing ONLY the public bundles between them — no participant ever
+// observes another's secret share (D-062). It returns each participant's local
+// EpochKeyMaterial (all sharing the same EpochPub / Commits). This is the
+// offline test/harness driver for Tasks 1.3 and 1.4; real transport is 1.5/1.6.
+func RunDKGInProcess(n, t int) ([]*EpochKeyMaterial, error) {
+	parts, err := NewInProcessCommittee(n, t)
+	if err != nil {
+		return nil, err
 	}
 
 	// Round 1 — deals.

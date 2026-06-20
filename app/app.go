@@ -68,6 +68,9 @@ import (
 	"github.com/AryaSingh22/conclave/app/unordered"
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	"github.com/AryaSingh22/conclave/crypto/reveal"
+	"github.com/AryaSingh22/conclave/x/epoch"
+	epochkeeper "github.com/AryaSingh22/conclave/x/epoch/keeper"
+	epochtypes "github.com/AryaSingh22/conclave/x/epoch/types"
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/mandate"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
@@ -132,6 +135,10 @@ type ConclaveApp struct {
 	// SessionKeeper is a pointer so SetVeilKeeper can wire the veil↔session
 	// dependency cycle in place after both keepers exist (Guard 1).
 	SessionKeeper *sessionkeeper.Keeper
+	// EpochKeeper owns the Phase-1 DKG epoch key lifecycle (PHASE1_DESIGN
+	// §2(b), D-068). A pointer so SetVeilKeeper can wire the veil↔epoch cycle in
+	// place. The live Reveal stays on StubScheme until Task 1.6.
+	EpochKeeper *epochkeeper.Keeper
 	// ReceiptKeeper is the SPEC §6.6 query/proof surface over the receipts
 	// x/session writes (D-045). It owns no store (D-052).
 	ReceiptKeeper receiptkeeper.Keeper
@@ -272,8 +279,9 @@ func NewConclaveApp(
 	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
 	veilKey := storetypes.NewKVStoreKey(veiltypes.StoreKey)
 	sessionKey := storetypes.NewKVStoreKey(sessiontypes.StoreKey)
+	epochKey := storetypes.NewKVStoreKey(epochtypes.StoreKey)
 	unorderedKey := storetypes.NewKVStoreKey(unorderedtypes.StoreKey)
-	if err := app.RegisterStores(sigilKey, mandateKey, veilKey, sessionKey, unorderedKey); err != nil {
+	if err := app.RegisterStores(sigilKey, mandateKey, veilKey, sessionKey, epochKey, unorderedKey); err != nil {
 		panic(err)
 	}
 	app.SigilKeeper = sigilkeeper.NewKeeper(app.appCodec, runtime.NewKVStoreService(sigilKey), govAuthority)
@@ -289,6 +297,16 @@ func NewConclaveApp(
 		app.appCodec, runtime.NewKVStoreService(sessionKey),
 		app.BankKeeper, app.DistrKeeper, app.AccountKeeper, app.SigilKeeper,
 		govAuthority,
+	)
+	// x/epoch owns the Phase-1 DKG epoch key lifecycle (PHASE1_DESIGN §2(b),
+	// D-068). Built BEFORE x/veil so it can be wired in as veil's EpochKeeper
+	// (submit-time epoch-tag validation); its own dependency on x/veil
+	// (HasInFlightForEpoch, for drain-before-rotate) is wired below via
+	// SetVeilKeeper once VeilKeeper exists. It reads the staking-finalized bonded
+	// set to snapshot each epoch's DKG committee.
+	app.EpochKeeper = epochkeeper.NewKeeper(
+		app.appCodec, runtime.NewKVStoreService(epochKey),
+		app.StakingKeeper, govAuthority,
 	)
 	app.VeilKeeper = veilkeeper.NewKeeper(
 		app.appCodec, runtime.NewKVStoreService(veilKey),
@@ -314,6 +332,13 @@ func NewConclaveApp(
 	// keeper value is captured by RegisterModules/setAnteHandler below, so the
 	// mandate msg-server and ante copies both observe it.
 	app.MandateKeeper.SetLiveExposureFn(app.VeilKeeper.SumLiveChargedSpendByOwner)
+	// wire the veil↔epoch cycle (D-068): veil's submit-time epoch-tag check needs
+	// IsDecryptableEpoch; epoch's drain-before-rotate needs HasInFlightForEpoch.
+	// SetEpochKeeper must run BEFORE the veil keeper value is captured by
+	// RegisterModules below (so the veil msg-server copy observes it), mirroring
+	// the mandate.SetLiveExposureFn pattern above.
+	app.VeilKeeper.SetEpochKeeper(app.EpochKeeper)
+	app.EpochKeeper.SetVeilKeeper(app.VeilKeeper)
 	// x/receipt is the SPEC §6.6 query/proof surface: it READS the receipts
 	// x/session writes (the SessionKeeper, via the SessionReceiptReader
 	// boundary; D-045/D-052) and builds ICS-23 proofs against the committed
@@ -332,6 +357,7 @@ func NewConclaveApp(
 		mandate.NewAppModule(app.appCodec, app.MandateKeeper, app.AccountKeeper, app.SigilKeeper),
 		veil.NewAppModule(app.appCodec, app.VeilKeeper, app.AccountKeeper, app.BankKeeper, app.SigilKeeper, app.MandateKeeper),
 		session.NewAppModule(app.appCodec, app.SessionKeeper, app.AccountKeeper, app.VeilKeeper),
+		epoch.NewAppModule(app.appCodec, app.EpochKeeper),
 		receipt.NewAppModule(app.appCodec, app.ReceiptKeeper),
 		unordered.NewAppModule(app.UnorderedManager),
 	); err != nil {

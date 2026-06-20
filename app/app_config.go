@@ -65,6 +65,7 @@ import (
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
 
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
+	epochtypes "github.com/AryaSingh22/conclave/x/epoch/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
@@ -183,6 +184,13 @@ var (
 						// SPEC §6.3 veil lifecycle sweeps: expiry, then the
 						// session-boundary seal that fixes intent ordering
 						veiltypes.ModuleName,
+						// PHASE1_DESIGN §2(b) DKG epoch lifecycle (D-068): boundary
+						// detection, DKG finalize, drain-before-rotate. Ordered
+						// AFTER staking (load-bearing: the committee snapshot reads
+						// the validator set staking has finalized for the block) and
+						// after veil (so RetireDrained observes the post-seal
+						// in-flight set).
+						epochtypes.ModuleName,
 						// SPEC §6.7 unordered dedup-cache sweep (app-level
 						// shim, manually registered)
 						unorderedtypes.ModuleName,
@@ -223,6 +231,10 @@ var (
 						mandatetypes.ModuleName,
 						veiltypes.ModuleName,
 						sessiontypes.ModuleName,
+						// PHASE1_DESIGN §2(b) DKG epoch lifecycle (D-068): InitGenesis
+						// sets params + id counters; no ACTIVE epoch ships (the live
+						// Reveal stays StubScheme until Task 1.6).
+						epochtypes.ModuleName,
 						// x/receipt is a store-less query/proof surface (D-052);
 						// its InitGenesis is a no-op but the module manager
 						// requires every registered module in the order list.

@@ -1,0 +1,24 @@
+syntax = "proto3";
+package conclave.epoch.v1;
+
+import "amino/amino.proto";
+import "conclave/epoch/v1/epoch.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/epoch/types";
+
+// GenesisState defines the x/epoch genesis state.
+//
+// Epoch 0 bootstrap is a RECORDED FORWARD SEAM to Task 1.6 (D-068): the live
+// encryption path is StubScheme until 1.6, so genesis ships no ACTIVE epoch and
+// no key. epochs/current_epoch_id stay empty/zero in normal genesis; they exist
+// so a test or a future bootstrapped network can import a pre-provisioned epoch.
+message GenesisState {
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // epochs are imported epoch records (normally empty).
+  repeated Epoch epochs = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // current_epoch_id is the ACTIVE epoch's id (0 = none; the 1.6 seam).
+  uint64 current_epoch_id = 3;
+  // next_epoch_id is the id the next FORMING epoch will take (0 → starts at 1).
+  uint64 next_epoch_id = 4;
+}

@@ -59,3 +59,14 @@ type SessionKeeper interface {
 	// (SPEC §6.4 EndBlock step 2 intake). The stub is a no-op.
 	IntakeRevealed(ctx sdk.Context, sessionID uint64, intentIDs []string) error
 }
+
+// EpochKeeper is the x/epoch surface x/veil depends on for submit-time epoch-tag
+// validation (PHASE1_DESIGN §2(b), D-068). An intent encrypted to a DKG epoch
+// carries that epoch's id in its envelope; submission rejects a tag that is not
+// CURRENTLY DECRYPTABLE — rejecting both a RETIRED epoch (past edge) and a
+// not-yet-published epoch (future edge the client could not have fetched). Wired
+// after construction via SetEpochKeeper; nil ⇒ no epoch system (stub mode), and
+// epoch_id==0 always passes (the StubScheme path).
+type EpochKeeper interface {
+	IsDecryptableEpoch(ctx sdk.Context, epochID uint64) bool
+}
