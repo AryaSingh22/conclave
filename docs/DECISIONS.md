@@ -1758,3 +1758,106 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   without the gate, proven); t-1 cannot / t can (at the raw primitive); `Combine`
   deterministic; DKG shares node-local. SPIKES were throwaway and not committed;
   StubScheme remains the live scheme; no consensus wiring.
+
+## D-067 — Task 1.4: offline adversarial harness for the threshold construction; kyber selection-rule probe; drain-before-rotate modeled as full rotation; three seams carried to 1.5
+
+- **Date:** 2026-06-20 (Phase-1 Task 1.4)
+- **SPEC:** §8 (the Veil for real), §6.3 ThresholdScheme, §11.6 determinism;
+  PHASE1_DESIGN §2 (drain-before-rotate, CANCEL-as-drain-terminus, grace-window
+  fallback) / §8 ("adversarial harness before consensus wiring"); builds on
+  **D-066** (the 1.3 construction) and the barrier characterization it fixed (gate
+  = LIVENESS/ROBUSTNESS; IBE FO check = INTEGRITY). OFFLINE — no consensus wiring;
+  `StubScheme` stays the live chain scheme until Task 1.6.
+- **What 1.4 is:** where the 1.3 unit tests ASSERTED the threshold/gate/determinism
+  properties on happy-path inputs, 1.4 PROVES them under an adversary model and
+  across the key-lifecycle events (churn, resharing) that 1.5/1.6 will drive. One
+  test-only file, `crypto/threshold/adversarial_test.go` (8 tests: 7 property +
+  1 selection-rule probe), reusing the 1.3 helpers. No source change; `threshold.go`
+  byte-identical to HEAD; the two new imports (`kyber/share`, `kyber/util/random`)
+  are confined to the `_test.go` file (`kyber/share` already a production dep,
+  `kyber/util/random` already imported by `dkg.go`) — `go.mod` unchanged, nothing
+  enters the consensus dependency graph, determinism vector provably untouched
+  (not re-burned; the D-063 per-seed hashes are invariant by construction).
+- **Adversary model (genuinely adversarial, not happy paths relabeled):**
+  - **SECRECY below threshold.** A coalition of t-1 MALICIOUS validators pooling
+    their REAL node-local secret shares (distinct per participant, from
+    `RunDKGInProcess`) plus all public material and a target ciphertext they did
+    not author cannot recover: `Combine` → `ErrInsufficientShares` (the "not yet"
+    refuse-to-interpolate semantic, D-066/Q3 — NOT a wrong-σ), and at the raw
+    primitive `share.RecoverCommit` errors (t-1 underdetermine the degree-(t-1)
+    polynomial; no σ is computed — Shamir perfect secrecy). Fabricating a t-th
+    forged share cannot fake quorum; a genuine t-th honest holder recovers ("t can").
+  - **ROBUSTNESS = the property the gate actually guarantees (LIVENESS).** Forged
+    shares are real G1 points that DESERIALIZE and reach the pairing check, then
+    FAIL it (index-forge: a genuine value re-labelled to a foreign index;
+    cross-ciphertext replay: a genuine share on a different ct). The load-bearing
+    claim — *when ≥ t honest shares exist, no forged shares can force
+    `ErrInsufficientShares`* — is proven with f∈{1, n-t} forged at LOW indices
+    (f=1, a single bad validator, is the 1.6-liveness case): gated `Combine`
+    recovers the true payload while the SAME set through the ungated path fails to
+    reproduce it (two separate assertions, gate the sole difference). Proven
+    RED-without-gate by temporary bypass (failure surfaced as the FO `rP check
+    failed`, itself proof the forged share cleared deserialization — a
+    parser-rejected share never reaches the FO check). The retry semantic is
+    separately pinned: t-1 honest + forged (replay or flood) → `ErrInsufficientShares`
+    (not an FO/decrypt error), so a forged share cannot fake progress to t.
+  - **WITHHELD shares.** A withholding adversary chooses WHO is silent: recovery
+    succeeds from arbitrary honest t-subsets including scattered-middle ones
+    (nodes 2,4 silent), not only the lowest-indexed t.
+- **Selection-rule probe (the corrupt-share premise made explicit, not assumed).**
+  The corrupt-share strategy DEPENDS on kyber's `share.RecoverCommit` selecting the
+  lowest-t shares BY INDEX (`poly.go` `xyCommit` sorts `byIndexPub`, breaks at
+  `len==t`) — undocumented-in-contract behavior that would change, if ever, via a
+  silent dependency bump, not our diff. Without a dedicated assertion, a future
+  kyber that picked the honest subset would make the robustness test pass VACUOUSLY
+  (forgery excluded by SELECTION, not by the gate) — "green for the wrong reason."
+  `TestKyberRecoverCommitSelectsLowestIndex` is a payload-independent, gate-free,
+  IBE-free probe: secret A at low indices, secret B at high, assert `RecoverCommit`
+  over the union returns `commitA`. Verified load-bearing (flipping the expectation
+  to `commitB` goes RED) so a changed selection rule fails BY NAME at the real
+  premise rather than as a disguised gate/forgery failure.
+- **CHURN / RESHARING (the 1.5/1.6 prerequisite).**
+  - **drain-before-rotate, modeled as a FULL rotation (conservative choice).** Two
+    independent in-process DKG runs = epochs e and e+1 with fully-independent key
+    material (distinct epoch masters, asserted). An in-flight ciphertext sealed to
+    epoch e's key REMAINS decryptable under epoch e's RETAINED shares after e+1
+    exists, and is NOT decryptable under epoch e+1's (gate-passing) shares (the FO
+    check errors on the wrong threshold signature) — cross-epoch isolation, why
+    clients tag each ct with its epoch id and the Reveal selects the matching share
+    set. This tests IN-FLIGHT decryptability across a rotation, not DKG
+    repeatability. Full independence is the STRONGEST drain condition (no share
+    overlap to lean on); partial-overlap resharing is a forward seam (below).
+  - **Leaver mid-epoch.** The threshold tolerates exactly n-t missing shares for
+    in-flight ciphertexts (n-t leavers recover; n-t+1 → `ErrInsufficientShares`).
+  - **CANCEL-as-drain-terminus — crypto precondition proven, session-state
+    deferred.** A permanently-undecryptable reveal (only t-1 shares will ever
+    exist) yields a TERMINAL, DETERMINISTIC, PURE `ErrInsufficientShares` across N
+    retries, and a sufficient `Combine` still succeeds afterward (no state mutation
+    — Combine is a pure function of its inputs, which 1.6's retry/CANCEL counter
+    relies on). This is the signal the 1.5/1.6 session state machine consumes to
+    CANCEL and release rotation; the state-machine interaction itself is NOT in
+    `crypto/threshold` and is carried forward.
+- **THREE seams carried forward to Task 1.5/1.6 (the crypto-to-consensus boundary,
+  recorded so 1.5 inherits them explicitly, not by rediscovery):**
+  - **(a) CANCEL-releases-rotation session-state interaction.** 1.4 proves the
+    crypto precondition (terminal deterministic signal); the assertion that a
+    CANCELLED session does not block epoch rotation lives in `x/session` / `x/veil`
+    and is Task 1.5/1.6.
+  - **(b) Grace-window fallback mechanism.** PHASE1_DESIGN §2's named, not-default
+    fallback (bounded retention of epoch e's material so e/e+1 overlap). Its crypto
+    basis is proven (epoch-e material decrypts e's in-flight ct independently of
+    e+1, the drain test); the WINDOW mechanism (bounded retention, overlap timing)
+    is epoch-lifecycle state → Task 1.5.
+  - **(c) Partial-overlap resharing.** 1.4 modeled rotation as FULL independence;
+    real CometBFT validator-set updates typically produce PARTIAL overlap (some
+    validators persist across the boundary). 1.5/1.6 must confirm the retained-share
+    selection (which epoch's shares decrypt which in-flight ct) handles partial
+    overlap — the full-rotation test is the conservative bound, not the complete
+    membership-mechanics check.
+- **Acceptance (offline, all green):** `make lint test` EXIT=0 incl.
+  `crypto/threshold` (8 new + 5 existing = 13 tests PASS); the two load-bearing
+  robustness/semantic tests proven RED-without-gate; the selection-rule probe
+  proven RED-on-wrong-expectation; `gofmt` clean; determinism vector unaffected
+  (test-only change, no source/sim touched). `StubScheme` remains the live scheme;
+  no consensus wiring. Next: Task 1.5 (DKG epoch lifecycle) — transport design
+  sub-review BEFORE code (STOP #1), inheriting seams (a)/(b)/(c) above.

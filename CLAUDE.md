@@ -135,8 +135,25 @@ green and the task is reviewed + committed.
       Round-trip t-of-n, t-1-cannot/t-can (info-theoretic), deterministic Combine.
       StubScheme stays the live scheme; no consensus wiring. `make lint test` +
       determinism vector green. 1.8 audit obligations recorded in D-066.
-- [ ] 1.4 Adversarial test harness (offline: t−1 cannot decrypt, t can; corrupt/withheld excluded)
+- [x] 1.4 Adversarial test harness (offline) — D-067. `crypto/threshold/adversarial_test.go`
+      (test-only; `threshold.go` byte-identical to HEAD): 7 property tests + a kyber
+      selection-rule probe. PROVES (vs 1.3's happy-path asserts) under an adversary —
+      t-1 real-secret-share COALITION cannot recover (`ErrInsufficientShares` "not yet",
+      info-theoretic at the raw primitive), t can; the gate's LIVENESS/ROBUSTNESS (not
+      silent-corruption — D-066): f∈{1,n-t} forged shares that DESERIALIZE-but-fail-the-
+      pairing-check cannot force `ErrInsufficientShares` when ≥t honest exist (load-bearing,
+      RED-without-gate proven), and a forged share cannot fake progress to t (retry
+      semantic); WITHHELD recovers from any honest t-subset (scattered-middle). CHURN:
+      drain-before-rotate keeps an epoch-e in-flight ct decryptable under e's retained
+      shares across a FULL (independent) rotation while e+1's shares cannot (cross-epoch
+      isolation); n-t leavers tolerated / n-t+1 not; CANCEL-as-drain-terminus crypto
+      precondition (terminal, deterministic, PURE signal) proven. `TestKyberRecoverCommit
+      SelectsLowestIndex` pins the lowest-t-by-index premise so a silent kyber bump fails
+      by name, not vacuously. Three seams carried to 1.5 (D-067): (a) CANCEL-releases-
+      rotation session-state, (b) grace-window mechanism, (c) partial-overlap resharing.
+      `make lint test` + determinism vector green; StubScheme stays live; no consensus wiring.
 - [ ] 1.5 DKG epoch lifecycle — transport design sub-review BEFORE code (STOP #1)
+      — inherits D-067 seams (a) CANCEL-releases-rotation, (b) grace-window, (c) partial-overlap reshare
 - [ ] 1.6 Vote-extension share transport + Reveal wiring
 - [ ] 1.7 Multi-node adversarial localnet (4 validators) — Phase-1 exit
 - [ ] 1.8 External audit engagement (gates mainnet; not a code task)
