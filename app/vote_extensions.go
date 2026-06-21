@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"cosmossdk.io/log"
@@ -11,13 +12,37 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/client/flags"
+	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/spf13/cast"
 
+	"github.com/AryaSingh22/conclave/app/dkgshare"
 	"github.com/AryaSingh22/conclave/crypto/reveal"
 	"github.com/AryaSingh22/conclave/crypto/threshold"
 	veilkeeper "github.com/AryaSingh22/conclave/x/veil/keeper"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
+
+// newNodeShareProvider builds the node's ShareProvider: a FILE-backed store under
+// <home>/data/dkg_shares on a real node (the DKG daemon writes shares there,
+// D-070), falling back to the in-memory MapShareProvider when no home is set
+// (unit tests / the in-process transport harness). A file-provider construction
+// failure also falls back to in-memory rather than aborting node start.
+func newNodeShareProvider(logger log.Logger, appOpts servertypes.AppOptions) ShareProvider {
+	home := cast.ToString(appOpts.Get(flags.FlagHome))
+	if home == "" {
+		return NewMapShareProvider()
+	}
+	dir := filepath.Join(home, "data", dkgshare.DirName)
+	fp, err := dkgshare.NewFileProvider(dir)
+	if err != nil {
+		logger.Error("dkg share provider: file store unavailable, using in-memory", "dir", dir, "err", err)
+		return NewMapShareProvider()
+	}
+	logger.Info("dkg share provider: file-backed node-local store", "dir", dir)
+	return fp
+}
 
 // vote_extensions.go wires the Task-1.6 vote-extension share transport (AUDIT
 // F-4 / PHASE1_DESIGN §2). This is the consensus-critical transport, reviewed in

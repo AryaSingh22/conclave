@@ -195,5 +195,32 @@ green and the task is reviewed + committed.
       epoch-inert → real path not exercised; real-path determinism proven by a
       cross-keeper test). Node-local `ShareProvider` shipped (interface + in-memory +
       harness); the live DKG daemon is 1.7. `make lint test` green.
-- [ ] 1.7 Multi-node adversarial localnet (4 validators) — Phase-1 exit
+- [x] 1.7 Multi-node adversarial localnet (4 validators) — D-070. The off-chain
+      **DKG daemon** (`app/dkgdaemon`, in-process via `start --dkg-daemon` PostSetup,
+      D1) is the missing client 1.5/1.6 stubbed: it watches FORMING epochs, runs the
+      kyber rounds, submits the register/deal/response/justify/confirm txs, and
+      PERSISTS the node-local secret share to a file store (`app/dkgshare`,
+      `<home>/data/dkg_shares`, 0600 — never consensus state / gossip, D-062). **A2
+      (STOP approved):** an on-chain DKG-key **registration round** (`MsgRegisterDKGKey`,
+      a 5th window before deal) binds each long-term G2 key to its validator via the
+      same account↔valoper check the bundle rounds use (protocol-enforced, not
+      genesis-trust); the COMMITTEE is the REGISTERED set (a non-registrant is excluded,
+      no single-point veto), finalized at the register-window close with `t=floor(2m/3)+1`,
+      FAILED if m<min_committee_size. **B2 (STOP approved): justification round CLOSED** —
+      the pre-1.7 Finalize collapsed on ANY complaint, so one faulty dealer in the FIRST
+      committee vetoed the whole confidentiality guarantee (epoch 1 never activates →
+      Veil stays plaintext). A `justify` window + `MsgSubmitJustification` excludes a
+      faulty dealer; n/threshold unchanged (all holders keep valid shares of the QUAL-set
+      secret), kyber aborts if qualified dealers<t (the floor), the existing ≥t-confirm
+      tally publishes the QUAL-set key unchanged. **Epoch proto unchanged (no new fields)**;
+      Params += register/justify windows. **3 build conditions proven** (faulty-excluded-
+      completes, register-binding-rejects-non-committee, FAILED-below-floor) at crypto AND
+      chain level. **LIVE 4-validator localnet (`scripts/localnet4.sh`, scripted):** real
+      DKG → epoch 1 ACTIVE; **app-hash agreement across all 4 nodes** (closes the 1.5
+      sim-boundary gap); encrypted intent → B+2 reveal via real VE shares → CLEARED;
+      **F-4** (a modified validator with its own share still can't decrypt:
+      ErrInsufficientShares); **faulty-dealer no-halt** (justification excludes it, chain
+      lives). **Reveal-cost benchmark:** ≈12ms/intent (n=4), recommended
+      `max_intents_per_session`≈25 — the default 0 is safe only on the epoch-0 stub path.
+      `make lint test` + determinism vector green. **Phase-1 BUILD complete.**
 - [ ] 1.8 External audit engagement (gates mainnet; not a code task)

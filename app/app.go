@@ -359,7 +359,13 @@ func NewConclaveApp(
 	// handlers). The StubScheme stays the live Reveal scheme until the Phase-B
 	// cutover; the cache is populated but not yet consumed.
 	app.RevealShareCache = NewRevealShareCache()
-	app.ShareProvider = NewMapShareProvider()
+	// Node-local DKG secret-share store ExtendVote reads (D-062). On a real node
+	// (home dir set in appOpts) it is FILE-backed under <home>/data/dkg_shares —
+	// the off-chain DKG daemon (Task 1.7, D-070) writes finalized shares there and
+	// this provider serves them to ExtendVote; the share never enters consensus
+	// state or p2p. Unit tests / the in-process harness pass no home and fall back
+	// to the in-memory MapShareProvider.
+	app.ShareProvider = newNodeShareProvider(logger, appOpts)
 	app.VeilKeeper.SetRevealShareSource(app.RevealShareCache)
 	// x/receipt is the SPEC §6.6 query/proof surface: it READS the receipts
 	// x/session writes (the SessionKeeper, via the SessionReceiptReader

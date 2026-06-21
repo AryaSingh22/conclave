@@ -7,11 +7,37 @@ import (
 )
 
 var (
+	_ sdk.Msg = (*MsgRegisterDKGKey)(nil)
 	_ sdk.Msg = (*MsgSubmitDeal)(nil)
 	_ sdk.Msg = (*MsgSubmitResponse)(nil)
+	_ sdk.Msg = (*MsgSubmitJustification)(nil)
 	_ sdk.Msg = (*MsgConfirmEpochKey)(nil)
 	_ sdk.Msg = (*MsgUpdateParams)(nil)
 )
+
+// ValidateBasic does stateless validation of a DKG key registration. The pubkey
+// is opaque to the chain (a marshaled G2 point validators parse), so only
+// structural checks apply; candidate membership is stateful (keeper).
+func (m *MsgRegisterDKGKey) ValidateBasic() error {
+	if _, err := sdk.AccAddressFromBech32(m.Sender); err != nil {
+		return errorsmod.Wrap(ErrUnauthorized, "invalid sender")
+	}
+	if len(m.DkgPubKey) == 0 {
+		return errorsmod.Wrap(ErrInvalidBundle, "empty dkg_pub_key")
+	}
+	return nil
+}
+
+// ValidateBasic does stateless validation of a justification submission.
+func (m *MsgSubmitJustification) ValidateBasic() error {
+	if _, err := sdk.AccAddressFromBech32(m.Sender); err != nil {
+		return errorsmod.Wrap(ErrUnauthorized, "invalid sender")
+	}
+	if len(m.Bundle) == 0 {
+		return errorsmod.Wrap(ErrInvalidBundle, "empty justification bundle")
+	}
+	return nil
+}
 
 // ValidateBasic does stateless validation of a deal submission. The bundle is
 // opaque to the chain, so only structural checks apply here; committee/window

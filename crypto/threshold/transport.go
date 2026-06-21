@@ -181,6 +181,81 @@ func UnmarshalResponseBundle(b []byte) (*dkg.ResponseBundle, error) {
 	}, nil
 }
 
+// MarshalJustificationBundle serializes a justification bundle (Task 1.7, D-070)
+// for on-chain transport in the justify window. Each justification reveals the
+// real share for a complained holder; the share is a G2 scalar. The bundle stays
+// opaque to the chain (same relay model as deals/responses).
+func MarshalJustificationBundle(j *dkg.JustificationBundle) ([]byte, error) {
+	if j == nil {
+		return nil, errors.New("threshold: nil justification bundle")
+	}
+	var buf []byte
+	buf = appendUint32(buf, j.DealerIndex)
+	buf = appendUint32(buf, uint32(len(j.Justifications)))
+	for i := range j.Justifications {
+		buf = appendUint32(buf, j.Justifications[i].ShareIndex)
+		sb, err := j.Justifications[i].Share.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		buf = appendChunk(buf, sb)
+	}
+	buf = appendChunk(buf, j.SessionID)
+	buf = appendChunk(buf, j.Signature)
+	return buf, nil
+}
+
+// UnmarshalJustificationBundle reverses MarshalJustificationBundle. Shares are
+// reconstructed as G2 scalars so the bundle Hash() (and the dealer signature
+// kyber verifies in ProcessJustifications) recomputes identically across the
+// round trip.
+func UnmarshalJustificationBundle(b []byte) (*dkg.JustificationBundle, error) {
+	group := dkgGroup()
+	di, b, err := readUint32(b)
+	if err != nil {
+		return nil, err
+	}
+	nJust, b, err := readUint32(b)
+	if err != nil {
+		return nil, err
+	}
+	justs := make([]dkg.Justification, nJust)
+	for i := uint32(0); i < nJust; i++ {
+		var si uint32
+		si, b, err = readUint32(b)
+		if err != nil {
+			return nil, err
+		}
+		var sb []byte
+		sb, b, err = readChunk(b)
+		if err != nil {
+			return nil, err
+		}
+		sc := group.Scalar()
+		if err = sc.UnmarshalBinary(sb); err != nil {
+			return nil, err
+		}
+		justs[i] = dkg.Justification{ShareIndex: si, Share: sc}
+	}
+	sid, b, err := readChunk(b)
+	if err != nil {
+		return nil, err
+	}
+	sig, b, err := readChunk(b)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) != 0 {
+		return nil, errors.New("threshold: trailing bytes in justification bundle")
+	}
+	return &dkg.JustificationBundle{
+		DealerIndex:    di,
+		Justifications: justs,
+		SessionID:      sid,
+		Signature:      sig,
+	}, nil
+}
+
 // MarshalCommits serializes the epoch public verification polynomial (the G2
 // coefficients an EpochKeyMaterial publishes as its confirmed key) to the wire
 // form x/epoch stores and counts agreement over. commits[0] is the epoch master

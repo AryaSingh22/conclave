@@ -99,6 +99,10 @@ func main() {
 		err = c.cycleAndAssert()
 	case "fallback":
 		err = c.fallback()
+	case "veil-e2e":
+		err = c.veilE2E()
+	case "veil-f4-adversary":
+		err = c.veilF4Adversary()
 	default:
 		err = fmt.Errorf("unknown subcommand %q", sub)
 	}

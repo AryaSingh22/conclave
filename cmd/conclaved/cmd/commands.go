@@ -61,12 +61,17 @@ func initRootCmd(
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newApp, appExport, server.StartCmdOptions{
 		AddFlags: func(startCmd *cobra.Command) {
 			crisis.AddModuleInitFlags(startCmd)
+			addDKGStartFlags(startCmd)
 		},
+		// PostSetup launches the in-process off-chain DKG daemon (Task 1.7, D-070)
+		// when --dkg-daemon is set; it is not called in stand-alone mode.
+		PostSetup: startDKGDaemon,
 	})
 
 	// add keybase, auxiliary RPC, query, genesis, and tx child commands
 	rootCmd.AddCommand(
 		server.StatusCommand(),
+		dkgKeygenCmd(),
 		genesisCommand(txConfig, basicManager),
 		queryCommand(),
 		txCommand(),

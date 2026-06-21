@@ -3,6 +3,7 @@ package keeper
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,9 +44,18 @@ type confirmMsg struct {
 	com [][]byte
 }
 
-// dkgTranscript is a fixed, replayable DKG transport transcript.
+// regMsg is one validator's captured long-term DKG key registration.
+type regMsg struct {
+	valoper string
+	pub     []byte
+}
+
+// dkgTranscript is a fixed, replayable five-window DKG transport transcript
+// (register → deal → response → justify → confirm; honest path has no
+// justifications).
 type dkgTranscript struct {
 	vals  []string
+	regs  []regMsg
 	deals []bundleMsg
 	resps []bundleMsg
 	confs []confirmMsg
@@ -53,16 +63,35 @@ type dkgTranscript struct {
 	thr   int
 }
 
-// buildTranscript runs ONE off-chain DKG and captures its committee + every
-// round's wire bytes, so two independent chain replays can be fed byte-identical
-// transport inputs.
+// buildTranscript runs ONE off-chain five-window DKG over a registered roster and
+// captures its registrations + every round's wire bytes, so two independent chain
+// replays can be fed byte-identical transport inputs (Task 1.7, D-070).
 func buildTranscript(t testing.TB, n int) dkgTranscript {
 	t.Helper()
 	thr := types.Threshold(n)
-	parts, err := threshold.NewInProcessCommittee(n, thr)
-	require.NoError(t, err)
 
-	tr := dkgTranscript{vals: valopers(n), n: n, thr: thr}
+	// candidate valopers, sorted (the committee/registration order).
+	vals := valopers(n)
+	sort.Strings(vals)
+
+	// fixed long-term keys per validator → the registration roster.
+	roster := make([][]byte, n)
+	secrets := make([][]byte, n)
+	tr := dkgTranscript{vals: vals, n: n, thr: thr}
+	for i, v := range vals {
+		sec, pub, err := threshold.GenerateLongTermKey()
+		require.NoError(t, err)
+		secrets[i] = sec
+		roster[i] = pub
+		tr.regs = append(tr.regs, regMsg{valoper: v, pub: pub})
+	}
+
+	parts := make([]*threshold.DKGParticipant, n)
+	for i := range vals {
+		p, err := threshold.NewParticipantFromRoster(1, i, secrets[i], roster, thr)
+		require.NoError(t, err)
+		parts[i] = p
+	}
 
 	dealWire := make([][]byte, 0, n)
 	for i, p := range parts {
@@ -90,8 +119,10 @@ func buildTranscript(t testing.TB, n int) dkgTranscript {
 
 	resps := decodeRespWire(t, respWire)
 	for i, p := range parts {
-		mat, err := p.Finalize(resps)
+		mat, jb, err := p.ProcessResponses(resps)
 		require.NoError(t, err)
+		require.Nil(t, jb, "honest transcript has no justifications")
+		require.NotNil(t, mat)
 		com, err := threshold.MarshalCommits(mat.Commits)
 		require.NoError(t, err)
 		tr.confs = append(tr.confs, confirmMsg{uint32(i), mat.EpochPub, com})
@@ -108,14 +139,26 @@ func replayLifecycle(t testing.TB, tr dkgTranscript) []byte {
 	f := setupEpoch(t)
 	f.staking.setValoper(tr.vals)
 
+	params, err := f.k.GetParams(f.ctx)
+	require.NoError(t, err)
+
 	replayEpoch := func(boundary uint64) uint64 {
 		f.setHeight(boundary)
 		require.NoError(t, f.k.EndBlocker(f.ctx))
 		id := f.k.FormingEpochID(f.ctx)
 		require.NotZero(t, id)
+
+		// register window — replay the fixed registrations.
+		f.setHeight(boundary + 1)
+		for _, r := range tr.regs {
+			require.NoError(t, f.k.CollectRegistration(f.ctx, id, r.valoper, r.pub))
+		}
+		// register-window close — finalize committee.
+		f.setHeight(boundary + params.RegisterWindowBlocks)
+		require.NoError(t, f.k.EndBlocker(f.ctx))
 		e, _ := f.k.GetEpoch(f.ctx, id)
 
-		f.setHeight(boundary + 1)
+		f.setHeight(e.DealDeadline - 1)
 		for _, d := range tr.deals {
 			require.NoError(t, f.k.CollectDeal(f.ctx, id, d.idx, d.bytes))
 		}
@@ -123,7 +166,7 @@ func replayLifecycle(t testing.TB, tr dkgTranscript) []byte {
 		for _, r := range tr.resps {
 			require.NoError(t, f.k.CollectResponse(f.ctx, id, r.idx, r.bytes))
 		}
-		f.setHeight(e.DealDeadline + 3)
+		f.setHeight(e.DealDeadline + params.ResponseWindowBlocks + params.JustifyWindowBlocks)
 		for _, c := range tr.confs {
 			require.NoError(t, f.k.CollectConfirm(f.ctx, id, c.idx, c.pub, c.com))
 		}

@@ -3,6 +3,7 @@ package conclave.epoch.v1;
 
 import "amino/amino.proto";
 import "conclave/epoch/v1/epoch.proto";
+import "cosmos_proto/cosmos.proto";
 import "gogoproto/gogo.proto";
 import "google/api/annotations.proto";
 
@@ -26,6 +27,26 @@ service Query {
   rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
     option (google.api.http).get = "/conclave/epoch/v1/params";
   }
+
+  // FormingEpoch returns the open FORMING epoch (the DKG-in-progress epoch the
+  // off-chain daemon drives), with an empty record (id 0) when none is forming
+  // (Task 1.7, D-070).
+  rpc FormingEpoch(QueryFormingEpochRequest) returns (QueryFormingEpochResponse) {
+    option (google.api.http).get = "/conclave/epoch/v1/forming";
+  }
+
+  // Registrations returns the long-term DKG public keys registered for an epoch
+  // (register window), so the daemon can build the DKG roster (Task 1.7 A2).
+  rpc Registrations(QueryRegistrationsRequest) returns (QueryRegistrationsResponse) {
+    option (google.api.http).get = "/conclave/epoch/v1/registrations/{epoch_id}";
+  }
+
+  // DKGTranscript returns the collected opaque bundles of one DKG round for an
+  // epoch (round 0=deal 1=response 2=justify), so the daemon can drive the next
+  // round from its peers' bundles (Task 1.7, D-070).
+  rpc DKGTranscript(QueryDKGTranscriptRequest) returns (QueryDKGTranscriptResponse) {
+    option (google.api.http).get = "/conclave/epoch/v1/transcript/{epoch_id}/{round}";
+  }
 }
 
 message QueryCurrentEpochRequest {}
@@ -48,4 +69,45 @@ message QueryParamsRequest {}
 
 message QueryParamsResponse {
   Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryFormingEpochRequest {}
+
+message QueryFormingEpochResponse {
+  // epoch is the FORMING epoch; its id is 0 when none is forming.
+  Epoch epoch = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryRegistrationsRequest {
+  uint64 epoch_id = 1;
+}
+
+// DKGRegistration is one validator's registered long-term DKG public key.
+message DKGRegistration {
+  string valoper = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes dkg_pub_key = 2;
+}
+
+message QueryRegistrationsResponse {
+  // registrations are sorted by valoper ascending (the committee-finalization
+  // order).
+  repeated DKGRegistration registrations = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryDKGTranscriptRequest {
+  uint64 epoch_id = 1;
+  // round selects which window's bundles: 0=deal 1=response 2=justify.
+  uint32 round = 2;
+}
+
+// DKGBundle is one collected opaque transport bundle, tagged with its dealer's
+// committee dkg_index.
+message DKGBundle {
+  uint32 dkg_index = 1;
+  bytes bundle = 2;
+}
+
+message QueryDKGTranscriptResponse {
+  // bundles are sorted by dkg_index ascending (deterministic).
+  repeated DKGBundle bundles = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
 }

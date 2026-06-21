@@ -226,6 +226,26 @@ func (k Keeper) GetEpochVerification(ctx sdk.Context, epochID uint64) (commits [
 	return e.Commits, len(e.Committee), true
 }
 
+// deletePrefix deletes every key under a prefix (snapshot the keys first — the
+// iterator must not outlive the deletes). Deterministic.
+func (k Keeper) deletePrefix(ctx sdk.Context, prefix []byte) {
+	store := k.storeService.OpenKVStore(ctx)
+	it, err := store.Iterator(prefix, storePrefixEnd(prefix))
+	if err != nil {
+		panic(err)
+	}
+	var keys [][]byte
+	for ; it.Valid(); it.Next() {
+		keys = append(keys, append([]byte{}, it.Key()...))
+	}
+	it.Close()
+	for _, key := range keys {
+		if err := store.Delete(key); err != nil {
+			panic(err)
+		}
+	}
+}
+
 // storePrefixEnd returns the exclusive end key for a single-byte prefix scan.
 func storePrefixEnd(prefix []byte) []byte {
 	end := make([]byte, len(prefix))

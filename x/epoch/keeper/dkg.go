@@ -13,23 +13,30 @@ import (
 	"github.com/AryaSingh22/conclave/x/epoch/types"
 )
 
-// dkgRound identifies which transport window a bundle belongs to.
+// dkgRound identifies which transport window a bundle belongs to (Task 1.7
+// D-070: register and justify windows added → five sequential windows).
 type dkgRound int
 
 const (
-	roundDeal dkgRound = iota
+	roundRegister dkgRound = iota
+	roundDeal
 	roundResponse
+	roundJustify
 	roundConfirm
 )
 
 // formingInWindow loads the FORMING epoch and checks that epochID matches it and
 // that the given round's window is open at the current height. It is the shared
-// gate for the three Collect* entry points (PHASE1_DESIGN §2(b) on-chain
-// transport). The windows are sequential and non-overlapping:
+// gate for the Collect* entry points (PHASE1_DESIGN §2(b) on-chain transport;
+// register/justify added Task 1.7, D-070). The five windows are sequential and
+// non-overlapping; their boundaries derive from formed_height / deal_deadline /
+// confirm_deadline + params (no new Epoch fields):
 //
-//	deal     [formed_height, deal_deadline)
-//	response [deal_deadline, response_deadline)
-//	confirm  [response_deadline, confirm_deadline)
+//	register [formed_height,    register_deadline)
+//	deal     [register_deadline, deal_deadline)
+//	response [deal_deadline,     response_deadline)
+//	justify  [response_deadline, justify_deadline)
+//	confirm  [justify_deadline,  confirm_deadline)
 func (k Keeper) formingInWindow(ctx sdk.Context, epochID uint64, params types.Params, round dkgRound) (types.Epoch, error) {
 	formingID := k.FormingEpochID(ctx)
 	if formingID == 0 {
@@ -43,15 +50,21 @@ func (k Keeper) formingInWindow(ctx sdk.Context, epochID uint64, params types.Pa
 		return types.Epoch{}, types.ErrEpochNotFound
 	}
 	height := uint64(ctx.BlockHeight())
-	responseDeadline := e.DealDeadline + params.ResponseWindowBlocks
+	regDeadline := registerDeadline(e, params)
+	respDeadline := responseDeadline(e, params)
+	justDeadline := justifyDeadline(e, params)
 	var open bool
 	switch round {
+	case roundRegister:
+		open = height < regDeadline
 	case roundDeal:
-		open = height < e.DealDeadline
+		open = height >= regDeadline && height < e.DealDeadline
 	case roundResponse:
-		open = height >= e.DealDeadline && height < responseDeadline
+		open = height >= e.DealDeadline && height < respDeadline
+	case roundJustify:
+		open = height >= respDeadline && height < justDeadline
 	case roundConfirm:
-		open = height >= responseDeadline && height < e.ConfirmDeadline
+		open = height >= justDeadline && height < e.ConfirmDeadline
 	}
 	if !open {
 		return types.Epoch{}, errorsmod.Wrapf(types.ErrWindowClosed,
@@ -68,6 +81,34 @@ func checkIndex(e types.Epoch, dkgIndex uint32) error {
 	return nil
 }
 
+// CollectRegistration stores a validator's long-term DKG public key for the
+// FORMING epoch's register window (Task 1.7 A2, D-070). Authorization is by
+// validator identity: the sender must be a bonded CANDIDATE of this epoch, and
+// the key is stored under the sender's valoper — a validator cannot register a
+// key in another's slot (the binding, build condition 2). The committee dkg_index
+// is assigned later (FinalizeCommittee), so no index is claimed here.
+func (k Keeper) CollectRegistration(ctx sdk.Context, epochID uint64, valoper string, pubKey []byte) error {
+	params, err := k.GetParams(ctx)
+	if err != nil {
+		return err
+	}
+	if uint32(len(pubKey)) > params.MaxBundleBytes {
+		return errorsmod.Wrapf(types.ErrBundleTooLarge, "%d > %d", len(pubKey), params.MaxBundleBytes)
+	}
+	if _, err := k.formingInWindow(ctx, epochID, params, roundRegister); err != nil {
+		return err
+	}
+	if !k.IsCandidate(ctx, epochID, valoper) {
+		return errorsmod.Wrapf(types.ErrNotCandidate, "%s", valoper)
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.RegisterKey(epochID, valoper)
+	if has, _ := store.Has(key); has {
+		return errorsmod.Wrapf(types.ErrDuplicateRegister, "epoch %d valoper %s", epochID, valoper)
+	}
+	return store.Set(key, pubKey)
+}
+
 // CollectDeal stores a Round-1 deal bundle (opaque bytes) for the FORMING epoch.
 // The chain NEVER interprets the bundle — only validators do, off-chain (D-061).
 func (k Keeper) CollectDeal(ctx sdk.Context, epochID uint64, dkgIndex uint32, bundle []byte) error {
@@ -77,6 +118,12 @@ func (k Keeper) CollectDeal(ctx sdk.Context, epochID uint64, dkgIndex uint32, bu
 // CollectResponse stores a Round-2 response bundle (opaque bytes).
 func (k Keeper) CollectResponse(ctx sdk.Context, epochID uint64, dkgIndex uint32, bundle []byte) error {
 	return k.collectBundle(ctx, epochID, dkgIndex, bundle, roundResponse, types.ResponseKey)
+}
+
+// CollectJustification stores a Round-3 justification bundle (opaque bytes) for
+// the justify window (Task 1.7 B2, D-070).
+func (k Keeper) CollectJustification(ctx sdk.Context, epochID uint64, dkgIndex uint32, bundle []byte) error {
+	return k.collectBundle(ctx, epochID, dkgIndex, bundle, roundJustify, types.JustifyKey)
 }
 
 func (k Keeper) collectBundle(ctx sdk.Context, epochID uint64, dkgIndex uint32, bundle []byte, round dkgRound, keyFn func(uint64, uint32) []byte) error {
@@ -152,6 +199,69 @@ func (k Keeper) Responses(ctx sdk.Context, epochID uint64) [][]byte {
 	return k.bundlesFor(ctx, types.ResponsePrefix, epochID)
 }
 
+// Justifications returns the collected justification bundles for an epoch.
+func (k Keeper) Justifications(ctx sdk.Context, epochID uint64) [][]byte {
+	return k.bundlesFor(ctx, types.JustifyPrefix, epochID)
+}
+
+// Registrations returns the registered long-term DKG keys for an epoch, sorted by
+// valoper ascending (the committee-finalization order; iteration is over a sorted
+// key prefix so the order is deterministic). The off-chain daemon reads these to
+// build the DKG roster (Task 1.7 A2, D-070).
+func (k Keeper) Registrations(ctx sdk.Context, epochID uint64) []types.DKGRegistration {
+	store := k.storeService.OpenKVStore(ctx)
+	iterPrefix := types.BundleIterPrefix(types.RegisterPrefix, epochID)
+	it, err := store.Iterator(iterPrefix, storePrefixEnd(iterPrefix))
+	if err != nil {
+		panic(err)
+	}
+	defer it.Close()
+	var out []types.DKGRegistration
+	for ; it.Valid(); it.Next() {
+		out = append(out, types.DKGRegistration{
+			Valoper:   types.ValoperFromKey(it.Key()),
+			DkgPubKey: append([]byte{}, it.Value()...),
+		})
+	}
+	return out
+}
+
+// transcriptBundles returns one round's collected bundles tagged with their
+// dealer dkg_index (round 0=deal 1=response 2=justify) — the DKGTranscript query
+// surface the daemon reads to drive the next round.
+func (k Keeper) transcriptBundles(ctx sdk.Context, epochID uint64, round uint32) []types.DKGBundle {
+	var prefix []byte
+	switch round {
+	case 0:
+		prefix = types.DealPrefix
+	case 1:
+		prefix = types.ResponsePrefix
+	case 2:
+		prefix = types.JustifyPrefix
+	default:
+		return nil
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	iterPrefix := types.BundleIterPrefix(prefix, epochID)
+	it, err := store.Iterator(iterPrefix, storePrefixEnd(iterPrefix))
+	if err != nil {
+		panic(err)
+	}
+	defer it.Close()
+	var out []types.DKGBundle
+	for ; it.Valid(); it.Next() {
+		key := it.Key()
+		// key = prefix(1) | epoch(8) | dkg_index(4); index is the last 4 bytes.
+		var idx uint32
+		if len(key) >= 4 {
+			tail := key[len(key)-4:]
+			idx = uint32(tail[0])<<24 | uint32(tail[1])<<16 | uint32(tail[2])<<8 | uint32(tail[3])
+		}
+		out = append(out, types.DKGBundle{DkgIndex: idx, Bundle: append([]byte{}, it.Value()...)})
+	}
+	return out
+}
+
 // FinalizeForming runs at the close of the confirm window of the FORMING epoch:
 // it publishes the (epoch_pub_key, commits) value that >= t committee members
 // confirmed byte-identically, makes that epoch ACTIVE, and rotates; if no value
@@ -221,26 +331,15 @@ func (k Keeper) tallyConfirmations(ctx sdk.Context, epochID uint64, t int) (valu
 	return nil, 0, false
 }
 
-// gcTranscript deletes the per-index deal/response/confirm bundles of a
-// finalized epoch — they are transient transport, not lasting epoch state.
+// gcTranscript deletes the transient transport (deals/responses/justifications/
+// confirmations/registrations) of a finalized epoch — they are not lasting epoch
+// state. The finalized flag is left (cheap, idempotent guard).
 func (k Keeper) gcTranscript(ctx sdk.Context, epochID uint64) {
-	store := k.storeService.OpenKVStore(ctx)
-	for _, prefix := range [][]byte{types.DealPrefix, types.ResponsePrefix, types.ConfirmPrefix} {
-		iterPrefix := types.BundleIterPrefix(prefix, epochID)
-		it, err := store.Iterator(iterPrefix, storePrefixEnd(iterPrefix))
-		if err != nil {
-			panic(err)
-		}
-		var keys [][]byte
-		for ; it.Valid(); it.Next() {
-			keys = append(keys, append([]byte{}, it.Key()...))
-		}
-		it.Close()
-		for _, key := range keys {
-			if err := store.Delete(key); err != nil {
-				panic(err)
-			}
-		}
+	for _, prefix := range [][]byte{
+		types.DealPrefix, types.ResponsePrefix, types.JustifyPrefix,
+		types.ConfirmPrefix, types.RegisterPrefix,
+	} {
+		k.deletePrefix(ctx, types.BundleIterPrefix(prefix, epochID))
 	}
 }
 

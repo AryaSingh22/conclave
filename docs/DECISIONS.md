@@ -2178,3 +2178,153 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   processes). Next: Task 1.7 (multi-node adversarial localnet) — real epoch boundary +
   encrypted reveal e2e, the DKG daemon, justification-grief closure, the Reveal-cost
   benchmark.
+
+## D-070 — Task 1.7: 4-validator adversarial localnet — the off-chain DKG daemon; on-chain DKG-key registration round (A2); justification round CLOSED (B2); live real-network proofs (epoch ACTIVE, encrypted reveal+clear, F-4, faulty-dealer no-halt, app-hash agreement); Reveal-cost benchmark
+
+- **Date:** 2026-06-21 (Phase-1 Task 1.7) — Phase-1 BUILD exit (1.8 = external audit).
+- **SPEC:** §8 (the Veil for real), §6.3, §11.6; PHASE1_DESIGN Task 1.7 + the
+  perf FLAGS (Reveal-cost benchmark, `max_intents_per_session`); closes the
+  accumulated D-066–D-069 forward gaps: (i) the off-chain DKG daemon populating
+  the node-local `ShareProvider`; (ii) real epoch-boundary + encrypted-reveal e2e
+  on a 4-validator localnet with VEs in real genesis; (iii) justification-grief
+  closure; (iv) the Reveal-cost benchmark; (v) the 1.5 determinism-boundary-in-sim
+  gap. Builds on D-066 (tlock construction), D-067 (offline adversarial proof),
+  D-068 (`x/epoch` lifecycle + transport), D-069 (VE share transport + cutover).
+- **PLAN-STOP APPROVED (A2, B2, C1, D1).** The two load-bearing reversals (made
+  under review pressure) were both adopted: Q1→**A2** (on-chain registration, the
+  binding must be protocol-enforced now since 1.7 builds the real chain), Q2→**B2**
+  (CLOSE justification — a single faulty dealer was a single-point VETO on the whole
+  confidentiality guarantee for the first epoch, not a bounded grief). Q3→C1
+  (scripted, no docker), Q4→D1 (in-process daemon).
+- **THE DKG DAEMON (`app/dkgdaemon`, in-process, D1) — the missing client.** 1.5/1.6
+  stubbed the share with a harness; 1.7 makes it real. Launched from `conclaved
+  start --dkg-daemon` via the server `StartCmdOptions.PostSetup` hook (in-process
+  only), it watches FORMING epochs, runs the kyber rounds locally, submits the
+  register/deal/response/justify/confirm txs to its own node (signed by the
+  validator account key, sequence filled fresh per tx — one tx per validator per
+  window, spaced over blocks), and PERSISTS the finalized node-local secret share
+  to a file-backed store. **D1 trust boundary:** the daemon holds the secret share
+  AND signs with the validator key, so it is node-coupled; the share is written
+  straight to `<home>/data/dkg_shares/epoch_<id>.share` (0600) and NEVER leaves the
+  node process / enters consensus state / is gossiped (D-061/D-062). `app/dkgshare`
+  is the leaf store both `app` (ExtendVote reads it) and the daemon (writes it)
+  share — a node with a home dir gets the `FileProvider`; unit tests keep the
+  in-memory `MapShareProvider`. The faulty-dealer adversary is a `--dkg-faulty-deal`
+  flag (corrupt-but-authentic deal + refuse to justify).
+- **A2 — on-chain DKG-key REGISTRATION round (the long-term-key/roster problem).**
+  kyber needs every validator's long-term BLS12-381 G2 public key + the agreed
+  roster + a shared nonce BEFORE round 1, none derivable from the ed25519 consensus
+  key — the G2 public must be PUBLISHED. A2 adds a `register` window (before deal)
+  + `MsgRegisterDKGKey(epoch, dkg_pub_key)`, keyed by the SIGNER's validator
+  identity (msg_server derives valoper from the signer account), authorized against
+  the bonded candidate set — the SAME account↔valoper binding the deal/response/
+  confirm rounds use, so a key cannot be registered in another validator's slot
+  (BUILD CONDITION 2, proven `TestRegisterBindingRejectsNonCandidate` /
+  `TestRegisterBindingViaMsgServer`). The roster nonce is `DeriveNonce(epoch,
+  sorted-roster)` — deterministic, agreed by all, no extra round. Rejected A1
+  (genesis-registered keys): an unauthenticated key channel resting on genesis
+  trust that does not generalize, and could not support dynamic membership.
+- **A2 — the COMMITTEE is the REGISTERED set (no single-point veto).** A registration
+  round that let a non-registering validator block the epoch would REINTRODUCE the
+  veto B2 exists to kill. So `MaybeOpenEpoch` snapshots the bonded set only as
+  CANDIDATES (committee `nil`, threshold 0); `FinalizeCommittee` runs once at the
+  register-window close and sets the committee to the sorted REGISTRANTS with dense
+  `dkg_index` and `t = floor(2m/3)+1` for the registered size m; a candidate that
+  did not register is simply excluded (proven `TestNonRegisteringCandidateDoesNotVeto`
+  — min=3, 3-of-4 register → ACTIVE). If m < `min_committee_size` the epoch FAILEDs
+  (BUILD CONDITION 3 / the floor — `TestTooFewRegistrationsFailsEpoch`). The
+  reveal-side n is the registered m, so the Combine threshold matches.
+- **B2 — justification round CLOSED (the faulty-dealer veto).** The pre-1.7
+  `DKGParticipant.Finalize` errored on ANY complaint, so ONE faulty dealer in the
+  FIRST committee made the DKG collapse for every node → epoch 1 never activates →
+  the Veil never leaves the epoch-0 PLAINTEXT bootstrap window: a single Byzantine
+  node vetoing the entire confidentiality guarantee (not bounded liveness-grief —
+  the first epoch has no prior key). `crypto/threshold` is restructured into the
+  kyber-faithful phases (`Round1Deal → Round2Response → ProcessResponses →
+  Finalize(justifications)`); a `justify` window + `MsgSubmitJustification` carries
+  justification bundles. **KEY INSIGHT that kept the chain-side small:** excluding a
+  faulty DEALER does NOT change n or the reveal threshold — all n holders still hold
+  valid shares of the QUALified-set master secret; kyber's `ProcessJustifications`
+  ABORTS if qualified dealers < t (the security floor is enforced INSIDE kyber, not
+  re-derived in consensus); and the chain's EXISTING ≥t-identical-confirmation tally
+  publishes the qualified-set key UNCHANGED (the 3 honest confirm the same key, the
+  faulty one's deviating/absent confirmation just doesn't count). So B2 on-chain =
+  a transport window only, no finalize surgery. Proven offline
+  (`TestJustificationExcludesFaultyDealerAndCompletes` f=1 completes,
+  `TestJustificationFailsBelowFloor` f=2 aborts) AND on chain
+  (`TestFaultyDealerExcludedEpochActivates`: epoch ACTIVE, the published key decrypts
+  a t-of-n reveal) — BUILD CONDITION 1.
+- **FIVE-WINDOW DKG (register → deal → response → justify → confirm).** Boundaries
+  derive from `formed_height`/`deal_deadline`/`confirm_deadline` + params (the
+  recompute-from-params pattern of 1.5) — the **`Epoch` proto is UNCHANGED, no new
+  fields** (`deal_deadline` already spans [register+deal], `confirm_deadline` spans
+  the full DKG; register/response/justify boundaries recompute). `Params` gains
+  `register_window_blocks` + `justify_window_blocks`. New store prefixes 0x09
+  (registration by valoper), 0x0a (justify), 0x0b (candidate), 0x0c
+  (committee-finalized flag). New queries `FormingEpoch`, `Registrations`,
+  `DKGTranscript(round)` are the daemon's read surface. New errors 1611/1612.
+- **LIVE 4-VALIDATOR NETWORK (`scripts/localnet4.sh`, scripted/C1) — every headline
+  proven on the real network, not in-process:**
+  - **The DKG daemon completed a real DKG across 4 validators → epoch 1 ACTIVE** with
+    a consistent published `EpochPubKey` (committee n=4, t=3); shares stayed
+    node-local. Multiple epochs rotated over a run (epoch_length=30, windows=5).
+  - **App-hash AGREEMENT across all 4 nodes** at the boundary/post-rotation height
+    (byte-identical `app_hash`; a divergent node would have halted consensus) —
+    **closes the D-068/D-069 "real boundary in the full sim" gap (gap v)** directly.
+  - **The headline e2e:** a client fetched the ACTIVE epoch key, ENCRYPTED a 2-party
+    swap to it (ciphertext 238B ≠ plaintext 34B — confidentiality is real, not
+    identity), submitted it `epoch_id`-tagged, and the intents revealed via REAL
+    vote-extension threshold shares (B+2) and CLEARED through the in-consensus
+    fallback — all on the 4-node net (`conclave-demo veil-e2e`).
+  - **F-4 on a real network:** the `veil-f4-adversary` (a modified validator given
+    its OWN node-local secret share + the published key + a target ciphertext)
+    proved it STILL cannot decrypt — 0-share and single-share Combine both refuse
+    (`ErrInsufficientShares`); it needs t=3 shares that only exist in vote extensions
+    AFTER the seal. conclave-demo is dev-only tooling, never linked into the shipping
+    `conclaved`, so this models a malicious node without modifying the real binary.
+    **F-4 framing (stated for the auditor, not discovered):** the real-network F-4
+    proof is a FULL-LOCAL-VIEW adversary with < t shares, NOT a forked node binary.
+    It is handed a REAL node's secret share + the sealed ciphertext + all public
+    material and still cannot decrypt — because the barrier is the CRYPTOGRAPHIC
+    THRESHOLD, not node-binary integrity. Granting the adversary a real share + full
+    local view is if anything a STRONGER test than a binary fork (it gives the
+    adversary strictly more than a modified node would have); the guarantee rests on
+    the threshold and the test exercises exactly that.
+  - **Faulty-dealer no-halt (B2 live):** with `FAULTY_NODE` set, the justification
+    round excludes the faulty dealer and the chain does NOT halt (the epoch still
+    reaches ACTIVE under the 3 honest dealers; degraded paths keep the prior key).
+- **REVEAL-COST BENCHMARK (D-069 gap iv) — a recorded FINDING.** `BenchmarkReveal
+  CombineUnderCap` / `TestRevealCostWithinBound`: per-intent reveal is pairing-
+  dominated (the D-066 share gate + IBE open) at **≈12ms/intent (n=4)**, so BeginBlock
+  reveal cost is LINEAR in the sealed-intent count and the per-session cap is
+  load-bearing. The recommended `max_intents_per_session` ≈ **25** for a ~300ms
+  reveal budget in a 1s block. **The default 0 (unbounded) is safe ONLY on the
+  epoch-0 stub path (no shares, no Combine); a live deployment (epoch ≥ 1) MUST set
+  a finite cap** — the localnet genesis sets 25. The gate asserts the per-intent
+  invariant (< 50ms) so a gate/IBE regression is caught. **CAP RECOMMENDATION IS
+  n=4-SPECIFIC — re-derive for the real committee before mainnet (1.8 obligation,
+  not a 1.7 blocker):** per-intent Combine cost SCALES WITH COMMITTEE SIZE n (more
+  partial-decryption shares to gate + interpolate), so a larger audit/testnet
+  committee RAISES per-intent cost and LOWERS the safe cap. The ≈25 figure must NOT
+  harden into a mainnet default; it is re-derived at the production n.
+- **Determinism (§11.6).** The in-process determinism vector stays REPRODUCIBLE
+  (the localnet harness does not touch the sim path; `epoch_length` in the sim is
+  still ≈1 day so x/epoch is inert there). The new chain-state surface (register/
+  justify windows, committee finalization, 5-window boundaries) is determinism-
+  covered by the rewritten `TestEpochChainStateDeterministic` (replays a fixed
+  five-window transcript into two independent keepers) and the per-condition keeper
+  tests; the REAL boundary is now also exercised live (app-hash agreement above).
+- **Acceptance (all green):** `make lint test` EXIT=0 (incl. the rewritten epoch
+  keeper suite over the 5-window flow, the crypto justification + reveal-cost tests,
+  all prior suites under the daemon/registration changes); determinism vector
+  reproducible; the live `scripts/localnet4.sh` end-to-end (epoch ACTIVE, app-hash
+  agreement, encrypted reveal+clear, F-4 adversary, faulty-dealer no-halt). **All
+  six 1.7 acceptance criteria met.** `StubScheme` remains the live scheme on the
+  epoch-0 path; the real scheme is built per-epoch from public commits (D-069).
+- **CARRIED TO 1.8 (external audit, the Phase-1 mainnet gate — D-066 obligations
+  stand):** the authored tlock construction, the DKG (now incl. the registration +
+  justification rounds + the daemon), the VE share transport, order-then-reveal, the
+  retry/cancel paths, and the verifiable-share exclusion are the audited unit. NEW
+  for the auditor's attention: the A2 registration binding, the B2 justification/
+  qualified-set finalize, the daemon's tx-driving + sequence handling, and the
+  honest-threshold confirmation-quorum basis (D-068). Phase-1 BUILD is COMPLETE.

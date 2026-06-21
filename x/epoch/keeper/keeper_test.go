@@ -76,11 +76,13 @@ func setupEpoch(t testing.TB) *epochFixture {
 
 	ctx = ctx.WithBlockHeight(1)
 	// short windows so a full DKG fits in a few blocks; epoch_length comfortably
-	// larger than deal+response+confirm.
+	// larger than the five DKG windows.
 	p := types.Params{
 		EpochLengthBlocks:    100,
+		RegisterWindowBlocks: 3,
 		DealWindowBlocks:     3,
 		ResponseWindowBlocks: 3,
+		JustifyWindowBlocks:  3,
 		ConfirmWindowBlocks:  3,
 		MinCommitteeSize:     4,
 		MaxBundleBytes:       1 << 20,
@@ -133,15 +135,28 @@ const (
 	dkgConfirmShort
 )
 
-// runDKG opens a FORMING epoch at boundaryHeight with the current validator set,
-// drives the on-chain transport (deals → responses → confirmations as opaque
-// bytes through the keeper Collect* methods, exactly as the on-chain transport
-// will), finalizes at the confirm deadline, and returns the epoch id plus every
-// node's local EpochKeyMaterial. The DKG runs OFF-CHAIN (NewInProcessCommittee);
-// only the public bundles transit chain state.
+// runDKG drives a full five-window on-chain DKG (Task 1.7, D-070), exactly as
+// the off-chain daemon will: open FORMING at boundaryHeight, REGISTER each
+// candidate's long-term key (register window), FINALIZE the committee from the
+// registrants, then deal → response → (justify, empty on the honest path) →
+// confirm, all as opaque bytes through the keeper Collect* methods, and finalize
+// at the confirm deadline. The DKG runs OFF-CHAIN over the registered roster
+// (NewParticipantFromRoster + DeriveNonce — the real daemon construction); only
+// public bundles transit chain state. Returns the epoch id and every node's local
+// EpochKeyMaterial (honest path).
 func (f *epochFixture) runDKG(t testing.TB, boundaryHeight uint64, n int, outcome dkgOutcome) (uint64, []*threshold.EpochKeyMaterial) {
 	t.Helper()
+	return f.runDKGFaulty(t, boundaryHeight, n, outcome, nil)
+}
 
+// runDKGFaulty is runDKG with an optional set of faulty dealer committee indices
+// (by their FINALIZED dkg_index) that corrupt their deals and refuse to justify —
+// the justification round excludes them. With outcome==dkgConfirmShort only t-1
+// nodes confirm (FAILED path).
+func (f *epochFixture) runDKGFaulty(t testing.TB, boundaryHeight uint64, n int, outcome dkgOutcome, faulty map[int]bool) (uint64, []*threshold.EpochKeyMaterial) {
+	t.Helper()
+
+	// Boundary — open FORMING with the candidate (bonded) set; committee not yet fixed.
 	f.setHeight(boundaryHeight)
 	require.NoError(t, f.k.EndBlocker(f.ctx))
 	epochID := f.k.FormingEpochID(f.ctx)
@@ -149,27 +164,68 @@ func (f *epochFixture) runDKG(t testing.TB, boundaryHeight uint64, n int, outcom
 	e, ok := f.k.GetEpoch(f.ctx, epochID)
 	require.True(t, ok)
 	require.Equal(t, types.EPOCH_STATUS_FORMING, e.Status)
-	require.Len(t, e.Committee, n)
+	require.Empty(t, e.Committee, "committee must not be fixed before the register window closes")
 
-	thr := int(e.Threshold)
-	parts, err := threshold.NewInProcessCommittee(n, thr)
+	params, err := f.k.GetParams(f.ctx)
 	require.NoError(t, err)
 
-	// Round 1 — deals (deal window).
+	// Register window — every candidate registers a long-term DKG key. Keyed by
+	// valoper; the committee dkg_index is assigned from the sorted registrants.
+	secrets := map[string]([]byte){}
 	f.setHeight(boundaryHeight + 1)
+	for _, v := range f.staking.vals {
+		valoper := v.OperatorAddress
+		sec, pub, err := threshold.GenerateLongTermKey()
+		require.NoError(t, err)
+		secrets[valoper] = sec
+		require.NoError(t, f.k.CollectRegistration(f.ctx, epochID, valoper, pub))
+	}
+
+	// Register-window close — finalize the committee from the registrants.
+	f.setHeight(boundaryHeight + params.RegisterWindowBlocks)
+	require.NoError(t, f.k.EndBlocker(f.ctx))
+	e, ok = f.k.GetEpoch(f.ctx, epochID)
+	require.True(t, ok)
+	require.Len(t, e.Committee, n, "committee = registered set")
+	thr := int(e.Threshold)
+
+	// Build the off-chain participants from the registered roster (real path).
+	regs := f.k.Registrations(f.ctx, epochID)
+	roster := make([][]byte, len(regs))
+	for i, r := range regs {
+		roster[i] = r.DkgPubKey
+	}
+	parts := make([]*threshold.DKGParticipant, n)
+	for i, r := range regs {
+		p, err := threshold.NewParticipantFromRoster(epochID, i, secrets[r.Valoper], roster, thr)
+		require.NoError(t, err)
+		parts[i] = p
+	}
+
+	// Deal window.
+	f.setHeight(e.DealDeadline - 1)
 	for i, p := range parts {
 		d, err := p.Round1Deal()
 		require.NoError(t, err)
+		if faulty[i] {
+			d2 := *d
+			threshold.CorruptDealForTest(p, &d2)
+			d = &d2
+		}
 		enc, err := threshold.MarshalDealBundle(d)
 		require.NoError(t, err)
 		require.NoError(t, f.k.CollectDeal(f.ctx, epochID, uint32(i), enc))
 	}
 
-	// Round 2 — responses (response window). Each node reads ALL committed deals.
-	respDeadline := e.DealDeadline + 3
+	// Response window — each node reads ALL committed deals; honest nodes complain
+	// about a faulty dealer.
 	f.setHeight(e.DealDeadline)
 	deals := decodeDealWire(t, f.k.Deals(f.ctx, epochID))
 	for i, p := range parts {
+		if faulty[i] {
+			_, _ = p.Round2Response(deals)
+			continue
+		}
 		r, err := p.Round2Response(deals)
 		require.NoError(t, err)
 		if r == nil {
@@ -180,29 +236,70 @@ func (f *epochFixture) runDKG(t testing.TB, boundaryHeight uint64, n int, outcom
 		require.NoError(t, f.k.CollectResponse(f.ctx, epochID, uint32(i), enc))
 	}
 
-	// Round 3 — confirmations (confirm window). Each node finalizes locally and
-	// posts its computed (epoch_pub_key, commits).
+	// Justify window — process responses; honest dealers justify (faulty refuse).
+	respDeadline := e.DealDeadline + params.ResponseWindowBlocks
 	f.setHeight(respDeadline)
 	resps := decodeRespWire(t, f.k.Responses(f.ctx, epochID))
+	type pend struct {
+		p   *threshold.DKGParticipant
+		mat *threshold.EpochKeyMaterial
+	}
+	var pending []pend
+	for i, p := range parts {
+		if faulty[i] {
+			_, _, _ = p.ProcessResponses(resps)
+			continue
+		}
+		mat, jb, err := p.ProcessResponses(resps)
+		require.NoError(t, err)
+		if jb != nil {
+			enc, err := threshold.MarshalJustificationBundle(jb)
+			require.NoError(t, err)
+			require.NoError(t, f.k.CollectJustification(f.ctx, epochID, uint32(i), enc))
+		}
+		pending = append(pending, pend{p: p, mat: mat})
+	}
+
+	// Confirm window — finalize locally (over justifications if any) and confirm.
+	justDeadline := respDeadline + params.JustifyWindowBlocks
+	f.setHeight(justDeadline)
+	justs := decodeJustWire(t, f.k.Justifications(f.ctx, epochID))
 	mats := make([]*threshold.EpochKeyMaterial, 0, n)
-	confirmers := n
+	for _, pe := range pending {
+		mat := pe.mat
+		if mat == nil {
+			m, err := pe.p.Finalize(justs)
+			require.NoError(t, err)
+			mat = m
+		}
+		mats = append(mats, mat)
+	}
+	confirmers := len(mats)
 	if outcome == dkgConfirmShort {
 		confirmers = thr - 1 // below threshold → FAILED
 	}
-	for i, p := range parts {
-		mat, err := p.Finalize(resps)
-		require.NoError(t, err)
-		mats = append(mats, mat)
+	for i, mat := range mats {
 		if i >= confirmers {
 			continue
 		}
 		commits, err := threshold.MarshalCommits(mat.Commits)
 		require.NoError(t, err)
-		require.NoError(t, f.k.CollectConfirm(f.ctx, epochID, uint32(i), mat.EpochPub, commits))
+		require.NoError(t, f.k.CollectConfirm(f.ctx, epochID, uint32(mat.Index), mat.EpochPub, commits))
 	}
 
 	// Finalize at the confirm deadline.
 	f.setHeight(e.ConfirmDeadline)
 	require.NoError(t, f.k.EndBlocker(f.ctx))
 	return epochID, mats
+}
+
+func decodeJustWire(t testing.TB, wire [][]byte) []*dkg.JustificationBundle {
+	t.Helper()
+	out := make([]*dkg.JustificationBundle, 0, len(wire))
+	for _, w := range wire {
+		j, err := threshold.UnmarshalJustificationBundle(w)
+		require.NoError(t, err)
+		out = append(out, j)
+	}
+	return out
 }

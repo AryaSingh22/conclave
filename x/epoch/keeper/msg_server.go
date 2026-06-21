@@ -43,6 +43,40 @@ func (k Keeper) authCommitteeMember(ctx sdk.Context, e types.Epoch, dkgIndex uin
 	return nil
 }
 
+// RegisterDKGKey records a validator's long-term DKG public key for the FORMING
+// epoch's register window (Task 1.7 A2, D-070). The sender's validator identity
+// (its valoper, derived from the signer account — the same account↔valoper
+// payload the bundle rounds authenticate against) is the registration key, so a
+// validator can only register its OWN slot: the binding is protocol-enforced, not
+// genesis-trusted (build condition 2).
+func (m msgServer) RegisterDKGKey(goCtx context.Context, msg *types.MsgRegisterDKGKey) (*types.MsgRegisterDKGKeyResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	acc, err := sdk.AccAddressFromBech32(msg.Sender)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrUnauthorized, "invalid sender")
+	}
+	valoper := sdk.ValAddress(acc).String()
+	if err := m.CollectRegistration(ctx, msg.EpochId, valoper, msg.DkgPubKey); err != nil {
+		return nil, err
+	}
+	return &types.MsgRegisterDKGKeyResponse{}, nil
+}
+
+func (m msgServer) SubmitJustification(goCtx context.Context, msg *types.MsgSubmitJustification) (*types.MsgSubmitJustificationResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	e, ok := m.GetEpoch(ctx, msg.EpochId)
+	if !ok {
+		return nil, types.ErrEpochNotFound
+	}
+	if err := m.authCommitteeMember(ctx, e, msg.DkgIndex, msg.Sender); err != nil {
+		return nil, err
+	}
+	if err := m.CollectJustification(ctx, msg.EpochId, msg.DkgIndex, msg.Bundle); err != nil {
+		return nil, err
+	}
+	return &types.MsgSubmitJustificationResponse{}, nil
+}
+
 func (m msgServer) SubmitDeal(goCtx context.Context, msg *types.MsgSubmitDeal) (*types.MsgSubmitDealResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	e, ok := m.GetEpoch(ctx, msg.EpochId)

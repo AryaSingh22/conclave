@@ -6,6 +6,7 @@ package types
 import (
 	context "context"
 	fmt "fmt"
+	_ "github.com/cosmos/cosmos-proto"
 	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
 	_ "github.com/cosmos/gogoproto/gogoproto"
 	grpc1 "github.com/cosmos/gogoproto/grpc"
@@ -280,6 +281,382 @@ func (m *QueryParamsResponse) GetParams() Params {
 	return Params{}
 }
 
+type QueryFormingEpochRequest struct {
+}
+
+func (m *QueryFormingEpochRequest) Reset()         { *m = QueryFormingEpochRequest{} }
+func (m *QueryFormingEpochRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryFormingEpochRequest) ProtoMessage()    {}
+func (*QueryFormingEpochRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{6}
+}
+func (m *QueryFormingEpochRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryFormingEpochRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryFormingEpochRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryFormingEpochRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryFormingEpochRequest.Merge(m, src)
+}
+func (m *QueryFormingEpochRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryFormingEpochRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryFormingEpochRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryFormingEpochRequest proto.InternalMessageInfo
+
+type QueryFormingEpochResponse struct {
+	// epoch is the FORMING epoch; its id is 0 when none is forming.
+	Epoch Epoch `protobuf:"bytes,1,opt,name=epoch,proto3" json:"epoch"`
+}
+
+func (m *QueryFormingEpochResponse) Reset()         { *m = QueryFormingEpochResponse{} }
+func (m *QueryFormingEpochResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryFormingEpochResponse) ProtoMessage()    {}
+func (*QueryFormingEpochResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{7}
+}
+func (m *QueryFormingEpochResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryFormingEpochResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryFormingEpochResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryFormingEpochResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryFormingEpochResponse.Merge(m, src)
+}
+func (m *QueryFormingEpochResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryFormingEpochResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryFormingEpochResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryFormingEpochResponse proto.InternalMessageInfo
+
+func (m *QueryFormingEpochResponse) GetEpoch() Epoch {
+	if m != nil {
+		return m.Epoch
+	}
+	return Epoch{}
+}
+
+type QueryRegistrationsRequest struct {
+	EpochId uint64 `protobuf:"varint,1,opt,name=epoch_id,json=epochId,proto3" json:"epoch_id,omitempty"`
+}
+
+func (m *QueryRegistrationsRequest) Reset()         { *m = QueryRegistrationsRequest{} }
+func (m *QueryRegistrationsRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryRegistrationsRequest) ProtoMessage()    {}
+func (*QueryRegistrationsRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{8}
+}
+func (m *QueryRegistrationsRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryRegistrationsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryRegistrationsRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryRegistrationsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryRegistrationsRequest.Merge(m, src)
+}
+func (m *QueryRegistrationsRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryRegistrationsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryRegistrationsRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryRegistrationsRequest proto.InternalMessageInfo
+
+func (m *QueryRegistrationsRequest) GetEpochId() uint64 {
+	if m != nil {
+		return m.EpochId
+	}
+	return 0
+}
+
+// DKGRegistration is one validator's registered long-term DKG public key.
+type DKGRegistration struct {
+	Valoper   string `protobuf:"bytes,1,opt,name=valoper,proto3" json:"valoper,omitempty"`
+	DkgPubKey []byte `protobuf:"bytes,2,opt,name=dkg_pub_key,json=dkgPubKey,proto3" json:"dkg_pub_key,omitempty"`
+}
+
+func (m *DKGRegistration) Reset()         { *m = DKGRegistration{} }
+func (m *DKGRegistration) String() string { return proto.CompactTextString(m) }
+func (*DKGRegistration) ProtoMessage()    {}
+func (*DKGRegistration) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{9}
+}
+func (m *DKGRegistration) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *DKGRegistration) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_DKGRegistration.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *DKGRegistration) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_DKGRegistration.Merge(m, src)
+}
+func (m *DKGRegistration) XXX_Size() int {
+	return m.Size()
+}
+func (m *DKGRegistration) XXX_DiscardUnknown() {
+	xxx_messageInfo_DKGRegistration.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_DKGRegistration proto.InternalMessageInfo
+
+func (m *DKGRegistration) GetValoper() string {
+	if m != nil {
+		return m.Valoper
+	}
+	return ""
+}
+
+func (m *DKGRegistration) GetDkgPubKey() []byte {
+	if m != nil {
+		return m.DkgPubKey
+	}
+	return nil
+}
+
+type QueryRegistrationsResponse struct {
+	// registrations are sorted by valoper ascending (the committee-finalization
+	// order).
+	Registrations []DKGRegistration `protobuf:"bytes,1,rep,name=registrations,proto3" json:"registrations"`
+}
+
+func (m *QueryRegistrationsResponse) Reset()         { *m = QueryRegistrationsResponse{} }
+func (m *QueryRegistrationsResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryRegistrationsResponse) ProtoMessage()    {}
+func (*QueryRegistrationsResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{10}
+}
+func (m *QueryRegistrationsResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryRegistrationsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryRegistrationsResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryRegistrationsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryRegistrationsResponse.Merge(m, src)
+}
+func (m *QueryRegistrationsResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryRegistrationsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryRegistrationsResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryRegistrationsResponse proto.InternalMessageInfo
+
+func (m *QueryRegistrationsResponse) GetRegistrations() []DKGRegistration {
+	if m != nil {
+		return m.Registrations
+	}
+	return nil
+}
+
+type QueryDKGTranscriptRequest struct {
+	EpochId uint64 `protobuf:"varint,1,opt,name=epoch_id,json=epochId,proto3" json:"epoch_id,omitempty"`
+	// round selects which window's bundles: 0=deal 1=response 2=justify.
+	Round uint32 `protobuf:"varint,2,opt,name=round,proto3" json:"round,omitempty"`
+}
+
+func (m *QueryDKGTranscriptRequest) Reset()         { *m = QueryDKGTranscriptRequest{} }
+func (m *QueryDKGTranscriptRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryDKGTranscriptRequest) ProtoMessage()    {}
+func (*QueryDKGTranscriptRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{11}
+}
+func (m *QueryDKGTranscriptRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryDKGTranscriptRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryDKGTranscriptRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryDKGTranscriptRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryDKGTranscriptRequest.Merge(m, src)
+}
+func (m *QueryDKGTranscriptRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryDKGTranscriptRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryDKGTranscriptRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryDKGTranscriptRequest proto.InternalMessageInfo
+
+func (m *QueryDKGTranscriptRequest) GetEpochId() uint64 {
+	if m != nil {
+		return m.EpochId
+	}
+	return 0
+}
+
+func (m *QueryDKGTranscriptRequest) GetRound() uint32 {
+	if m != nil {
+		return m.Round
+	}
+	return 0
+}
+
+// DKGBundle is one collected opaque transport bundle, tagged with its dealer's
+// committee dkg_index.
+type DKGBundle struct {
+	DkgIndex uint32 `protobuf:"varint,1,opt,name=dkg_index,json=dkgIndex,proto3" json:"dkg_index,omitempty"`
+	Bundle   []byte `protobuf:"bytes,2,opt,name=bundle,proto3" json:"bundle,omitempty"`
+}
+
+func (m *DKGBundle) Reset()         { *m = DKGBundle{} }
+func (m *DKGBundle) String() string { return proto.CompactTextString(m) }
+func (*DKGBundle) ProtoMessage()    {}
+func (*DKGBundle) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{12}
+}
+func (m *DKGBundle) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *DKGBundle) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_DKGBundle.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *DKGBundle) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_DKGBundle.Merge(m, src)
+}
+func (m *DKGBundle) XXX_Size() int {
+	return m.Size()
+}
+func (m *DKGBundle) XXX_DiscardUnknown() {
+	xxx_messageInfo_DKGBundle.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_DKGBundle proto.InternalMessageInfo
+
+func (m *DKGBundle) GetDkgIndex() uint32 {
+	if m != nil {
+		return m.DkgIndex
+	}
+	return 0
+}
+
+func (m *DKGBundle) GetBundle() []byte {
+	if m != nil {
+		return m.Bundle
+	}
+	return nil
+}
+
+type QueryDKGTranscriptResponse struct {
+	// bundles are sorted by dkg_index ascending (deterministic).
+	Bundles []DKGBundle `protobuf:"bytes,1,rep,name=bundles,proto3" json:"bundles"`
+}
+
+func (m *QueryDKGTranscriptResponse) Reset()         { *m = QueryDKGTranscriptResponse{} }
+func (m *QueryDKGTranscriptResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryDKGTranscriptResponse) ProtoMessage()    {}
+func (*QueryDKGTranscriptResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_8290e4d3b148e335, []int{13}
+}
+func (m *QueryDKGTranscriptResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryDKGTranscriptResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryDKGTranscriptResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryDKGTranscriptResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryDKGTranscriptResponse.Merge(m, src)
+}
+func (m *QueryDKGTranscriptResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryDKGTranscriptResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryDKGTranscriptResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryDKGTranscriptResponse proto.InternalMessageInfo
+
+func (m *QueryDKGTranscriptResponse) GetBundles() []DKGBundle {
+	if m != nil {
+		return m.Bundles
+	}
+	return nil
+}
+
 func init() {
 	proto.RegisterType((*QueryCurrentEpochRequest)(nil), "conclave.epoch.v1.QueryCurrentEpochRequest")
 	proto.RegisterType((*QueryCurrentEpochResponse)(nil), "conclave.epoch.v1.QueryCurrentEpochResponse")
@@ -287,40 +664,69 @@ func init() {
 	proto.RegisterType((*QueryEpochResponse)(nil), "conclave.epoch.v1.QueryEpochResponse")
 	proto.RegisterType((*QueryParamsRequest)(nil), "conclave.epoch.v1.QueryParamsRequest")
 	proto.RegisterType((*QueryParamsResponse)(nil), "conclave.epoch.v1.QueryParamsResponse")
+	proto.RegisterType((*QueryFormingEpochRequest)(nil), "conclave.epoch.v1.QueryFormingEpochRequest")
+	proto.RegisterType((*QueryFormingEpochResponse)(nil), "conclave.epoch.v1.QueryFormingEpochResponse")
+	proto.RegisterType((*QueryRegistrationsRequest)(nil), "conclave.epoch.v1.QueryRegistrationsRequest")
+	proto.RegisterType((*DKGRegistration)(nil), "conclave.epoch.v1.DKGRegistration")
+	proto.RegisterType((*QueryRegistrationsResponse)(nil), "conclave.epoch.v1.QueryRegistrationsResponse")
+	proto.RegisterType((*QueryDKGTranscriptRequest)(nil), "conclave.epoch.v1.QueryDKGTranscriptRequest")
+	proto.RegisterType((*DKGBundle)(nil), "conclave.epoch.v1.DKGBundle")
+	proto.RegisterType((*QueryDKGTranscriptResponse)(nil), "conclave.epoch.v1.QueryDKGTranscriptResponse")
 }
 
 func init() { proto.RegisterFile("conclave/epoch/v1/query.proto", fileDescriptor_8290e4d3b148e335) }
 
 var fileDescriptor_8290e4d3b148e335 = []byte{
-	// 434 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0x92, 0x4d, 0xce, 0xcf, 0x4b,
-	0xce, 0x49, 0x2c, 0x4b, 0xd5, 0x4f, 0x2d, 0xc8, 0x4f, 0xce, 0xd0, 0x2f, 0x33, 0xd4, 0x2f, 0x2c,
-	0x4d, 0x2d, 0xaa, 0xd4, 0x2b, 0x28, 0xca, 0x2f, 0xc9, 0x17, 0x12, 0x84, 0x49, 0xeb, 0x81, 0xa5,
-	0xf5, 0xca, 0x0c, 0xa5, 0x04, 0x13, 0x73, 0x33, 0xf3, 0xf2, 0xf5, 0xc1, 0x24, 0x44, 0x95, 0x14,
-	0x16, 0x43, 0x20, 0xca, 0x21, 0xd2, 0x22, 0xe9, 0xf9, 0xe9, 0xf9, 0x60, 0xa6, 0x3e, 0x88, 0x05,
-	0x15, 0x95, 0x49, 0xcf, 0xcf, 0x4f, 0xcf, 0x49, 0xd5, 0x4f, 0x2c, 0xc8, 0xd4, 0x4f, 0xcc, 0xcb,
-	0xcb, 0x2f, 0x49, 0x2c, 0xc9, 0xcc, 0xcf, 0x2b, 0x86, 0xc8, 0x2a, 0x49, 0x71, 0x49, 0x04, 0x82,
-	0xdc, 0xe1, 0x5c, 0x5a, 0x54, 0x94, 0x9a, 0x57, 0xe2, 0x0a, 0x32, 0x2e, 0x28, 0xb5, 0xb0, 0x34,
-	0xb5, 0xb8, 0x44, 0x29, 0x8c, 0x4b, 0x12, 0x8b, 0x5c, 0x71, 0x41, 0x7e, 0x5e, 0x71, 0xaa, 0x90,
-	0x25, 0x17, 0x2b, 0xd8, 0x6e, 0x09, 0x46, 0x05, 0x46, 0x0d, 0x6e, 0x23, 0x09, 0x3d, 0x0c, 0x1f,
-	0xe8, 0x81, 0x35, 0x38, 0x71, 0x9e, 0xb8, 0x27, 0xcf, 0xb0, 0xe2, 0xf9, 0x06, 0x2d, 0xc6, 0x20,
-	0x88, 0x0e, 0x25, 0x65, 0x2e, 0x41, 0xb0, 0xb9, 0xc8, 0x96, 0x09, 0xf1, 0x71, 0x31, 0x65, 0xa6,
-	0x80, 0x0d, 0x63, 0x09, 0x62, 0xca, 0x4c, 0x51, 0xf2, 0xe7, 0x12, 0x42, 0x56, 0x44, 0xb9, 0xad,
-	0x22, 0x50, 0x03, 0x03, 0x12, 0x8b, 0x12, 0x73, 0x8b, 0x61, 0x7e, 0x0c, 0xe6, 0x12, 0x46, 0x11,
-	0x85, 0xda, 0x63, 0xc3, 0xc5, 0x56, 0x00, 0x16, 0x81, 0x5a, 0x24, 0x89, 0xc5, 0x22, 0x88, 0x16,
-	0x64, 0x9b, 0xa0, 0x7a, 0x8c, 0x26, 0x32, 0x73, 0xb1, 0x82, 0x4d, 0x15, 0xea, 0x65, 0xe4, 0xe2,
-	0x41, 0x0e, 0x3e, 0x21, 0x6d, 0x2c, 0x06, 0xe1, 0x8a, 0x00, 0x29, 0x1d, 0xe2, 0x14, 0x43, 0xdc,
-	0xac, 0xa4, 0xd4, 0x74, 0xf9, 0xc9, 0x64, 0x26, 0x19, 0x21, 0x29, 0x7d, 0xcc, 0x64, 0x92, 0x0c,
-	0xd1, 0x20, 0x54, 0xc3, 0xc5, 0x0a, 0x71, 0x87, 0x0a, 0x2e, 0xa3, 0x51, 0x1c, 0xa0, 0x4a, 0x40,
-	0x15, 0xd4, 0x66, 0x35, 0xb0, 0xcd, 0x0a, 0x42, 0x72, 0xfa, 0x38, 0x12, 0x68, 0xb1, 0x7e, 0x75,
-	0x66, 0x4a, 0xad, 0x50, 0x15, 0x17, 0x1b, 0x24, 0xd0, 0x84, 0x70, 0x1a, 0x8c, 0x12, 0x3b, 0x52,
-	0x6a, 0x84, 0x94, 0x41, 0x1d, 0xa0, 0x08, 0x76, 0x80, 0xb4, 0x90, 0x24, 0x16, 0x07, 0x40, 0xe2,
-	0xc4, 0xc9, 0xfd, 0xc4, 0x23, 0x39, 0xc6, 0x0b, 0x8f, 0xe4, 0x18, 0x1f, 0x3c, 0x92, 0x63, 0x9c,
-	0xf0, 0x58, 0x8e, 0xe1, 0xc2, 0x63, 0x39, 0x86, 0x1b, 0x8f, 0xe5, 0x18, 0xa2, 0x74, 0xd3, 0x33,
-	0x4b, 0x32, 0x4a, 0x93, 0xf4, 0x92, 0xf3, 0x73, 0xf5, 0x1d, 0x8b, 0x2a, 0x13, 0x83, 0x33, 0xf3,
-	0xd2, 0x33, 0x8c, 0x8c, 0x10, 0x46, 0x55, 0x40, 0x0d, 0x2b, 0xa9, 0x2c, 0x48, 0x2d, 0x4e, 0x62,
-	0x03, 0x67, 0x1c, 0x63, 0x40, 0x00, 0x00, 0x00, 0xff, 0xff, 0x6b, 0x82, 0x2f, 0xbd, 0xd2, 0x03,
-	0x00, 0x00,
+	// 773 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xa4, 0x55, 0x41, 0x6f, 0xd3, 0x4a,
+	0x10, 0x8e, 0xf3, 0x5e, 0xd2, 0x66, 0xdb, 0xbc, 0xa7, 0x2e, 0x11, 0x4a, 0xdc, 0x62, 0x82, 0x81,
+	0xaa, 0xa2, 0x24, 0xa6, 0xa9, 0x84, 0x40, 0xe2, 0x40, 0x43, 0x21, 0xaa, 0x82, 0x44, 0x71, 0x10,
+	0x07, 0x2e, 0x91, 0x13, 0x2f, 0xae, 0x95, 0xc4, 0xeb, 0xae, 0xed, 0xa8, 0xa1, 0xf4, 0xc2, 0x1d,
+	0x09, 0x89, 0x5f, 0xc0, 0x05, 0x71, 0xe4, 0xc0, 0x8f, 0xe8, 0xb1, 0x82, 0x0b, 0x27, 0x84, 0x5a,
+	0x24, 0x6e, 0xfc, 0x06, 0x94, 0xdd, 0x75, 0xb1, 0xdb, 0x35, 0xad, 0xd4, 0x4b, 0x94, 0xd9, 0xf9,
+	0x66, 0xbe, 0x6f, 0x66, 0x32, 0x13, 0x70, 0xa1, 0x8b, 0x9d, 0x6e, 0xdf, 0x18, 0x22, 0x0d, 0xb9,
+	0xb8, 0xbb, 0xa1, 0x0d, 0x97, 0xb4, 0xcd, 0x00, 0x91, 0x51, 0xd5, 0x25, 0xd8, 0xc7, 0x70, 0x26,
+	0x74, 0x57, 0xa9, 0xbb, 0x3a, 0x5c, 0x92, 0x67, 0x8c, 0x81, 0xed, 0x60, 0x8d, 0x7e, 0x32, 0x94,
+	0x2c, 0x48, 0xc2, 0xe0, 0xcc, 0x5d, 0xea, 0x62, 0x6f, 0x80, 0xbd, 0x36, 0xb5, 0x34, 0x66, 0x70,
+	0x57, 0xc1, 0xc2, 0x16, 0x66, 0xef, 0xe3, 0x6f, 0xfc, 0x75, 0xce, 0xc2, 0xd8, 0xea, 0x23, 0xcd,
+	0x70, 0x6d, 0xcd, 0x70, 0x1c, 0xec, 0x1b, 0xbe, 0x8d, 0x1d, 0x1e, 0xa3, 0xca, 0xa0, 0xf8, 0x78,
+	0x2c, 0xf1, 0x5e, 0x40, 0x08, 0x72, 0xfc, 0xfb, 0x63, 0x26, 0x1d, 0x6d, 0x06, 0xc8, 0xf3, 0xd5,
+	0xa7, 0xa0, 0x24, 0xf0, 0x79, 0x2e, 0x76, 0x3c, 0x04, 0x6f, 0x83, 0x0c, 0x95, 0x55, 0x94, 0xca,
+	0xd2, 0xc2, 0x54, 0xad, 0x58, 0x3d, 0x56, 0x5c, 0x95, 0x06, 0xd4, 0x73, 0xbb, 0xdf, 0x2e, 0xa6,
+	0x3e, 0xfc, 0xfc, 0x78, 0x4d, 0xd2, 0x59, 0x84, 0x7a, 0x19, 0xcc, 0xd0, 0xbc, 0x51, 0x32, 0xf8,
+	0x1f, 0x48, 0xdb, 0x26, 0x4d, 0xf6, 0xaf, 0x9e, 0xb6, 0x4d, 0xf5, 0x11, 0x80, 0x51, 0xd0, 0xd9,
+	0x59, 0x0b, 0x3c, 0xe1, 0xba, 0x41, 0x8c, 0x81, 0x17, 0xd6, 0xd8, 0x02, 0xe7, 0x62, 0xaf, 0x9c,
+	0xe7, 0x0e, 0xc8, 0xba, 0xf4, 0x85, 0x13, 0x95, 0x04, 0x44, 0x2c, 0x24, 0xca, 0xc4, 0x63, 0x0e,
+	0x9b, 0xfa, 0x00, 0x93, 0x81, 0xed, 0x58, 0xc2, 0xa6, 0xc6, 0x7d, 0x67, 0x2f, 0xef, 0x26, 0xcf,
+	0xab, 0x23, 0xcb, 0xf6, 0x7c, 0xc2, 0x86, 0x1c, 0x36, 0xb7, 0x04, 0x26, 0x29, 0xaa, 0x7d, 0xd8,
+	0xe2, 0x09, 0x6a, 0xaf, 0x99, 0x2a, 0x02, 0xff, 0xaf, 0x36, 0x1b, 0xd1, 0x28, 0x58, 0x03, 0x13,
+	0x43, 0xa3, 0x8f, 0x5d, 0x44, 0x28, 0x38, 0x57, 0x2f, 0x7e, 0xfe, 0x54, 0x29, 0xf0, 0x9f, 0xda,
+	0x8a, 0x69, 0x12, 0xe4, 0x79, 0x2d, 0x9f, 0xd8, 0x8e, 0xa5, 0x87, 0x40, 0xa8, 0x80, 0x29, 0xb3,
+	0x67, 0xb5, 0xdd, 0xa0, 0xd3, 0xee, 0xa1, 0x51, 0x31, 0x5d, 0x96, 0x16, 0xa6, 0xf5, 0x9c, 0xd9,
+	0xb3, 0xd6, 0x83, 0x4e, 0x13, 0x8d, 0xd4, 0x4d, 0x20, 0x8b, 0xe4, 0xf1, 0xba, 0x5b, 0x20, 0x4f,
+	0xa2, 0x8e, 0xa2, 0x54, 0xfe, 0x67, 0x61, 0xaa, 0xa6, 0x0a, 0xea, 0x3f, 0x22, 0x36, 0xda, 0x89,
+	0x78, 0x0e, 0xf5, 0x21, 0xef, 0xc8, 0x6a, 0xb3, 0xf1, 0x84, 0x18, 0x8e, 0xd7, 0x25, 0xb6, 0xeb,
+	0x9f, 0xdc, 0x11, 0x58, 0x00, 0x19, 0x82, 0x03, 0xc7, 0xa4, 0x45, 0xe4, 0x75, 0x66, 0xa8, 0x77,
+	0x41, 0x6e, 0xb5, 0xd9, 0xa8, 0x07, 0x8e, 0xd9, 0x47, 0x70, 0x16, 0x8c, 0x4b, 0x6b, 0xdb, 0x8e,
+	0x89, 0xb6, 0x68, 0x78, 0x5e, 0x9f, 0x34, 0x7b, 0xd6, 0xda, 0xd8, 0x86, 0xe7, 0x41, 0xb6, 0x43,
+	0x61, 0xbc, 0x0b, 0xdc, 0x52, 0xdb, 0xbc, 0x05, 0x47, 0xf4, 0xf0, 0x16, 0xac, 0x80, 0x09, 0x86,
+	0x0b, 0x8b, 0x9f, 0x13, 0x17, 0xcf, 0x14, 0x44, 0xcb, 0x0e, 0xe3, 0x6a, 0xbf, 0xb2, 0x20, 0x43,
+	0x19, 0xe0, 0x6b, 0x09, 0x4c, 0x47, 0xb7, 0x16, 0x2e, 0x0a, 0x92, 0x25, 0xed, 0xbd, 0x7c, 0xfd,
+	0x74, 0x60, 0x26, 0x5c, 0x55, 0x5f, 0x7d, 0xf9, 0xf1, 0x36, 0x3d, 0x07, 0x65, 0xed, 0xf8, 0xe1,
+	0xea, 0xb2, 0x00, 0xf8, 0x12, 0x64, 0x98, 0x8e, 0x2b, 0x49, 0xa9, 0x63, 0x02, 0xae, 0x9e, 0x80,
+	0xe2, 0xcc, 0xf3, 0x94, 0xb9, 0x0c, 0x15, 0x2d, 0xe1, 0x64, 0x7a, 0xda, 0xb6, 0x6d, 0xee, 0xc0,
+	0x17, 0x20, 0xcb, 0x76, 0x15, 0x26, 0x26, 0x8e, 0x1d, 0x05, 0x79, 0xfe, 0x24, 0x18, 0x17, 0x70,
+	0x89, 0x0a, 0x98, 0x85, 0x25, 0x81, 0x00, 0x76, 0x0a, 0xe8, 0x24, 0xa2, 0xab, 0x9e, 0x3c, 0x09,
+	0xc1, 0xb1, 0x48, 0x9e, 0x84, 0xe8, 0x7a, 0xfc, 0x75, 0x12, 0xcf, 0x59, 0x00, 0x7c, 0x27, 0x81,
+	0x7c, 0x6c, 0x07, 0x61, 0x22, 0x87, 0xe8, 0x92, 0xc8, 0x95, 0x53, 0xa2, 0xb9, 0xa4, 0x65, 0x2a,
+	0xa9, 0x02, 0x17, 0x05, 0x92, 0x62, 0xdb, 0xaa, 0x6d, 0x87, 0xeb, 0xb8, 0x03, 0xdf, 0x4b, 0x20,
+	0x1f, 0x5b, 0x92, 0x64, 0x8d, 0xa2, 0xdd, 0x4e, 0xd6, 0x28, 0xdc, 0x3c, 0xf5, 0x16, 0xd5, 0x58,
+	0x83, 0x37, 0x04, 0x1a, 0xfd, 0x43, 0x78, 0x44, 0xa0, 0xb6, 0x4d, 0x4f, 0xc2, 0x4e, 0xbd, 0xb1,
+	0xbb, 0xaf, 0x48, 0x7b, 0xfb, 0x8a, 0xf4, 0x7d, 0x5f, 0x91, 0xde, 0x1c, 0x28, 0xa9, 0xbd, 0x03,
+	0x25, 0xf5, 0xf5, 0x40, 0x49, 0x3d, 0xab, 0x58, 0xb6, 0xbf, 0x11, 0x74, 0xaa, 0x5d, 0x3c, 0xd0,
+	0x56, 0xc8, 0xc8, 0x68, 0xd9, 0x8e, 0xb5, 0x51, 0xab, 0xfd, 0x61, 0xd8, 0xe2, 0x1c, 0xfe, 0xc8,
+	0x45, 0x5e, 0x27, 0x4b, 0xff, 0x8c, 0x97, 0x7f, 0x07, 0x00, 0x00, 0xff, 0xff, 0x39, 0xa3, 0x73,
+	0x78, 0x41, 0x08, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -341,6 +747,17 @@ type QueryClient interface {
 	Epoch(ctx context.Context, in *QueryEpochRequest, opts ...grpc.CallOption) (*QueryEpochResponse, error)
 	// Params returns the module parameters.
 	Params(ctx context.Context, in *QueryParamsRequest, opts ...grpc.CallOption) (*QueryParamsResponse, error)
+	// FormingEpoch returns the open FORMING epoch (the DKG-in-progress epoch the
+	// off-chain daemon drives), with an empty record (id 0) when none is forming
+	// (Task 1.7, D-070).
+	FormingEpoch(ctx context.Context, in *QueryFormingEpochRequest, opts ...grpc.CallOption) (*QueryFormingEpochResponse, error)
+	// Registrations returns the long-term DKG public keys registered for an epoch
+	// (register window), so the daemon can build the DKG roster (Task 1.7 A2).
+	Registrations(ctx context.Context, in *QueryRegistrationsRequest, opts ...grpc.CallOption) (*QueryRegistrationsResponse, error)
+	// DKGTranscript returns the collected opaque bundles of one DKG round for an
+	// epoch (round 0=deal 1=response 2=justify), so the daemon can drive the next
+	// round from its peers' bundles (Task 1.7, D-070).
+	DKGTranscript(ctx context.Context, in *QueryDKGTranscriptRequest, opts ...grpc.CallOption) (*QueryDKGTranscriptResponse, error)
 }
 
 type queryClient struct {
@@ -378,6 +795,33 @@ func (c *queryClient) Params(ctx context.Context, in *QueryParamsRequest, opts .
 	return out, nil
 }
 
+func (c *queryClient) FormingEpoch(ctx context.Context, in *QueryFormingEpochRequest, opts ...grpc.CallOption) (*QueryFormingEpochResponse, error) {
+	out := new(QueryFormingEpochResponse)
+	err := c.cc.Invoke(ctx, "/conclave.epoch.v1.Query/FormingEpoch", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) Registrations(ctx context.Context, in *QueryRegistrationsRequest, opts ...grpc.CallOption) (*QueryRegistrationsResponse, error) {
+	out := new(QueryRegistrationsResponse)
+	err := c.cc.Invoke(ctx, "/conclave.epoch.v1.Query/Registrations", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) DKGTranscript(ctx context.Context, in *QueryDKGTranscriptRequest, opts ...grpc.CallOption) (*QueryDKGTranscriptResponse, error) {
+	out := new(QueryDKGTranscriptResponse)
+	err := c.cc.Invoke(ctx, "/conclave.epoch.v1.Query/DKGTranscript", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 type QueryServer interface {
 	// CurrentEpoch returns the current ACTIVE epoch (the encryption target).
@@ -386,6 +830,17 @@ type QueryServer interface {
 	Epoch(context.Context, *QueryEpochRequest) (*QueryEpochResponse, error)
 	// Params returns the module parameters.
 	Params(context.Context, *QueryParamsRequest) (*QueryParamsResponse, error)
+	// FormingEpoch returns the open FORMING epoch (the DKG-in-progress epoch the
+	// off-chain daemon drives), with an empty record (id 0) when none is forming
+	// (Task 1.7, D-070).
+	FormingEpoch(context.Context, *QueryFormingEpochRequest) (*QueryFormingEpochResponse, error)
+	// Registrations returns the long-term DKG public keys registered for an epoch
+	// (register window), so the daemon can build the DKG roster (Task 1.7 A2).
+	Registrations(context.Context, *QueryRegistrationsRequest) (*QueryRegistrationsResponse, error)
+	// DKGTranscript returns the collected opaque bundles of one DKG round for an
+	// epoch (round 0=deal 1=response 2=justify), so the daemon can drive the next
+	// round from its peers' bundles (Task 1.7, D-070).
+	DKGTranscript(context.Context, *QueryDKGTranscriptRequest) (*QueryDKGTranscriptResponse, error)
 }
 
 // UnimplementedQueryServer can be embedded to have forward compatible implementations.
@@ -400,6 +855,15 @@ func (*UnimplementedQueryServer) Epoch(ctx context.Context, req *QueryEpochReque
 }
 func (*UnimplementedQueryServer) Params(ctx context.Context, req *QueryParamsRequest) (*QueryParamsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Params not implemented")
+}
+func (*UnimplementedQueryServer) FormingEpoch(ctx context.Context, req *QueryFormingEpochRequest) (*QueryFormingEpochResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FormingEpoch not implemented")
+}
+func (*UnimplementedQueryServer) Registrations(ctx context.Context, req *QueryRegistrationsRequest) (*QueryRegistrationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Registrations not implemented")
+}
+func (*UnimplementedQueryServer) DKGTranscript(ctx context.Context, req *QueryDKGTranscriptRequest) (*QueryDKGTranscriptResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DKGTranscript not implemented")
 }
 
 func RegisterQueryServer(s grpc1.Server, srv QueryServer) {
@@ -460,6 +924,60 @@ func _Query_Params_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_FormingEpoch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryFormingEpochRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).FormingEpoch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/conclave.epoch.v1.Query/FormingEpoch",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).FormingEpoch(ctx, req.(*QueryFormingEpochRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_Registrations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryRegistrationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).Registrations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/conclave.epoch.v1.Query/Registrations",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).Registrations(ctx, req.(*QueryRegistrationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_DKGTranscript_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryDKGTranscriptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).DKGTranscript(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/conclave.epoch.v1.Query/DKGTranscript",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).DKGTranscript(ctx, req.(*QueryDKGTranscriptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var Query_serviceDesc = _Query_serviceDesc
 var _Query_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "conclave.epoch.v1.Query",
@@ -476,6 +994,18 @@ var _Query_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Params",
 			Handler:    _Query_Params_Handler,
+		},
+		{
+			MethodName: "FormingEpoch",
+			Handler:    _Query_FormingEpoch_Handler,
+		},
+		{
+			MethodName: "Registrations",
+			Handler:    _Query_Registrations_Handler,
+		},
+		{
+			MethodName: "DKGTranscript",
+			Handler:    _Query_DKGTranscript_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -655,6 +1185,269 @@ func (m *QueryParamsResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *QueryFormingEpochRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryFormingEpochRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryFormingEpochRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryFormingEpochResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryFormingEpochResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryFormingEpochResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	{
+		size, err := m.Epoch.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintQuery(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryRegistrationsRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryRegistrationsRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryRegistrationsRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.EpochId != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.EpochId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *DKGRegistration) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *DKGRegistration) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *DKGRegistration) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.DkgPubKey) > 0 {
+		i -= len(m.DkgPubKey)
+		copy(dAtA[i:], m.DkgPubKey)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.DkgPubKey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Valoper) > 0 {
+		i -= len(m.Valoper)
+		copy(dAtA[i:], m.Valoper)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.Valoper)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryRegistrationsResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryRegistrationsResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryRegistrationsResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Registrations) > 0 {
+		for iNdEx := len(m.Registrations) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Registrations[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintQuery(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryDKGTranscriptRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryDKGTranscriptRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryDKGTranscriptRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Round != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.Round))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.EpochId != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.EpochId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *DKGBundle) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *DKGBundle) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *DKGBundle) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Bundle) > 0 {
+		i -= len(m.Bundle)
+		copy(dAtA[i:], m.Bundle)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.Bundle)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.DkgIndex != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.DkgIndex))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryDKGTranscriptResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryDKGTranscriptResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryDKGTranscriptResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Bundles) > 0 {
+		for iNdEx := len(m.Bundles) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Bundles[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintQuery(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
 func encodeVarintQuery(dAtA []byte, offset int, v uint64) int {
 	offset -= sovQuery(v)
 	base := offset
@@ -726,6 +1519,116 @@ func (m *QueryParamsResponse) Size() (n int) {
 	_ = l
 	l = m.Params.Size()
 	n += 1 + l + sovQuery(uint64(l))
+	return n
+}
+
+func (m *QueryFormingEpochRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *QueryFormingEpochResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = m.Epoch.Size()
+	n += 1 + l + sovQuery(uint64(l))
+	return n
+}
+
+func (m *QueryRegistrationsRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.EpochId != 0 {
+		n += 1 + sovQuery(uint64(m.EpochId))
+	}
+	return n
+}
+
+func (m *DKGRegistration) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Valoper)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	l = len(m.DkgPubKey)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	return n
+}
+
+func (m *QueryRegistrationsResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if len(m.Registrations) > 0 {
+		for _, e := range m.Registrations {
+			l = e.Size()
+			n += 1 + l + sovQuery(uint64(l))
+		}
+	}
+	return n
+}
+
+func (m *QueryDKGTranscriptRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.EpochId != 0 {
+		n += 1 + sovQuery(uint64(m.EpochId))
+	}
+	if m.Round != 0 {
+		n += 1 + sovQuery(uint64(m.Round))
+	}
+	return n
+}
+
+func (m *DKGBundle) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.DkgIndex != 0 {
+		n += 1 + sovQuery(uint64(m.DkgIndex))
+	}
+	l = len(m.Bundle)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	return n
+}
+
+func (m *QueryDKGTranscriptResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if len(m.Bundles) > 0 {
+		for _, e := range m.Bundles {
+			l = e.Size()
+			n += 1 + l + sovQuery(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -1129,6 +2032,683 @@ func (m *QueryParamsResponse) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			if err := m.Params.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryFormingEpochRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryFormingEpochRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryFormingEpochRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryFormingEpochResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryFormingEpochResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryFormingEpochResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Epoch", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.Epoch.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryRegistrationsRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryRegistrationsRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryRegistrationsRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EpochId", wireType)
+			}
+			m.EpochId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EpochId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *DKGRegistration) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: DKGRegistration: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: DKGRegistration: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Valoper", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Valoper = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DkgPubKey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.DkgPubKey = append(m.DkgPubKey[:0], dAtA[iNdEx:postIndex]...)
+			if m.DkgPubKey == nil {
+				m.DkgPubKey = []byte{}
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryRegistrationsResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryRegistrationsResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryRegistrationsResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Registrations", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Registrations = append(m.Registrations, DKGRegistration{})
+			if err := m.Registrations[len(m.Registrations)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryDKGTranscriptRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryDKGTranscriptRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryDKGTranscriptRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EpochId", wireType)
+			}
+			m.EpochId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EpochId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Round", wireType)
+			}
+			m.Round = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Round |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *DKGBundle) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: DKGBundle: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: DKGBundle: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DkgIndex", wireType)
+			}
+			m.DkgIndex = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.DkgIndex |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bundle", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bundle = append(m.Bundle[:0], dAtA[iNdEx:postIndex]...)
+			if m.Bundle == nil {
+				m.Bundle = []byte{}
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryDKGTranscriptResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryDKGTranscriptResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryDKGTranscriptResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bundles", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bundles = append(m.Bundles, DKGBundle{})
+			if err := m.Bundles[len(m.Bundles)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

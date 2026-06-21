@@ -98,11 +98,16 @@ func TestDKGViaTransportConsistentKey(t *testing.T) {
 	}
 
 	// Round 3 — each node reads ALL response bytes, decodes, finalizes locally.
+	// All-honest path: ProcessResponses yields the local material directly (no
+	// justify window needed).
 	mats := make([]*EpochKeyMaterial, 0, n)
 	for i, p := range parts {
-		mat, err := p.Finalize(decodeResps(t, respWire))
+		mat, jb, err := p.ProcessResponses(decodeResps(t, respWire))
 		if err != nil {
-			t.Fatalf("Finalize[%d]: %v", i, err)
+			t.Fatalf("ProcessResponses[%d]: %v", i, err)
+		}
+		if jb != nil || mat == nil {
+			t.Fatalf("node %d: unexpected justify path on all-honest DKG", i)
 		}
 		if !bytes.Equal(mat.EpochPub, mats0(mats)) && len(mats) > 0 {
 			t.Fatalf("node %d EpochPub differs from node 0 — DKG not consistent across transport", i)

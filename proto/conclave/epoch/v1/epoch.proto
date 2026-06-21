@@ -74,7 +74,10 @@ message Epoch {
   uint64 confirm_deadline = 9;
 }
 
-// Params are the governable x/epoch parameters (PHASE1_DESIGN §2(b), D-068).
+// Params are the governable x/epoch parameters (PHASE1_DESIGN §2(b), D-068;
+// register/justify windows added Task 1.7, D-070). The DKG runs five sequential
+// windows inside the FORMING epoch: register → deal → response → justify →
+// confirm.
 message Params {
   // epoch_length_blocks is the epoch cadence — the boundary fires when
   // height % epoch_length_blocks == 0 (dev default ~1 day of blocks).
@@ -83,12 +86,24 @@ message Params {
   uint64 deal_window_blocks = 2;
   // response_window_blocks is the Round-2 (response) collection window length.
   uint64 response_window_blocks = 3;
-  // confirm_window_blocks is the Round-3 (key-confirmation) window length;
-  // finalize runs at its close.
+  // confirm_window_blocks is the key-confirmation window length; finalize runs
+  // at its close.
   uint64 confirm_window_blocks = 4;
-  // min_committee_size is the smallest bonded set that can run a DKG; below it
-  // the boundary does not open an epoch (degraded — keeps the prior key).
+  // min_committee_size is the smallest REGISTERED committee that can run a DKG;
+  // below it the epoch FAILEDs (degraded — keeps the prior key). It is checked
+  // against the registered set, not the bonded candidate set (D-070).
   uint32 min_committee_size = 5;
   // max_bundle_bytes caps one DKG transport message (DoS bound on VE/tx size).
   uint32 max_bundle_bytes = 6;
+  // register_window_blocks is the Round-0 (DKG long-term key registration)
+  // window length (Task 1.7 A2, D-070). The committee is finalized from the
+  // members who register here; a non-registering candidate is simply excluded
+  // (no single-point veto), so this round does not undo the B2 justification
+  // guarantee.
+  uint64 register_window_blocks = 7;
+  // justify_window_blocks is the justification window length (Task 1.7 B2,
+  // D-070): a dealer complained about in the response window justifies here, or
+  // is excluded from the QUALified set. Closes the faulty-dealer-forces-FAILED
+  // grief (a single Byzantine dealer can no longer veto the epoch).
+  uint64 justify_window_blocks = 8;
 }
