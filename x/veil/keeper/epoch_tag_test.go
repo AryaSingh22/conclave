@@ -16,6 +16,12 @@ type mockEpoch struct{ decryptable map[uint64]bool }
 
 func (m mockEpoch) IsDecryptableEpoch(_ sdk.Context, id uint64) bool { return m.decryptable[id] }
 
+// GetEpochVerification satisfies the Task-1.6 EpochKeeper surface; the epoch-tag
+// tests do not drive the Reveal, so it returns no material.
+func (mockEpoch) GetEpochVerification(_ sdk.Context, _ uint64) ([][]byte, int, bool) {
+	return nil, 0, false
+}
+
 func epochEnvelope(t testingT, ttl, epochID uint64) []byte {
 	t.Helper()
 	env := types.IntentEnvelope{

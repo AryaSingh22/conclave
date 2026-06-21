@@ -170,6 +170,30 @@ green and the task is reviewed + committed.
       1.6 (single faulty dealer can deny rotation = bounded liveness-grief). Bundle
       serde = `crypto/threshold/transport.go` (off-chain). `make lint test` +
       determinism vector green; `StubScheme` stays live; no Reveal/VE wiring.
-- [ ] 1.6 Vote-extension share transport + Reveal wiring
+- [x] 1.6 Vote-extension share transport + Reveal wiring — D-069. The F-4
+      convergence: the LIVE Reveal now uses real threshold decryption and
+      order-then-reveal rests on **vote-extension share availability**, not
+      state-gating (AUDIT F-4 CLOSED). `ExtendVote(h)` enumerates the committed
+      `SEALED_IN_SESSION` set (epoch-tagged, deterministic 0x02 index), emits
+      `PartialReveal` shares; the proposer INJECTS the prior block's
+      `ExtendedCommitInfo` at `Txs[0]`, `ProcessProposal` re-validates
+      (`ValidateVoteExtensions`) + strips, `PreBlocker` collects, `BeginBlock`
+      Combines ≥t → OPEN. TWO STOPS (plan; transport-in-isolation before cutover).
+      Injected-`Txs[0]` unforgeability proven on 4 legs (position+height-gated,
+      never content-sniffed). **ABCI++ off-by-one found+acted on:** `ExtendVote(h)`
+      runs before `FinalizeBlock(h)` and reads committed `h-1`, so reveal is **B+2**,
+      not B+1 (strengthens F-4); the retry counter floors at B+2. Cutover keyed
+      per-intent on `epoch_id` (0=StubScheme bootstrap window; ≠0=real
+      `threshold.NewSchemeFromCommitBytes` + VE shares); revealed plaintext persisted
+      into `Ciphertext` at OPEN. Retry→CANCEL per-session (bonds refunded, releases
+      rotation, chain never halts). `max_intents_per_session` cap-at-seal (0x02 order)
+      + `max_reveal_retries`. **Epoch-0 bootstrap = first-DKG-then-live + an HONEST
+      plaintext-stub window** (the Veil guarantee does NOT hold genesis→first-ACTIVE-
+      epoch; operators must not route sensitive flow before epoch 1). Justification-
+      grief RE-DEFERRED to 1.7 (needs the DKG daemon + faulty-node localnet; bounded/
+      survivable today). Determinism vector GREEN with the cutover live (sim is
+      epoch-inert → real path not exercised; real-path determinism proven by a
+      cross-keeper test). Node-local `ShareProvider` shipped (interface + in-memory +
+      harness); the live DKG daemon is 1.7. `make lint test` green.
 - [ ] 1.7 Multi-node adversarial localnet (4 validators) — Phase-1 exit
 - [ ] 1.8 External audit engagement (gates mainnet; not a code task)

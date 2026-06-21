@@ -137,6 +137,34 @@ func NewScheme(commits []kyber.Point, n int) (*Scheme, error) {
 	}, nil
 }
 
+// NewSchemeFromCommitBytes builds a reveal-capable Scheme from an epoch's
+// PUBLISHED verification material — the marshaled commitment points (G2) stored
+// on the x/epoch Epoch record — and the validator count n. It is the bridge the
+// Task-1.6 live Reveal uses: x/epoch publishes commits as [][]byte, and the
+// Reveal rebuilds the scheme to gate + Combine. Deterministic (unmarshal only);
+// no fresh randomness.
+func NewSchemeFromCommitBytes(commits [][]byte, n int) (*Scheme, error) {
+	if len(commits) == 0 {
+		return nil, errors.New("threshold: empty commitments")
+	}
+	s := newSuite()
+	pts := make([]kyber.Point, len(commits))
+	for i, bz := range commits {
+		p := s.G2().Point()
+		if err := p.UnmarshalBinary(bz); err != nil {
+			return nil, fmt.Errorf("threshold: bad commitment %d: %w", i, err)
+		}
+		pts[i] = p
+	}
+	return &Scheme{
+		suite:   s,
+		tbls:    tbls.NewThresholdSchemeOnG1(s),
+		pubPoly: share.NewPubPoly(s.G2(), s.G2().Point().Base(), pts),
+		n:       n,
+		t:       len(pts),
+	}, nil
+}
+
 // Threshold implements the SPEC §6.3 t-of-n rule: t = ⌊2n/3⌋ + 1.
 func (s *Scheme) Threshold(n int) int { return 2*n/3 + 1 }
 

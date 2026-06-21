@@ -11,11 +11,13 @@ import (
 )
 
 // GetOpenIntent returns an OPEN intent's record and decoded payload for
-// x/session solution validation and settlement (SPEC §6.4; task 0.8). The
-// payload is decoded through the ThresholdScheme (stub: identity) behind
-// recover, so a corrupted stored payload yields an error, never a panic
-// (§11.6). Forward-compatible: Phase-1 encrypted payloads are readable only
-// through x/veil, never by x/session directly.
+// x/session solution validation and settlement (SPEC §6.4; task 0.8). An OPEN
+// intent's Ciphertext field already holds the REVEALED plaintext payload (the
+// Reveal persisted it at OPEN — Task 1.6; for stub epoch_id==0 the bytes were
+// always plaintext), so this is a plain proto-unmarshal behind recover: a
+// corrupted stored payload yields an error, never a panic (§11.6). Encrypted
+// payloads are decryptable only at the Reveal (with that block's vote-extension
+// shares), never re-decrypted here.
 //
 // implements the x/session VeilKeeper hand-off (SPEC §6.4).
 func (k Keeper) GetOpenIntent(ctx sdk.Context, chamberID uint32, intentID string) (types.IntentRecord, types.IntentPayload, error) {
@@ -27,7 +29,7 @@ func (k Keeper) GetOpenIntent(ctx sdk.Context, chamberID uint32, intentID string
 		return types.IntentRecord{}, types.IntentPayload{},
 			errorsmod.Wrapf(types.ErrIntentNotOpen, "intent %s is %s", intentID, rec.State)
 	}
-	payload, ok := k.revealPayload(rec.Intent.Ciphertext)
+	payload, ok := decodePayload(rec.Intent.Ciphertext)
 	if !ok {
 		// an OPEN intent decoded cleanly at the Reveal, so a failure here is
 		// state corruption — surfaced as an error, never a panic.

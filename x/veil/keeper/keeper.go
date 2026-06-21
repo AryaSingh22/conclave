@@ -46,6 +46,11 @@ type Keeper struct {
 	// ⇒ no epoch system is wired (stub mode) and the epoch-tag check is skipped.
 	epochKeeper types.EpochKeeper
 
+	// revealShares supplies the per-block vote-extension reveal shares the Reveal
+	// consumes (Task 1.6), wired via SetRevealShareSource. nil ⇒ no share
+	// transport (stub/unit-test mode); epoch_id!=0 intents then find no shares.
+	revealShares RevealShareSource
+
 	// authority is the address allowed to update params (gov module account).
 	authority string
 }

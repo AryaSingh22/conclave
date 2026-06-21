@@ -18,4 +18,19 @@ message Params {
   // invalid_slash_bps is the bond fraction slashed to the community pool on
   // INVALID (SPEC §6.3: 50% = 5000 bps).
   uint32 invalid_slash_bps = 3;
+  // max_intents_per_session caps how many SUBMITTED intents seal into one
+  // session at a boundary (PHASE1_DESIGN §2 perf FLAG, Task 1.6). It bounds
+  // the per-block vote-extension size and the BeginBlock Combine cost, since
+  // ExtendVote emits one reveal share per in-flight sealed ciphertext. The
+  // overflow stays SUBMITTED and seals at the next boundary (natural
+  // backpressure); the selection is the deterministic §6.3 0x02 state/ttl
+  // index order, so which intents seal vs. roll is consensus-deterministic.
+  // 0 means unbounded (the Phase-0/stub default — no encrypted shares exist).
+  uint32 max_intents_per_session = 4;
+  // max_reveal_retries is how many blocks a session may fall short of t valid
+  // reveal shares before it CANCELs (PHASE1_DESIGN §2(c), D-067). On CANCEL the
+  // session's still-sealed intents go CANCELLED with full bond refund, which
+  // releases epoch rotation (drain-before-rotate); the chain never halts.
+  // Counted per session over committed vote-extension state (deterministic).
+  uint32 max_reveal_retries = 5;
 }

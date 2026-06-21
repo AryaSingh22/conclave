@@ -1,6 +1,8 @@
 package keeper
 
 import (
+	"errors"
+	"sort"
 	"strconv"
 
 	errorsmod "cosmossdk.io/errors"
@@ -9,6 +11,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
+	"github.com/AryaSingh22/conclave/crypto/reveal"
+	"github.com/AryaSingh22/conclave/crypto/threshold"
 	"github.com/AryaSingh22/conclave/x/veil/types"
 )
 
@@ -156,15 +160,33 @@ func (k Keeper) CancelIntent(ctx sdk.Context, sender, intentID string) error {
 	return nil
 }
 
-// SealSubmitted implements the SPEC §6.3 session boundary: every SUBMITTED
-// intent transitions to SEALED_IN_SESSION with the session id, fixing
-// ordering. Runs in EndBlock only (order-then-reveal invariant: the Reveal
-// cannot run before the block that executes this completes).
+// SealSubmitted implements the SPEC §6.3 session boundary: SUBMITTED intents
+// transition to SEALED_IN_SESSION with the session id, fixing ordering. Runs in
+// EndBlock only (order-then-reveal invariant: the Reveal cannot run before the
+// block that executes this completes).
+//
+// VE size bound (Task 1.6, PHASE1_DESIGN §2 perf FLAG): at most
+// max_intents_per_session intents seal into one session (0 = unbounded). Because
+// ExtendVote emits one reveal share per in-flight sealed ciphertext, capping the
+// sealed set bounds the per-block vote-extension size and the Combine cost. The
+// SELECTION is the deterministic §6.3 0x02 state/ttl index order (ttl ascending,
+// then id) — now consensus state, identical on every node — so which intents seal
+// vs. roll cannot depend on map/insertion order. The overflow stays SUBMITTED and
+// seals at the next boundary (natural backpressure; ttl still governs expiry).
 func (k Keeper) SealSubmitted(ctx sdk.Context, sessionID uint64) error {
 	ids, err := k.intentIDsInState(ctx, types.INTENT_STATE_SUBMITTED, types.MaxTTL)
 	if err != nil {
 		return err
 	}
+
+	params, err := k.GetParams(ctx)
+	if err != nil {
+		return err
+	}
+	if limit := params.MaxIntentsPerSession; limit > 0 && uint32(len(ids)) > limit {
+		ids = ids[:limit]
+	}
+
 	for _, id := range ids {
 		rec, err := k.GetIntentRecord(ctx, phase0Chamber, id)
 		if err != nil {
@@ -183,12 +205,31 @@ func (k Keeper) SealSubmitted(ctx sdk.Context, sessionID uint64) error {
 	return nil
 }
 
+// revealStatus is the per-intent outcome of one Reveal attempt (Task 1.6).
+type revealStatus int
+
+const (
+	revealOK           revealStatus = iota // plaintext recovered
+	revealInsufficient                     // < t valid shares: leave SEALED, retry
+	revealMalformed                        // Combine errored after gating: INVALID
+)
+
 // RevealSealed implements the Reveal (SPEC §6.3 ABCI hooks): in BeginBlock,
-// every intent sealed in a STRICTLY earlier block (stub session id = the
-// boundary height, D-038) is decrypted via the ThresholdScheme and either
-// opens (OPEN) or, on a malformed payload, turns INVALID with the §6.3
-// 50% bond slash to the community pool. Decoding runs behind recover —
-// the chain never panics on user input (SPEC §11.6).
+// every intent sealed in a STRICTLY earlier block (session id = the boundary
+// height, D-038) is decrypted and either OPENs, turns INVALID with the §6.3 50%
+// slash (malformed payload or D-065 commitment violation), or — under the real
+// threshold scheme — falls short of t shares and is retried next block.
+//
+// Per-intent scheme selection (Task 1.6 cutover, AUDIT F-4): envelope epoch_id==0
+// is the StubScheme path (identity Reveal, the epoch-0 bootstrap window — see the
+// honest confidentiality note in D-069); epoch_id!=0 uses the real BLS threshold
+// scheme built from that epoch's published commits, decrypting from the
+// vote-extension shares the PreBlocker collected this block. A session that stays
+// short of t shares retries up to max_reveal_retries (counted from the B+2 floor,
+// the earliest block a share can exist — see EnumerateInFlightForReveal) then
+// CANCELs (PHASE1_DESIGN §2(c)). Decoding runs behind recover — the chain never
+// panics on user input (SPEC §11.6) — and the whole path is deterministic
+// (committed shares, randomness-free PartialReveal, sorted gate, D-066).
 func (k Keeper) RevealSealed(ctx sdk.Context) error {
 	height := uint64(ctx.BlockHeight())
 	ids, err := k.intentIDsInState(ctx, types.INTENT_STATE_SEALED_IN_SESSION, types.MaxTTL)
@@ -205,6 +246,10 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 	// keys iterated in ascending order below (deterministic, §11.6)
 	opened := make(map[uint64][]string)
 	var sessions []uint64
+	// per-epoch reveal scheme cache (build once per epoch per block); and the set
+	// of sessions still holding an unrevealed epoch_id!=0 intent after this block.
+	schemes := make(map[uint64]*threshold.Scheme)
+	pending := make(map[uint64]struct{})
 
 	for _, id := range ids {
 		rec, err := k.GetIntentRecord(ctx, phase0Chamber, id)
@@ -212,16 +257,37 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 			return err
 		}
 		// the order-then-reveal invariant, explicit: ordering must have been
-		// fixed in a strictly earlier block. With the stub cadence this is
-		// always true (sealed in EndBlock h-1, revealed in BeginBlock h),
-		// but the check is what ProcessProposal-grade paranoia costs here.
+		// fixed in a strictly earlier block. Reveal and ordering can never share
+		// a block — and under the real scheme the shares for this ciphertext do
+		// not even exist until ExtendVote read its committed seal (F-4).
 		if rec.SessionId >= height {
 			continue
 		}
 
-		payload, ok := k.revealPayload(rec.Intent.Ciphertext)
+		var env types.IntentEnvelope
+		if err := env.Unmarshal(rec.Intent.Envelope); err != nil {
+			// the envelope was validated at submission/genesis import, so a decode
+			// failure here is stored-state corruption, not user input.
+			return errorsmod.Wrapf(types.ErrInvalidEnvelope,
+				"stored envelope of intent %s undecodable: %s", id, err)
+		}
+
+		plaintext, status := k.revealIntent(ctx, height, rec, env, schemes)
+		switch status {
+		case revealInsufficient:
+			// not enough shares yet: leave SEALED for the retry sweep below.
+			pending[rec.SessionId] = struct{}{}
+			continue
+		case revealMalformed:
+			// §6.3 INVALID path: malformed payload / undecryptable (D-040).
+			if err := k.markInvalid(ctx, &rec, params.InvalidSlashBps, types.InvalidReasonMalformedPayload); err != nil {
+				return err
+			}
+			continue
+		}
+
+		payload, ok := decodePayload(plaintext)
 		if !ok {
-			// §6.3 INVALID path: malformed payload (D-040).
 			if err := k.markInvalid(ctx, &rec, params.InvalidSlashBps, types.InvalidReasonMalformedPayload); err != nil {
 				return err
 			}
@@ -230,11 +296,11 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 
 		// D-065 commitment cross-check: the ante bound the ceilings to the
 		// declared spend_commitment WITHOUT reading give legs (uniform in stub
-		// and encrypted mode); the Reveal now reads the real give legs and
-		// turns the intent INVALID — exactly like a malformed payload (50%
-		// slash, D-040) — if its actual coin give exceeds the commitment in
-		// ANY denom (under-declaration). Over/exact declaration and coin-give-
-		// free intents (data/svc-only, the F-3 boundary) pass to OPEN.
+		// and encrypted mode); the Reveal now reads the real give legs and turns
+		// the intent INVALID — exactly like a malformed payload (50% slash,
+		// D-040) — if its actual coin give exceeds the commitment in ANY denom
+		// (under-declaration). Over/exact declaration and coin-give-free intents
+		// (data/svc-only, the F-3 boundary) pass to OPEN.
 		exceeds, err := k.giveExceedsCommitment(ctx, rec, payload)
 		if err != nil {
 			return err
@@ -246,6 +312,14 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 			continue
 		}
 
+		// persist the recovered plaintext into the record before OPEN: post-Reveal
+		// the payload is public (the auction matches on it) and the vote-extension
+		// shares are gone, so x/session must read the revealed plaintext, not
+		// re-decrypt. For epoch_id==0 (stub identity) plaintext == ciphertext, so
+		// this is a no-op; for a real epoch it replaces the ciphertext with the
+		// decrypted payload (GetOpenIntent then reads it directly). Deterministic:
+		// the same shares yield the same plaintext on every node.
+		rec.Intent.Ciphertext = plaintext
 		if err := k.transitionIntent(ctx, &rec, types.INTENT_STATE_OPEN); err != nil {
 			return err
 		}
@@ -260,6 +334,10 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 		))
 	}
 
+	if err := k.accountRetriesAndCancel(ctx, height, params.MaxRevealRetries, pending); err != nil {
+		return err
+	}
+
 	// sessions appended in index iteration order is already deterministic;
 	// hand each revealed session to x/session (stub: no-op)
 	for _, sessionID := range sessions {
@@ -267,6 +345,143 @@ func (k Keeper) RevealSealed(ctx sdk.Context) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// revealIntent recovers an intent's plaintext for the Reveal, selecting the
+// scheme by envelope epoch_id (Task 1.6 cutover). epoch_id==0 ⇒ StubScheme
+// (identity, the bootstrap window); epoch_id!=0 ⇒ the real threshold scheme over
+// the epoch's published commits and the vote-extension shares collected this
+// block. Runs behind recover so a crafted ciphertext can never panic the chain
+// (SPEC §11.6). schemes caches one *threshold.Scheme per epoch for the block.
+func (k Keeper) revealIntent(ctx sdk.Context, height uint64, rec types.IntentRecord, env types.IntentEnvelope, schemes map[uint64]*threshold.Scheme) (plaintext []byte, status revealStatus) {
+	defer func() {
+		if r := recover(); r != nil {
+			plaintext, status = nil, revealMalformed
+		}
+	}()
+
+	if env.EpochId == 0 {
+		pt, err := k.scheme.Combine(nil, rec.Intent.Ciphertext)
+		if err != nil {
+			return nil, revealMalformed
+		}
+		return pt, revealOK
+	}
+
+	scheme, ok := schemes[env.EpochId]
+	if !ok {
+		if k.epochKeeper == nil {
+			return nil, revealInsufficient
+		}
+		commits, n, found := k.epochKeeper.GetEpochVerification(ctx, env.EpochId)
+		if !found {
+			// the epoch's key material is unavailable (e.g. retired/failed): the
+			// intent can no longer be revealed and will drain via retry→CANCEL.
+			return nil, revealInsufficient
+		}
+		sc, err := threshold.NewSchemeFromCommitBytes(commits, n)
+		if err != nil {
+			return nil, revealInsufficient
+		}
+		schemes[env.EpochId] = sc
+		scheme = sc
+	}
+
+	var shares []reveal.RevealShare
+	if k.revealShares != nil {
+		shares = k.revealShares.SharesFor(int64(height), rec.Intent.Id)
+	}
+	pt, err := scheme.Combine(shares, rec.Intent.Ciphertext)
+	if err != nil {
+		if errors.Is(err, threshold.ErrInsufficientShares) {
+			return nil, revealInsufficient
+		}
+		// ≥ t valid shares but the IBE/AEAD open failed ⇒ the ciphertext is
+		// malformed (the FO/CCA integrity check, D-066): INVALID, not a retry.
+		return nil, revealMalformed
+	}
+	return pt, revealOK
+}
+
+// accountRetriesAndCancel applies the §2(c) retry→CANCEL policy over the sessions
+// that still hold an unrevealed epoch_id!=0 intent after this block's Reveal
+// (Task 1.6). It increments a per-session attempt counter — but ONLY from the
+// B+2 floor (height >= session_id+2), the earliest block a share can exist
+// (ExtendVote(B+1) first sees the seal committed at B, its shares reach B+2), so
+// the structurally-impossible B+1 attempt never burns a retry. When the counter
+// reaches max_reveal_retries the session's remaining sealed intents CANCEL (bonds
+// refunded), which releases epoch rotation (drain-before-rotate). Counters for
+// drained sessions are cleared. All inputs are committed state ⇒ deterministic.
+func (k Keeper) accountRetriesAndCancel(ctx sdk.Context, height uint64, maxRetries uint32, pending map[uint64]struct{}) error {
+	// clear counters for sessions that are no longer pending (fully revealed or
+	// already cancelled) — iterate a snapshot of stored counters deterministically.
+	for _, s := range k.revealAttemptSessions(ctx) {
+		if _, still := pending[s]; !still {
+			k.deleteRevealAttempts(ctx, s)
+		}
+	}
+
+	// deterministic order over pending sessions (§11.6).
+	sessionIDs := make([]uint64, 0, len(pending))
+	for s := range pending {
+		sessionIDs = append(sessionIDs, s)
+	}
+	sort.Slice(sessionIDs, func(i, j int) bool { return sessionIDs[i] < sessionIDs[j] })
+
+	for _, s := range sessionIDs {
+		if height < s+2 { // B+2 floor: reveal not yet structurally possible
+			continue
+		}
+		attempts := k.getRevealAttempts(ctx, s) + 1
+		if maxRetries > 0 && attempts >= maxRetries {
+			if err := k.cancelSessionSealed(ctx, s, attempts); err != nil {
+				return err
+			}
+			k.deleteRevealAttempts(ctx, s)
+			continue
+		}
+		k.setRevealAttempts(ctx, s, attempts)
+		ctx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeRevealRetry,
+			sdk.NewAttribute(types.AttributeKeySessionID, strconv.FormatUint(s, 10)),
+			sdk.NewAttribute(types.AttributeKeyAttempts, strconv.FormatUint(uint64(attempts), 10)),
+		))
+	}
+	return nil
+}
+
+// cancelSessionSealed CANCELs every still-SEALED intent of a session whose Reveal
+// exhausted max_reveal_retries (PHASE1_DESIGN §2(c)): each intent goes CANCELLED
+// with a full bond refund + window decommit (settleRefund, the §5.2 cancel
+// settlement), so a permanently-undecryptable session never halts the chain and
+// stops counting as in-flight (releasing epoch rotation, seam (a)). The walk is
+// the deterministic 0x02 state index (§11.6).
+func (k Keeper) cancelSessionSealed(ctx sdk.Context, sessionID uint64, attempts uint32) error {
+	ids, err := k.intentIDsInState(ctx, types.INTENT_STATE_SEALED_IN_SESSION, types.MaxTTL)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		rec, err := k.GetIntentRecord(ctx, phase0Chamber, id)
+		if err != nil {
+			return err
+		}
+		if rec.SessionId != sessionID {
+			continue
+		}
+		if err := k.transitionIntent(ctx, &rec, types.INTENT_STATE_CANCELLED); err != nil {
+			return err
+		}
+		if err := k.settleRefund(ctx, rec, types.EventTypeIntentCancelled); err != nil {
+			return err
+		}
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeSessionCancelled,
+		sdk.NewAttribute(types.AttributeKeySessionID, strconv.FormatUint(sessionID, 10)),
+		sdk.NewAttribute(types.AttributeKeyAttempts, strconv.FormatUint(uint64(attempts), 10)),
+	))
 	return nil
 }
 
@@ -371,20 +586,17 @@ func (k Keeper) slashInvalid(ctx sdk.Context, rec types.IntentRecord, slashBps u
 	return nil
 }
 
-// revealPayload runs the ThresholdScheme Reveal (stub: identity) and the
-// payload proto-unmarshal behind recover. ok=false means the §6.3 INVALID
-// path: "payload that fails proto-unmarshal at Reveal" — this never
-// panics the chain (SPEC §11.6).
-func (k Keeper) revealPayload(ciphertext []byte) (payload types.IntentPayload, ok bool) {
+// decodePayload proto-unmarshals a recovered plaintext into an IntentPayload
+// behind recover. ok=false is the §6.3 INVALID path ("payload that fails
+// proto-unmarshal at Reveal") — this never panics the chain (SPEC §11.6). The
+// plaintext itself comes from revealIntent (stub identity or real threshold
+// decryption, per epoch_id).
+func decodePayload(plaintext []byte) (payload types.IntentPayload, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			ok = false
 		}
 	}()
-	plaintext, err := k.scheme.Combine(nil, ciphertext)
-	if err != nil {
-		return payload, false
-	}
 	if err := payload.Unmarshal(plaintext); err != nil {
 		return payload, false
 	}

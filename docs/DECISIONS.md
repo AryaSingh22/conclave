@@ -2035,3 +2035,146 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   show liveness stalls. Next: Task 1.6 (vote-extension share transport + Reveal
   wiring) — sources epoch material from `x/epoch`, closes the justification-round
   liveness-grief, and handles epoch-0 bootstrap.
+  - **LEDGER CORRECTION (recorded at Task 1.6, D-069):** this entry's "closes the
+    justification-round liveness-grief" was OPTIMISTIC. Task-1.6 analysis showed
+    closure is inherently MULTI-NODE (it needs the off-chain DKG daemon to detect a
+    faulty deal, justify, and re-submit, exercised against a real faulty node) and
+    CANNOT be done in an in-process task. It is RE-DEFERRED to Task 1.7; the grief
+    stays bounded/survivable (`TestFailedDKGDegradesNoRotation`), which is the
+    deferral bar. 1.6 closes epoch-0 bootstrap only.
+
+## D-069 — Task 1.6: vote-extension share transport + Reveal wiring (AUDIT F-4 closed); StubScheme→real-threshold cutover keyed per-intent on epoch_id; ABCI++ off-by-one (reveal is B+2); retry→CANCEL; epoch-0 plaintext-bootstrap window; justification-grief re-deferred to 1.7
+
+- **Date:** 2026-06-21 (Phase-1 Task 1.6)
+- **SPEC:** §8 (the Veil for real), §6.3 (the Reveal / ThresholdScheme), §11.6
+  (determinism); PHASE1_DESIGN §2 (order-then-reveal under real crypto, the VE
+  mechanism, retry/CANCEL, the perf FLAGS); AUDIT **F-4** (the entry criterion this
+  task CLOSES); builds on **D-066** (the tlock construction + the gate/FO barriers),
+  **D-067** (the adversarial proof + CANCEL-as-drain-terminus), **D-068** (the
+  `x/epoch` key lifecycle + the three D-068 seams). This is the CONVERGENCE task:
+  1.3+1.4+1.5 come together so the LIVE Reveal uses real threshold decryption and
+  order-then-reveal rests on vote-extension share availability, not state-gating.
+- **TWO MANDATORY STOPS (like 0.8/1.5), both passed.** STOP #1 = full plan
+  (5 decisions confirmed). STOP #2 = the consensus-critical share transport reviewed
+  IN ISOLATION before the StubScheme cutover (the 0.8-Half-A pattern), with the
+  injected-`Txs[0]` unforgeability elevated to a gating artifact.
+- **THE MECHANISM (F-4 closed).** ABCI++ (CometBFT v0.38) delivers height-h vote
+  extensions to exactly one place: `PrepareProposal(h+1).LocalLastCommit`. So:
+  `ExtendVote(h)` enumerates the committed `SEALED_IN_SESSION` set tagged to a DKG
+  epoch (`EnumerateInFlightForReveal`, the deterministic §6.3 0x02 index — the
+  ordering↔share CONTRACT), `PartialReveal`s each with the node-local secret share,
+  and packs them into the VE. The proposer of `h+1` INJECTS h's `ExtendedCommitInfo`
+  at `Txs[0]` (`InjectedRevealVotes`); `ProcessProposal(h+1)` re-validates it with
+  `baseapp.ValidateVoteExtensions` and STRIPS it; `PreBlocker(h+1)` collects the
+  shares into a per-block `RevealShareCache`; `BeginBlock(h+1)` `RevealSealed`
+  combines ≥t → OPEN. F-4 holds BY CONSTRUCTION: a valid share for a ciphertext
+  cannot exist until the seal that fixed its ordering is committed (proven —
+  `TestRevealRealSchemeEndToEnd` shows the intent does NOT open at B+1 with shares
+  withheld even though ordering is fixed; `TestEnumerateInFlightForReveal` excludes
+  SUBMITTED/epoch_id==0).
+- **ABCI++ OFF-BY-ONE (the load-bearing find, STOP #2).** `ExtendVote(h)` runs
+  BEFORE `FinalizeBlock(h)` and reads COMMITTED state through `h-1` (baseapp builds
+  its ctx from `cms.CacheMultiStore()`). So PHASE1_DESIGN §2's "EndBlock(B) seal →
+  ExtendVote(B)" diagram was off by one: a seal committed at block B is first seen by
+  `ExtendVote(B+1)`, whose shares reach `B+2` — **reveal is 2 blocks post-seal, not
+  1**. This STRENGTHENS F-4 (a share needs the seal COMMITTED, not merely decided).
+  Consequence acted on: the retry counter FLOORS at B+2 (`height >= session_id+2`),
+  so the structurally-impossible B+1 attempt never burns a retry.
+- **INJECTED-`Txs[0]` UNFORGEABILITY (STOP #2 gating artifact, proven on 4 legs,
+  tests not assertions).** The chain distinguishes "Txs[0] is injected commit-info"
+  from "Txs[0] is a normal tx" by POSITION + HEIGHT, never by content-sniffing:
+  (1) at injection-active heights (`h > VoteExtensionsEnableHeight`) ProcessProposal
+  REQUIRES Txs[0] to decode as `InjectedRevealVotes` and pass ValidateVoteExtensions,
+  else REJECT — a normal tx at index 0 cannot masquerade; (2) ValidateVoteExtensions
+  authenticates every extension against the validator's CONSENSUS key + ≥2/3 power —
+  a proposer cannot forge/alter another's shares; (3) Txs[0] is stripped before the
+  Block-SDK handler and consumed in PreBlocker before baseapp's tx loop, which only
+  `deliverTx`s on decode success (the `InjectedRevealVotes` blob → harmless
+  `ErrTxDecode`, never executed; even a pathological dual-decode is neutralized by
+  the ante's signature check); (4) share AUTHENTICITY rests independently on the
+  BeginBlock pairing gate (D-066), a second barrier. The VE-signature-authenticates-
+  SUBMITTER / pairing-gate-authenticates-CORRECTNESS split is the defense-in-depth.
+  (`TestRevealVoteExtensionUnforgeable`.)
+- **CUTOVER keyed per-intent on `epoch_id` (the F-4 flip).** `RevealSealed` branches
+  per intent: `epoch_id==0` → `StubScheme` identity (the bootstrap window); `epoch_id
+  !=0` → the real BLS threshold scheme `threshold.NewSchemeFromCommitBytes(commits,n)`
+  built from the epoch's PUBLISHED commits (`EpochKeeper.GetEpochVerification`),
+  decrypting from the vote-extension shares the PreBlocker collected this block
+  (`RevealShareSource`). `<t` valid shares → `ErrInsufficientShares` → leave SEALED
+  (retry); `≥t` but IBE/AEAD open fails → INVALID (the FO/CCA integrity barrier,
+  D-066); success → OPEN. The recovered plaintext is PERSISTED into the record's
+  `Ciphertext` at OPEN (post-Reveal the payload is public — the auction matches on it
+  — and the VE shares are gone, so x/session reads the revealed plaintext via
+  `GetOpenIntent`, never re-decrypts; for stub `epoch_id==0` plaintext==ciphertext, a
+  no-op). The live `k.scheme` field STAYS `StubScheme` — the real scheme is built
+  per-epoch from public commits, never held as the singleton.
+- **RETRY → CANCEL (PHASE1_DESIGN §2(c), seam (a)).** Per-SESSION attempt counter
+  (new `0x05` key), incremented only from the B+2 floor; at `>= max_reveal_retries`
+  (default 3) the session's remaining SEALED intents CANCEL with full bond refund
+  (`settleRefund`), which releases epoch rotation (they stop counting as in-flight —
+  drain-before-rotate seam (a)). The chain NEVER halts. All inputs are committed
+  state (collected shares, counter) ⇒ deterministic. (`TestRevealRetryExhaustionCancels`.)
+- **VE SIZE BOUND (perf FLAG).** New veil param `max_intents_per_session` caps how
+  many SUBMITTED intents seal into one session AT THE SEAL (`SealSubmitted`), in the
+  deterministic 0x02 index order (now consensus state — which seal vs. roll cannot
+  depend on map/insertion order); the overflow stays SUBMITTED for the next boundary
+  (natural backpressure). 0 = unbounded (the Phase-0/stub default — epoch_id==0
+  intents produce no shares). `VerifyVoteExtension` additionally rejects a VE with
+  more shares than there are in-flight ciphertexts. New param `max_reveal_retries`
+  (default 3).
+- **EPOCH-0 BOOTSTRAP — RESOLVED (first-DKG-then-live + plaintext-stub window).**
+  Genesis ships no ACTIVE epoch (`current_epoch_id=0`); until the first DKG reaches
+  ACTIVE, clients submit `epoch_id==0` intents that reveal via `StubScheme` (identity).
+  **HONEST CONFIDENTIALITY CLAIM (recorded loudly, not buried):** the Veil guarantee
+  does NOT hold during the genesis → first-ACTIVE-epoch window; intents in that window
+  reveal via StubScheme = **effectively plaintext**. This is the honest security claim
+  for a fresh chain, not a silent gap — operators MUST NOT route sensitive flow before
+  epoch 1 is ACTIVE. Chosen because a genesis-provisioned key would require shipping
+  secret shares at genesis (defeats the DKG / D-062) or a trusted dealer.
+- **JUSTIFICATION-GRIEF — RE-DEFERRED to Task 1.7 (D-068 seam, ledger corrected).**
+  Closing the faulty-dealer-forces-FAILED grief needs the off-chain DKG daemon + a
+  real faulty-node localnet (1.7 infra) and cannot be done in an in-process task; the
+  grief is bounded/survivable today (chain never halts, prior key stays —
+  `TestFailedDKGDegradesNoRotation`). Stacking it on the phase's highest-risk task was
+  rejected. The D-068 ledger framing ("1.6 closes justification-grief") is corrected
+  above.
+- **NODE-LOCAL SHARE PROVIDER (the crypto→consensus seam).** `ShareProvider`
+  (node-local, NEVER consensus state, D-062) supplies ExtendVote this node's DKG
+  secret share for an epoch. 1.6 ships the interface + an in-memory `MapShareProvider`
+  + the in-process harness that seeds it; **Task 1.7's DKG daemon** (watch FORMING
+  epochs → run the kyber rounds → submit the deal/response/confirm txs → persist the
+  share) populates it on a live network.
+- **DETERMINISM (§11.6, the hard gate).** Cross-process determinism vector GREEN with
+  the cutover live. The 500-block app sim is EPOCH-INERT (`epoch_length≈17280` ≫ 500,
+  D-068), so `CurrentEpochID` stays 0, every intent is `epoch_id==0`, and the real-
+  scheme/VE path is NEVER exercised in the vector — it traverses the StubScheme path
+  exactly as before (hashes shifted from the pre-1.6 baseline only because the two new
+  `Params` fields change genesis bytes; reproducible — the gate is cross-process
+  reproducibility, not a frozen golden hash). The transport is inert on the sim path
+  (sim keeps VEs disabled → injection/collect are pass-throughs; the cache is in-memory,
+  never written to state). The REAL-path determinism is proven directly by
+  `TestRevealRealSchemeDeterministic` (identical committed inputs → byte-identical
+  reveal across two independent keepers). **NAMED FORWARD GAP (inherited from D-068):**
+  no test drives a real epoch boundary + DKG + reveal inside the full multi-validator
+  APP sim — **Task 1.7's multi-node adversarial localnet exercises a real boundary +
+  encrypted reveal end-to-end with VEs enabled in a real genesis.**
+- **VE ENABLING (A5).** Vote extensions ship enabled via `app.DefaultConsensusParams()`
+  (height 1) and `scripts/localnet.sh` (dev genesis `vote_extensions_enable_height=1`);
+  the determinism sim and keeper unit tests keep them OFF (independent genesis), so the
+  vector is provably untouched. Production sets the genesis field; the full real-genesis
+  VE + epoch-boundary flow is exercised in 1.7.
+- **Proto/state added:** veil `Params.max_intents_per_session`/`max_reveal_retries`;
+  `VoteExtensionShares`/`PartialRevealShare`/`InjectedRevealVotes` messages; key `0x05`
+  reveal-attempt counter; errors `1314`/`1315`; events `reveal_retry`/
+  `session_reveal_cancelled`. `threshold.NewSchemeFromCommitBytes` (the public-commits
+  bridge). No change to the live `k.scheme` singleton (StubScheme).
+- **Acceptance (all green):** `make lint test` EXIT=0; `x/veil/keeper` transport +
+  cutover suite (`TestEnumerateInFlightForReveal`, `TestRevealRealSchemeEndToEnd`,
+  `TestRevealRetryExhaustionCancels`, `TestRevealRealSchemeDeterministic`); `app`
+  transport suite (`TestRevealTransportCollectAndDecrypt` incl. F-4 0/t-1-cannot,
+  `TestRevealVoteExtensionUnforgeable`, `TestCollectIsDeterministicAndDropsGarbage`,
+  `TestInjectedRoundTrip`); the 1.1 spend_commitment Reveal-slash and all prior suites
+  still green under the cutover; determinism vector reproducible (5 seeds, two
+  processes). Next: Task 1.7 (multi-node adversarial localnet) — real epoch boundary +
+  encrypted reveal e2e, the DKG daemon, justification-grief closure, the Reveal-cost
+  benchmark.

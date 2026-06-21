@@ -77,6 +77,13 @@ jq '.app_state.bank.denom_metadata = [
 jq '.app_state.gov.params.voting_period = "30s"
   | .app_state.gov.params.expedited_voting_period = "15s"' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
 
+# Task 1.6: ENABLE vote extensions — the reveal share transport (PHASE1_DESIGN
+# §2, AUDIT F-4) requires them. Without this the chain runs but no encrypted
+# (epoch_id!=0) intent can ever reveal. enable_height=1 turns them on from the
+# first block; the genesis→first-ACTIVE-epoch window still reveals via StubScheme
+# (epoch_id==0, the honest plaintext-bootstrap window — D-069).
+jq '.consensus.params.abci.vote_extensions_enable_height = "1"' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
+
 # fund the x/mandate fee-conversion pool (SPEC §6.2: "the module holds a CLV
 # float funded at genesis"). The balance is written directly into bank
 # genesis — never via add-genesis-account, which would create a BaseAccount

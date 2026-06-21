@@ -69,4 +69,10 @@ type SessionKeeper interface {
 // epoch_id==0 always passes (the StubScheme path).
 type EpochKeeper interface {
 	IsDecryptableEpoch(ctx sdk.Context, epochID uint64) bool
+	// GetEpochVerification returns an epoch's published DKG verification material
+	// (the commitment points and committee size n) for building a reveal-capable
+	// threshold scheme at the Reveal (Task 1.6); ok=false unless the epoch is
+	// ACTIVE/DRAINING with a published key. Lets the per-intent Reveal select the
+	// correct epoch's share set across a drain-before-rotate overlap (D-068).
+	GetEpochVerification(ctx sdk.Context, epochID uint64) (commits [][]byte, n int, ok bool)
 }

@@ -197,6 +197,35 @@ func (k Keeper) IsDecryptableEpoch(ctx sdk.Context, epochID uint64) bool {
 	return e.Status == types.EPOCH_STATUS_ACTIVE || e.Status == types.EPOCH_STATUS_DRAINING
 }
 
+// CommitteeSize returns the DKG committee size (n) of an epoch — the validator
+// count its threshold scheme was built for. Used by the Task-1.6 vote-extension
+// verification to range-check a share's dkg_index. ok=false if the epoch is
+// unknown.
+func (k Keeper) CommitteeSize(ctx sdk.Context, epochID uint64) (int, bool) {
+	e, ok := k.GetEpoch(ctx, epochID)
+	if !ok {
+		return 0, false
+	}
+	return len(e.Committee), true
+}
+
+// GetEpochVerification returns an epoch's published DKG verification material —
+// the commitment points (the public polynomial; commits[0] is the epoch master
+// key) and the committee size n — for building a reveal-capable threshold
+// scheme (Task 1.6 Reveal wiring). ok=false unless the epoch exists and is
+// currently decryptable (ACTIVE or DRAINING) with a published key; a FORMING/
+// FAILED/RETIRED epoch yields no reveal material.
+func (k Keeper) GetEpochVerification(ctx sdk.Context, epochID uint64) (commits [][]byte, n int, ok bool) {
+	e, found := k.GetEpoch(ctx, epochID)
+	if !found || len(e.Commits) == 0 {
+		return nil, 0, false
+	}
+	if e.Status != types.EPOCH_STATUS_ACTIVE && e.Status != types.EPOCH_STATUS_DRAINING {
+		return nil, 0, false
+	}
+	return e.Commits, len(e.Committee), true
+}
+
 // storePrefixEnd returns the exclusive end key for a single-byte prefix scan.
 func storePrefixEnd(prefix []byte) []byte {
 	end := make([]byte, len(prefix))

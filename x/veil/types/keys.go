@@ -43,7 +43,22 @@ var (
 	// IDSequenceKey: 0x04 → uint64 global id sequence (nonce for D-009 id
 	// derivation, intent domain byte 0x04 per D-037)
 	IDSequenceKey = []byte{0x04}
+	// RevealAttemptsKeyPrefix: 0x05 | session_id(8) → uint32 reveal-attempt
+	// count (Task 1.6, PHASE1_DESIGN §2(c)). A session short of t valid reveal
+	// shares increments this each block; once it exceeds max_reveal_retries the
+	// session CANCELs. Keyed by session id (per-session CANCEL granularity); the
+	// count is a deterministic function of committed vote-extension state.
+	RevealAttemptsKeyPrefix = []byte{0x05}
 )
+
+// RevealAttemptsKey returns 0x05 | session_id(8).
+func RevealAttemptsKey(sessionID uint64) []byte {
+	key := make([]byte, 0, 1+8)
+	key = append(key, RevealAttemptsKeyPrefix...)
+	sid := make([]byte, 8)
+	binary.BigEndian.PutUint64(sid, sessionID)
+	return append(key, sid...)
+}
 
 // IntentIDBytes decodes an intent id from its 64-char hex form into the raw
 // 32 bytes used in store keys.

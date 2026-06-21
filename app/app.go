@@ -152,6 +152,17 @@ type ConclaveApp struct {
 	// inspect the lane registry and per-lane contents.
 	LanedMempool *block.LanedMempool
 
+	// Task-1.6 vote-extension share transport (PHASE1_DESIGN §2, AUDIT F-4).
+	// RevealShareCache is the per-block supply of collected reveal shares wired
+	// into x/veil as its RevealShareSource; ShareProvider is the node-local DKG
+	// secret-share store ExtendVote reads (a MapShareProvider by default — tests
+	// and the Task-1.7 DKG daemon seed it via the same pointer the handler holds);
+	// RevealVoteExt holds the ExtendVote/Verify/PrepareProposal/ProcessProposal/
+	// PreBlocker handlers. Exported for the in-process transport harness.
+	RevealShareCache *RevealShareCache
+	ShareProvider    ShareProvider
+	RevealVoteExt    *RevealVoteExtensions
+
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
 
@@ -339,6 +350,17 @@ func NewConclaveApp(
 	// the mandate.SetLiveExposureFn pattern above.
 	app.VeilKeeper.SetEpochKeeper(app.EpochKeeper)
 	app.EpochKeeper.SetVeilKeeper(app.VeilKeeper)
+	// wire the Task-1.6 vote-extension share transport (PHASE1_DESIGN §2): the
+	// per-block reveal-share cache is x/veil's RevealShareSource, and the
+	// node-local DKG secret-share store ExtendVote reads. Both are created here —
+	// BEFORE RegisterModules captures the veil keeper copy, mirroring SetEpochKeeper
+	// — so the BeginBlocker copy observes the wired source. The ABCI handlers
+	// themselves are built in setBlockSDKLanes (they wrap the Block-SDK proposal
+	// handlers). The StubScheme stays the live Reveal scheme until the Phase-B
+	// cutover; the cache is populated but not yet consumed.
+	app.RevealShareCache = NewRevealShareCache()
+	app.ShareProvider = NewMapShareProvider()
+	app.VeilKeeper.SetRevealShareSource(app.RevealShareCache)
 	// x/receipt is the SPEC §6.6 query/proof surface: it READS the receipts
 	// x/session writes (the SessionKeeper, via the SessionReceiptReader
 	// boundary; D-045/D-052) and builds ICS-23 proofs against the committed
@@ -478,8 +500,29 @@ func (app *ConclaveApp) setBlockSDKLanes(logger log.Logger, anteHandler sdk.Ante
 		lanedMempool,
 		true,
 	)
-	app.SetPrepareProposal(proposalHandler.PrepareProposalHandler())
-	app.SetProcessProposal(proposalHandler.ProcessProposalHandler())
+
+	// Task-1.6 vote-extension share transport (PHASE1_DESIGN §2, AUDIT F-4). The
+	// Block SDK owns PrepareProposal/ProcessProposal (lane structure), so the
+	// reveal transport WRAPS them: PrepareProposal prepends the prior block's
+	// ExtendedCommitInfo at Txs[0], ProcessProposal validates + strips it before
+	// delegating to the lane handler. ExtendVote/VerifyVoteExtension produce/check
+	// the per-block reveal shares, and the PreBlocker collects them into the
+	// share cache BEFORE BeginBlock. block-sdk ships no vote-extension handling,
+	// so this is the only VE surface. The StubScheme stays the live Reveal scheme
+	// until the Phase-B cutover (reviewed at STOP #2 first).
+	ve := NewRevealVoteExtensions(
+		logger, app.VeilKeeper, app.EpochKeeper, app.StakingKeeper,
+		app.ShareProvider, app.RevealShareCache,
+	)
+	app.RevealVoteExt = ve
+	app.SetPrepareProposal(ve.PrepareProposalHandler(proposalHandler.PrepareProposalHandler()))
+	app.SetProcessProposal(ve.ProcessProposalHandler(proposalHandler.ProcessProposalHandler()))
+	app.SetExtendVoteHandler(ve.ExtendVoteHandler())
+	app.SetVerifyVoteExtensionHandler(ve.VerifyVoteExtensionHandler())
+	// chain the share-collection PreBlocker in front of the module-manager
+	// PreBlock (the runtime default, which runs the upgrade module): collect the
+	// injected reveal shares, then run the normal preblock.
+	app.SetPreBlocker(ve.PreBlocker(app.App.PreBlocker))
 }
 
 // LegacyAmino returns the app's amino codec.

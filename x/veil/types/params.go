@@ -23,6 +23,17 @@ const (
 	// pool on INVALID (SPEC §6.3 "50%" = 5000 bps, D-007).
 	DefaultInvalidSlashBps = 5000
 
+	// DefaultMaxIntentsPerSession bounds how many intents seal into one session
+	// (Task 1.6, PHASE1_DESIGN §2 perf FLAG). 0 = unbounded: the Phase-0/stub
+	// default, safe because epoch_id==0 (stub) intents produce no vote-extension
+	// shares, so there is nothing to bound until a DKG epoch is ACTIVE. A live
+	// network with encrypted intents sets a finite cap via governance.
+	DefaultMaxIntentsPerSession = 0
+
+	// DefaultMaxRevealRetries is how many blocks a session may fall short of t
+	// reveal shares before CANCEL (SPEC §8(c), PHASE1_DESIGN §2(c): 3).
+	DefaultMaxRevealRetries = 3
+
 	// bpsDenominator converts basis points to a fraction.
 	bpsDenominator = 10_000
 )
@@ -30,9 +41,11 @@ const (
 // DefaultParams returns the default x/veil parameters.
 func DefaultParams() Params {
 	return Params{
-		MinBond:         sdk.NewCoin(DefaultBondDenom, math.NewInt(1_000_000)), // 1 CLV
-		BondBps:         DefaultBondBps,
-		InvalidSlashBps: DefaultInvalidSlashBps,
+		MinBond:              sdk.NewCoin(DefaultBondDenom, math.NewInt(1_000_000)), // 1 CLV
+		BondBps:              DefaultBondBps,
+		InvalidSlashBps:      DefaultInvalidSlashBps,
+		MaxIntentsPerSession: DefaultMaxIntentsPerSession,
+		MaxRevealRetries:     DefaultMaxRevealRetries,
 	}
 }
 

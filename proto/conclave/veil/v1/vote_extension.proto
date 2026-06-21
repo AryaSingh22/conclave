@@ -1,0 +1,47 @@
+syntax = "proto3";
+package conclave.veil.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/AryaSingh22/conclave/x/veil/types";
+
+// PartialRevealShare is one validator's partial decryption of ONE in-flight
+// sealed ciphertext, produced in ExtendVote(B) and consumed in
+// BeginBlock(B+1) (Task 1.6, AUDIT F-4). The share is a tBLS signature share
+// on the ciphertext identity; its bytes are index-prefixed and ARE the
+// validity proof (D-066 — the intrinsic pairing check, no separate NIZK).
+// The share exists ONLY here (the vote extension of the block whose EndBlock
+// fixed ordering), which is what makes order-then-reveal hold by construction.
+message PartialRevealShare {
+  // intent_id is the sealed intent this share decrypts (hex id, SPEC §5.1).
+  string intent_id = 1;
+  // dkg_index is the validator's committee position in the intent's epoch; the
+  // gate authenticates the share against the published key share at this index,
+  // so a forged index fails the pairing check and is excluded (self-attesting).
+  uint32 dkg_index = 2;
+  // share is the marshaled tBLS partial signature (the reveal share bytes).
+  bytes share = 3;
+}
+
+// VoteExtensionShares is one validator's full vote-extension payload for a
+// block: a reveal share for every in-flight SEALED_IN_SESSION ciphertext
+// tagged to a decryptable DKG epoch (epoch_id != 0) that this node can serve.
+// epoch_id == 0 (stub) intents need no share and never appear here, so on a
+// chain with no ACTIVE epoch every vote extension is empty (the determinism
+// path: the epoch-inert sim produces empty extensions).
+message VoteExtensionShares {
+  repeated PartialRevealShare shares = 1 [(gogoproto.nullable) = false];
+}
+
+// InjectedRevealVotes is the block-data element the proposer injects at
+// Txs[0] in PrepareProposal(B+1): the marshaled CometBFT ExtendedCommitInfo
+// of block B (carrying each validator's signed VoteExtensionShares). It is a
+// dedicated message type so the chain never confuses it with a normal tx —
+// ProcessProposal(B+1) re-validates it with baseapp.ValidateVoteExtensions
+// (consensus-key signatures + >= 2/3 power) and PreBlocker(B+1) consumes it
+// BEFORE the tx-execution loop. It is NOT an sdk.Tx and is never executed.
+message InjectedRevealVotes {
+  // extended_commit_info is the marshaled abci.ExtendedCommitInfo of the prior
+  // block (opaque here; unmarshaled in app code).
+  bytes extended_commit_info = 1;
+}

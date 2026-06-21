@@ -18,4 +18,6 @@ var (
 	ErrInvalidChamber       = errorsmod.Register(ModuleName, 1311, "chamber_id must be 0 until Phase 3")
 	ErrIntentNotOpen        = errorsmod.Register(ModuleName, 1312, "intent is not OPEN")
 	ErrEpochNotDecryptable  = errorsmod.Register(ModuleName, 1313, "envelope epoch_id is not a currently-decryptable epoch")
+	ErrInvalidVoteExtension = errorsmod.Register(ModuleName, 1314, "invalid reveal vote extension")
+	ErrEpochMaterial        = errorsmod.Register(ModuleName, 1315, "epoch verification material unavailable for reveal")
 )
