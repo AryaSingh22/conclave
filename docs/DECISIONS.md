@@ -2328,3 +2328,71 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   for the auditor's attention: the A2 registration binding, the B2 justification/
   qualified-set finalize, the daemon's tx-driving + sequence handling, and the
   honest-threshold confirmation-quorum basis (D-068). Phase-1 BUILD is COMPLETE.
+
+## D-071 — Task 1.8: external cryptographic audit SCOPE PACKAGE — `docs/AUDIT_SCOPE_1.8.md`; collects the scattered D-066–070 1.8-obligation flags into one auditor-facing artifact
+
+- **Date:** 2026-06-22 (Phase-1 Task 1.8). **NOT a build task** — the deliverable is
+  a document (`docs/AUDIT_SCOPE_1.8.md`), no source code written; `make lint test`
+  green and HEAD source byte-identical to `5f5feb8` (only docs + ledger changed).
+- **SPEC:** §8(d) (the external audit is the **mainnet** gating milestone, not
+  testnet); PHASE1_DESIGN §2/§3/§5. Collects the 1.8 obligations recorded across
+  **D-066, D-067, D-068, D-069, D-070** — which were deliberately scattered as the
+  build accreted them — into ONE auditor-facing scope, so the engagement does not
+  re-derive them from five decisions.
+- **WHAT "1.8 COMPLETE" MEANS (recorded loudly, not buried):** the SCOPE PACKAGE is
+  delivered. The external cryptographic audit ITSELF is performed by an outside
+  party, has NOT been run, and is the actual mainnet gate. The ledger `[x]` marks
+  scope-delivered, NOT audit-passed. Findings, when they come, triage back here.
+- **The scope's spine (the obligation collection — the point of the artifact):**
+  - **O1** = D-066(a): IND-CCA of the composed BF-IBE-KEM + AES-256-GCM-DEM under an
+    attacker-influenced identity `id=H(DST‖C_dem)` (the tlock divergence: tlock's
+    identity is an external fixed beacon round). Mix-and-match closure is INFORMAL;
+    a formal reduction is the deliverable.
+  - **O2** = D-066(b): DST-uniqueness sweep + the IBE/tBLS shared-suite hash-to-curve
+    DST (pre-mainnet checklist).
+  - **O3** = D-066(c), **UPDATED**: the authored-surface inventory. D-066's "exactly
+    four pieces" is **no longer true as stated** — 1.7 authored consensus-integration
+    surface (A2 registration binding, B2 justification transport + qualified-set
+    tally, VE share transport, the epoch-tag gate, the share custody/daemon). The
+    scope's §2.2 is the corrected complete inventory as of `5f5feb8`; the doc states
+    the correction explicitly so the auditor is not pointed away from what 1.7 added.
+  - **O4** = D-070: re-derive `max_intents_per_session` at the production committee n
+    (the ≈25 / ≈12 ms-per-intent figure is n=4-specific; per-intent Combine scales
+    with n; default 0 is safe only on the epoch-0 stub path).
+  - **Arguments to verify/refute** (presented as "here is our argument", not
+    rebuilt): A-bind (transitive mix-and-match, 1.3/Q1b), **A-barriers** (gate =
+    robustness / IBE FO = integrity — carrying the 1.3 self-correction that an earlier
+    comment overstated the gate as the "sole guard"), A-floor (t−1 info-theoretic),
+    A-F4 (order-then-reveal by construction + the full-local-view <t-share adversary,
+    D-069/D-070(d)), A-inject (injected-`Txs[0]` unforgeability, D-069), A-reg (A2),
+    A-just (B2).
+  - **Trust assumptions** (named because they are where consensus USES crypto, not
+    crypto properties): **T1** = D-068 honest-threshold confirmation-counting basis
+    (the most easily overlooked); T2 = D-067 kyber `RecoverCommit` lowest-index
+    selection premise; T3 = D-070 DKG-daemon D1 trust boundary (holds the secret
+    share AND signs with the validator key; 0600 file store, never gossiped); T4 =
+    D-066 dependency pin + MPL-2.0.
+  - **Limitations:** L1 = D-069 epoch-0 plaintext-bootstrap window (Veil does NOT hold
+    genesis→first-ACTIVE-epoch); L2 = the n=4-cap operational face of O4; L3 = D-066
+    FLAG III (the share IS its own proof — no NIZK — framed as the replay-binding
+    question that cross-references O1).
+- **Evidence map = a WORKING-system pointer (1.7 shipped the live network).** 25
+  property→test rows + the live `scripts/localnet4.sh` proofs. A discrete
+  verification pass over the FINISHED doc confirmed **44/44 cited Test/Benchmark
+  functions resolve at their paths** and every code-location citation resolves —
+  which CAUGHT two file-attribution errors fixed before commit: `RevealSealed` +
+  the `NewSchemeFromCommitBytes` call live in `x/veil/keeper/lifecycle.go` (not
+  `reveal_transport.go`, which holds `EnumerateInFlightForReveal` + the retry/B+2
+  counter), and the `ShareProvider` interface + in-memory `MapShareProvider` live in
+  `app/vote_extensions.go` (only `FileProvider` is in `app/dkgshare/`).
+- **Authored vs adopted boundary = the orientation section** (the scope's most
+  important framing): ADOPTED = drand/kyber pairing+hash-to-curve, `share` Lagrange,
+  `sign/tbls`, `share/dkg`, `encrypt/ibe`, stdlib AES-256-GCM (in scope only for
+  correct USAGE); AUTHORED = the KEM/DEM wrapper + `deriveIdentity` + the
+  `ThresholdScheme` adapter + the share-gating + the DKG round-wrapping/serde + the
+  1.7 consensus integration. No novel primitive authored.
+- **Acceptance:** `docs/AUDIT_SCOPE_1.8.md` exists, complete against the D-066–070
+  obligations (cross-checked), accurate against `5f5feb8` (references verified to
+  resolve), honest about what is unproven; `make lint test` green (no code). Phase-1
+  is BUILD-complete and now SCOPE-complete; the external audit is the remaining
+  mainnet gate.

@@ -223,4 +223,11 @@ green and the task is reviewed + committed.
       lives). **Reveal-cost benchmark:** ≈12ms/intent (n=4), recommended
       `max_intents_per_session`≈25 — the default 0 is safe only on the epoch-0 stub path.
       `make lint test` + determinism vector green. **Phase-1 BUILD complete.**
-- [ ] 1.8 External audit engagement (gates mainnet; not a code task)
+- [x] 1.8 External audit engagement — SCOPE PACKAGE delivered (`docs/AUDIT_SCOPE_1.8.md`,
+      D-071). Not a code task: the deliverable is the auditor-facing scope document
+      (authored-vs-adopted boundary, the open obligations O1–O4 collected from
+      D-066–070, the security arguments to verify/refute, the evidence map, the
+      limitations + trust assumptions). "1.8 complete" means the SCOPE is delivered —
+      the external cryptographic audit itself is the mainnet gate and has NOT been
+      run/passed. `make lint test` green (no source touched); all 44 cited test refs +
+      code-location citations verified to resolve in-tree at `5f5feb8`.
