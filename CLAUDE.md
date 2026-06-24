@@ -231,3 +231,41 @@ green and the task is reviewed + committed.
       the external cryptographic audit itself is the mainnet gate and has NOT been
       run/passed. `make lint test` green (no source touched); all 44 cited test refs +
       code-location citations verified to resolve in-tree at `5f5feb8`.
+
+**Phase-1 BUILD + SCOPE COMPLETE.** The external cryptographic audit is the
+**mainnet** gate (owned externally) and does **not** block Phase-2 build work.
+
+## Phase-2 task ledger (docs/PHASE2_DESIGN.md §2)
+
+One task per session, in order. Mark complete only after `make lint test` is
+green and the task is reviewed + committed. **`docs/PHASE2_DESIGN.md` is the
+approved phase authority** (D-072) — each task below bootstraps from it.
+
+- [x] 2.0 Phase-2 design ledger authored — `docs/PHASE2_DESIGN.md` (D-072). Docs-only
+      (no source/proto/logic touched; `make lint test` green at `39cb207`). Per-task
+      sections 2.1–2.5 + numbered task 2.6 (matcher-richness hardening pass owning the
+      five latent matcher TODOs); all ten `CONCLAVE-TODO(phase-2)` markers
+      dispositioned; v0.53 held as decide-when-reached (2.2-owned), edges scoped
+      separate-repo. The completeness-gate review passed before prose.
+- [ ] 2.1 `x/escrow` delivery conditions — three condition classes as §11.2 transition
+      tables (HASHLOCK / OPTIMISTIC / ZK_DELIVERY); `conclude.go:152` record-ownership
+      handoff; `PenalizeLostDispute` reputation-hook wiring; D5 ratification. Recommended
+      split: **2.1a (HASHLOCK+OPTIMISTIC)** = next session; **2.1b (ZK_DELIVERY/gnark)**
+      = own session, gnark-Go-floor spike with a STOP branch vs the kyber pin (FLAG A).
+- [ ] 2.2 wasmd + CVM custom bindings (CONCLUDE + escrow) — **owns the D-060 v0.53
+      re-evaluation** (spike-then-decide against then-current block-sdk/ibc-go/wasmd;
+      do NOT pre-bake the outcome).
+- [ ] 2.3 x402 gateway — **SEPARATE REPO** (`conclave-x402-gateway`); in-repo deliverable
+      = the node-side gRPC surface contract.
+- [ ] 2.4 7683 resolver — **SEPARATE REPO** (`conclave-7683-resolver`); in-repo deliverable
+      = the node-side gRPC + receipt-proof surface contract.
+- [ ] 2.5 Real USDC via IBC + session-TWAP fee (swaps the `window.go:138` fee seam;
+      shares the IBC-line question with 2.2).
+- [ ] 2.6 Matcher-richness hardening pass — owns latent TODOs: partial-fill/cycle-aware
+      fallback, partial-fill cycles + alt numeraire anchoring, §5.1 limit-rate honoring,
+      multi-intent-per-sigil, multi-asset in-kind skim. One determinism-focused session
+      behind the existing `validateSolution` bar + determinism vector.
+
+**Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
+data from a Conclave agent; receipt IBC-verified on a second chain (spans
+2.1+2.2+2.3+2.5; 2.4 is the parallel inbound rail, off the exit path).

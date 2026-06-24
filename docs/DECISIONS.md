@@ -2396,3 +2396,59 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   resolve), honest about what is unproven; `make lint test` green (no code). Phase-1
   is BUILD-complete and now SCOPE-complete; the external audit is the remaining
   mainnet gate.
+
+## D-072 — Phase-2 design ledger authored (docs/PHASE2_DESIGN.md is the approved phase authority)
+
+- **Date:** 2026-06-24 (Phase-1 → Phase-2 boundary planning session)
+- **SPEC:** §10 (Phase-2 tasks 2.1–2.5), §6.5, §9, §11.2, §14 D5
+- **Decision:** `docs/PHASE2_DESIGN.md` is authored and approved as the per-task
+  design ledger for Phase 2 (the analog of `docs/PHASE1_DESIGN.md`). It is the
+  reviewed phase authority each Phase-2 build session bootstraps from; SPEC §10 +
+  this log remain the source of truth for detail. A docs-only task — no source,
+  proto, or logic touched; `make lint test` green at baseline `39cb207`.
+- **What it pins:**
+  - **Per-task sections 2.1–2.5** (what/deps/acceptance/plan-stop decisions),
+    plus a **numbered task 2.6** (matcher-richness hardening pass) that OWNS the
+    five latent matcher TODOs so none floats.
+  - **2.1 (`x/escrow`)** detailed most: the three condition classes as §11.2
+    transition tables (HASHLOCK / OPTIMISTIC / ZK_DELIVERY — three sub-graphs over
+    the shared `EscrowState` enum, illegal transitions enumerated per class); the
+    `conclude.go:152` record-ownership handoff; the `PenalizeLostDispute` reputation
+    hook wiring; **D5 ratification** (hash-mismatch + seller bond, subjective
+    arbitration out of scope — to become a DECISIONS entry when 2.1 runs); and a
+    recommended **2.1a (HASHLOCK+OPTIMISTIC) / 2.1b (ZK_DELIVERY)** session split.
+  - **2.1b gnark-spike branch** (FLAG A): gnark's Go floor vs the D-066 kyber pin —
+    (a) works on current toolchain → proceed; (b) needs a Go kyber tolerates →
+    proceed-with-bump-recorded; (c) needs a Go that BREAKS the kyber pin → **STOP
+    and decide** (different gnark / kyber-tolerating toolchain / defer ZK_DELIVERY).
+  - **2.2 owns the D-060 v0.53 re-evaluation** (FLAG B): spike-then-decide — 2.2
+    begins by re-checking D-060 (a)/(b)/(c) against THEN-CURRENT block-sdk/ibc-go/
+    wasmd; the doc does NOT pre-bake the v0.50-vs-v0.53 outcome. 2.5 shares the
+    IBC-line sub-question (b).
+  - **2.3 / 2.4 are SEPARATE-REPO** edge services (FLAG C): off-chain gRPC clients;
+    the in-repo deliverable is the node-side gRPC surface contract, not module code.
+  - **2.5** IBC real USDC + session-TWAP fee (swaps the `window.go:138` fee seam).
+  - **Latent-TODO disposition:** all ten `CONCLAVE-TODO(phase-2)` markers
+    dispositioned — #1 (conclude.go:152)→2.1, #2 (reputation.go hook)→2.1,
+    #3 (tx.pb.go:322 CVM bindings)→2.2, #4 (window.go:138 fee TWAP)→2.5,
+    #5 (sigverify.go:16 ADR-070)→2.2, #6–10 (fallback/cycles/limit-rate/
+    multi-intent/multi-asset-skim)→2.6; #10 carries a 2.5 coherence cross-ref.
+  - **Phase-2 exit:** the §1.3 demo extended (external x402 agent buys ZK-verified
+    data; receipt IBC-verified on a second chain) — spans 2.1+2.2+2.3+2.5; 2.4 is
+    the parallel inbound rail, deliberately off the exit path.
+- **2.1b forward design point (recorded for the 2.1b plan-stop, not in the doc):**
+  the ZK_DELIVERY replay-rejection mechanism must bind to the escrow **INSTANCE**,
+  not just the schema — a proof over `schema_commitment` alone could replay across
+  two escrows sharing a schema. The proof/verification public inputs must
+  incorporate something escrow-instance-unique (the escrow id or a per-escrow
+  nonce). The §2.1 table correctly names replay illegal; 2.1b owns making the
+  mechanism bind to THIS escrow.
+- **Rationale:** PHASE1_DESIGN.md played exactly this role for Phase 1 (reviewed
+  before any build task, per-task acceptance + plan-stop decisions). Authoring the
+  Phase-2 analog up front flags every §10 under-specification and toolchain risk
+  (gnark/kyber, wasmd/v0.53) before build, and the completeness gate guarantees no
+  latent phase-2 TODO ships unowned.
+- **Acceptance:** `docs/PHASE2_DESIGN.md` exists, mirrors PHASE1_DESIGN's shape,
+  dispositions all ten phase-2 TODOs, holds v0.53 as decide-when-reached and the
+  edges as separate-repo; `make lint test` green (no code) at `39cb207`. 2.1a
+  begins the Phase-2 build in a fresh session on this approved doc.
