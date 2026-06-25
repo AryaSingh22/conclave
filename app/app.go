@@ -71,6 +71,8 @@ import (
 	"github.com/AryaSingh22/conclave/x/epoch"
 	epochkeeper "github.com/AryaSingh22/conclave/x/epoch/keeper"
 	epochtypes "github.com/AryaSingh22/conclave/x/epoch/types"
+	"github.com/AryaSingh22/conclave/x/escrow"
+	escrowkeeper "github.com/AryaSingh22/conclave/x/escrow/keeper"
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/mandate"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
@@ -132,6 +134,10 @@ type ConclaveApp struct {
 	SigilKeeper   sigilkeeper.Keeper
 	MandateKeeper mandatekeeper.Keeper
 	VeilKeeper    veilkeeper.Keeper
+	// EscrowKeeper owns the SPEC §6.5 conditioned-delivery escrows (D-073
+	// ownership handoff from x/session). Built before x/session so the
+	// conclude.go DataGrant handoff can write through it.
+	EscrowKeeper escrowkeeper.Keeper
 	// SessionKeeper is a pointer so SetVeilKeeper can wire the veil↔session
 	// dependency cycle in place after both keepers exist (Guard 1).
 	SessionKeeper *sessionkeeper.Keeper
@@ -290,15 +296,23 @@ func NewConclaveApp(
 	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
 	veilKey := storetypes.NewKVStoreKey(veiltypes.StoreKey)
 	sessionKey := storetypes.NewKVStoreKey(sessiontypes.StoreKey)
+	escrowKey := storetypes.NewKVStoreKey(escrowtypes.StoreKey)
 	epochKey := storetypes.NewKVStoreKey(epochtypes.StoreKey)
 	unorderedKey := storetypes.NewKVStoreKey(unorderedtypes.StoreKey)
-	if err := app.RegisterStores(sigilKey, mandateKey, veilKey, sessionKey, epochKey, unorderedKey); err != nil {
+	if err := app.RegisterStores(sigilKey, mandateKey, veilKey, sessionKey, escrowKey, epochKey, unorderedKey); err != nil {
 		panic(err)
 	}
 	app.SigilKeeper = sigilkeeper.NewKeeper(app.appCodec, runtime.NewKVStoreService(sigilKey), govAuthority)
 	app.MandateKeeper = mandatekeeper.NewKeeper(
 		app.appCodec, runtime.NewKVStoreService(mandateKey),
 		app.SigilKeeper, app.BankKeeper, app.AccountKeeper, govAuthority,
+	)
+	// x/escrow owns the SPEC §6.5 conditioned-delivery escrows (D-073). Built
+	// BEFORE x/session so the conclude.go DataGrant ownership handoff writes
+	// escrow records through this keeper rather than into the session store.
+	app.EscrowKeeper = escrowkeeper.NewKeeper(
+		app.appCodec, runtime.NewKVStoreService(escrowKey),
+		app.BankKeeper, app.SigilKeeper,
 	)
 	// x/session is built BEFORE x/veil so it can be passed in as veil's real
 	// SessionKeeper (SessionBoundary/IntakeRevealed), replacing the D-038 stub.
@@ -307,6 +321,7 @@ func NewConclaveApp(
 	app.SessionKeeper = sessionkeeper.NewKeeper(
 		app.appCodec, runtime.NewKVStoreService(sessionKey),
 		app.BankKeeper, app.DistrKeeper, app.AccountKeeper, app.SigilKeeper,
+		app.EscrowKeeper,
 		govAuthority,
 	)
 	// x/epoch owns the Phase-1 DKG epoch key lifecycle (PHASE1_DESIGN §2(b),
@@ -385,6 +400,7 @@ func NewConclaveApp(
 		mandate.NewAppModule(app.appCodec, app.MandateKeeper, app.AccountKeeper, app.SigilKeeper),
 		veil.NewAppModule(app.appCodec, app.VeilKeeper, app.AccountKeeper, app.BankKeeper, app.SigilKeeper, app.MandateKeeper),
 		session.NewAppModule(app.appCodec, app.SessionKeeper, app.AccountKeeper, app.VeilKeeper),
+		escrow.NewAppModule(app.appCodec, app.EscrowKeeper),
 		epoch.NewAppModule(app.appCodec, app.EpochKeeper),
 		receipt.NewAppModule(app.appCodec, app.ReceiptKeeper),
 		unordered.NewAppModule(app.UnorderedManager),
@@ -392,12 +408,10 @@ func NewConclaveApp(
 		panic(err)
 	}
 
-	// Escrow msg types are registered here (the SPEC §6.7 commerce lane routes
-	// on them and x/escrow has no module until Phase 2 — D-033); x/session now
-	// registers its own msgs via RegisterModules (the lane no longer needs the
-	// app-level shim for session types).
-	escrowtypes.RegisterInterfaces(app.interfaceRegistry)
-	escrowtypes.RegisterLegacyAminoCodec(app.legacyAmino)
+	// x/escrow now has a real module (Phase 2, D-073): it registers its own msg
+	// interfaces + amino codec via RegisterModules above, so the D-033 app-level
+	// shim that pre-registered the escrow types for the §6.7 commerce lane is
+	// removed (it would double-register and conflict the proto interface table).
 
 	// ---- end Conclave modules ----
 

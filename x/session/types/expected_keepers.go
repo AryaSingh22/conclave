@@ -7,9 +7,20 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	sigiltypes "github.com/AryaSingh22/conclave/x/sigil/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
+
+// EscrowKeeper is the x/escrow surface x/session writes through at CONCLUDE
+// (D-073 ownership handoff: x/escrow owns the records; x/session no longer
+// writes 0x09). x/session derives the escrow id and record, then calls
+// CreateEscrow inside its atomic Conclude cache so the escrow funding (the
+// buyer's payment and, for OPTIMISTIC, the seller bond) is part of the
+// all-or-nothing settlement.
+type EscrowKeeper interface {
+	CreateEscrow(ctx sdk.Context, esc escrowtypes.Escrow, payerAddr, payeeAddr sdk.AccAddress, contentHash []byte) error
+}
 
 // BankKeeper is the x/bank surface x/session depends on. The session module
 // account is the SPEC §6.4 settlement escrow account (coin legs route through

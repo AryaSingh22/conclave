@@ -66,6 +66,7 @@ import (
 
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	epochtypes "github.com/AryaSingh22/conclave/x/epoch/types"
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
@@ -115,6 +116,10 @@ var (
 		// solver-bond custodian, and the protocol fee pool. It holds the Minter
 		// permission to mint svc/{schema} service-voucher tokens at settlement.
 		{Account: sessiontypes.ModuleName, Permissions: []string{authtypes.Minter}},
+		// the escrow module account custodies conditioned-delivery escrows: the
+		// buyer's escrowed payment and the OPTIMISTIC seller bond (SPEC §6.5,
+		// D-073). It never mints or burns — funds flow out as release/refund.
+		{Account: escrowtypes.ModuleName},
 	}
 
 	// blocked account addresses (module accounts that must not receive user funds)
@@ -128,6 +133,7 @@ var (
 		mandatetypes.ModuleName,
 		veiltypes.ModuleName,
 		sessiontypes.ModuleName,
+		escrowtypes.ModuleName,
 		// the gov module account is allowed to receive funds (deposits)
 	}
 
@@ -181,6 +187,12 @@ var (
 						// fallback/rollover) run BEFORE x/veil's expiry sweep +
 						// boundary seal (steps 6–7) — the D-038 ordering pin.
 						sessiontypes.ModuleName,
+						// SPEC §6.5 escrow timeout sweep (HASHLOCK refund /
+						// OPTIMISTIC auto-release / dispute resolution). Ordered
+						// AFTER x/session (D-073) so escrows that CONCLUDE creates
+						// this block are never swept before they exist; the same-
+						// block creation always sets timeout_height > current.
+						escrowtypes.ModuleName,
 						// SPEC §6.3 veil lifecycle sweeps: expiry, then the
 						// session-boundary seal that fixes intent ordering
 						veiltypes.ModuleName,
@@ -231,6 +243,9 @@ var (
 						mandatetypes.ModuleName,
 						veiltypes.ModuleName,
 						sessiontypes.ModuleName,
+						// SPEC §6.5 conditioned-delivery escrows (D-073). DefaultGenesis
+						// is empty; escrows are created at runtime by CONCLUDE.
+						escrowtypes.ModuleName,
 						// PHASE1_DESIGN §2(b) DKG epoch lifecycle (D-068): InitGenesis
 						// sets params + id counters; no ACTIVE epoch ships (the live
 						// Reveal stays StubScheme until Task 1.6).

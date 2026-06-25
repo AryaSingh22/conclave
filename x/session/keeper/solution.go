@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"sort"
@@ -11,6 +12,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/session/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
@@ -202,6 +204,23 @@ func (k Keeper) validateSolution(ctx sdk.Context, session types.Session, matches
 			}
 		}
 
+		// rule 6 (Phase 2, 2.1a): condition policy. ZK_DELIVERY is rejected at
+		// conservation; HASHLOCK/OPTIMISTIC require an unambiguous bilateral
+		// match (D-074) AND the seller's SIGNED consent (D-075).
+		if err := validateConditionedMatch(m); err != nil {
+			return errorsmod.Wrapf(err, "match %d", mi)
+		}
+		// CONSENT (D-075): the condition lives only on the solver-built
+		// SettleLeg, which no party signs. A solver is UNTRUSTED, so it must not
+		// be able to bind a seller to a delivery obligation + bond/slash the
+		// seller never signed. Enforce that every conditioned leg's condition
+		// EQUALS the seller (FromSigil) intent's signed IntentPayload.condition
+		// (carried in the signed ciphertext). A seller's default NONE rejects
+		// any imposed condition → the conditioned match fails → fallback.
+		if err := validateConditionConsent(m, byID); err != nil {
+			return errorsmod.Wrapf(err, "match %d", mi)
+		}
+
 		// rule 4: uniform price.
 		if err := checkUniformPrice(m.ClearingPrices); err != nil {
 			return err
@@ -378,6 +397,131 @@ func checkLimits(mi matchIntent, flow map[string]math.Int) error {
 		}
 	}
 	return nil
+}
+
+// validateConditionedMatch enforces the 2.1a condition policy (SPEC §6.5,
+// D-073). A match carrying any HASHLOCK/OPTIMISTIC condition must be an
+// unambiguous bilateral exchange: exactly one conditioned leg, a DataGrant
+// from seller→buyer, with the only other legs being coin payment legs
+// buyer→seller, across exactly two distinct sigils. This is the pairing the
+// escrow funding (payment-into-escrow + seller bond) depends on; multi-party,
+// multi-conditioned, or non-coin-paid conditioned matches are a deliberate,
+// recorded limitation (spirit of D-049), liftable when richer escrow funding
+// lands. ZK_DELIVERY is already rejected at conservation (2.1b owns it).
+func validateConditionedMatch(m types.Match) error {
+	condIdx := -1
+	for li := range m.Legs {
+		c := m.Legs[li].Condition
+		if c != nil && c.Condition != nil {
+			if condIdx >= 0 {
+				return errorsmod.Wrap(types.ErrConditionUnsupportedMatch, "more than one conditioned leg")
+			}
+			condIdx = li
+		}
+	}
+	if condIdx < 0 {
+		return nil // unconditioned match — the unchanged settlement path
+	}
+
+	cond := m.Legs[condIdx]
+	if cond.GetData() == nil {
+		return errorsmod.Wrap(types.ErrConditionUnsupportedMatch, "conditioned leg is not a DataGrant")
+	}
+	seller, buyer := cond.FromSigil, cond.ToSigil
+	if seller == buyer {
+		return errorsmod.Wrap(types.ErrConditionUnsupportedMatch, "conditioned self-trade")
+	}
+
+	sigils := make(map[string]bool, 2)
+	for li := range m.Legs {
+		sigils[m.Legs[li].FromSigil] = true
+		sigils[m.Legs[li].ToSigil] = true
+	}
+	if len(sigils) != 2 || !sigils[seller] || !sigils[buyer] {
+		return errorsmod.Wrap(types.ErrConditionUnsupportedMatch, "conditioned match is not two-party")
+	}
+
+	// every other leg must be a coin payment from the buyer to the seller.
+	for li := range m.Legs {
+		if li == condIdx {
+			continue
+		}
+		leg := m.Legs[li]
+		if leg.GetCoin() == nil || leg.FromSigil != buyer || leg.ToSigil != seller {
+			return errorsmod.Wrap(types.ErrConditionUnsupportedMatch, "non-payment leg in a conditioned match")
+		}
+	}
+	return nil
+}
+
+// validateConditionConsent enforces SPEC §6.5 / D-075: a delivery condition is
+// solver-attached (it lives only on the unsigned SettleLeg — IntentLeg has no
+// condition field), so a solver — an untrusted party (SPEC §1.1) — must not be
+// able to bind a seller to a delivery obligation and the OPTIMISTIC bond/slash
+// state machine the seller never signed. Every conditioned leg's condition must
+// EQUAL the seller (FromSigil) intent's signed IntentPayload.condition (carried
+// in the signed ciphertext). The seller's default NONE rejects any imposed
+// condition, so the conditioned match fails closed → fallback. The signed
+// per-leg consent field (an IntentLeg.condition proto addition) is the longer-
+// term refinement; this binds to the existing signed payload-level field with
+// no proto change.
+func validateConditionConsent(m types.Match, byID map[string]matchIntent) error {
+	for li := range m.Legs {
+		leg := m.Legs[li]
+		if leg.Condition == nil || leg.Condition.Condition == nil {
+			continue // NONE leg — nothing to consent to
+		}
+		seller, ok := intentBySigil(byID, leg.FromSigil)
+		if !ok {
+			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no seller intent for sigil %s", li, leg.FromSigil)
+		}
+		if !conditionEqual(seller.payload.Condition, leg.Condition) {
+			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: seller %s did not sign this condition", li, leg.FromSigil)
+		}
+	}
+	return nil
+}
+
+// intentBySigil returns the match intent a sigil submitted. Rule 1 guarantees a
+// distinct sigil per intent in a match, so the result is unambiguous and the
+// map-iteration order does not affect it (no state write — §11.6 safe).
+func intentBySigil(byID map[string]matchIntent, sigil string) (matchIntent, bool) {
+	for _, mi := range byID {
+		if mi.sigil == sigil {
+			return mi, true
+		}
+	}
+	return matchIntent{}, false
+}
+
+// conditionEqual reports whether two delivery conditions are byte-for-byte the
+// same (including class and all parameters), treating nil / empty-oneof as the
+// same NONE. It is the consent-equality check, so it compares the FULL params
+// the seller signed (a solver may not alter the timeout, payload hash, or
+// dispute window).
+func conditionEqual(a, b *escrowtypes.DeliveryCondition) bool {
+	aNone := a == nil || a.Condition == nil
+	bNone := b == nil || b.Condition == nil
+	if aNone || bNone {
+		return aNone && bNone
+	}
+	switch at := a.Condition.(type) {
+	case *escrowtypes.DeliveryCondition_Hashlock:
+		bt, ok := b.Condition.(*escrowtypes.DeliveryCondition_Hashlock)
+		return ok &&
+			bytes.Equal(at.Hashlock.PayloadHash, bt.Hashlock.PayloadHash) &&
+			at.Hashlock.TimeoutBlocks == bt.Hashlock.TimeoutBlocks
+	case *escrowtypes.DeliveryCondition_Optimistic:
+		bt, ok := b.Condition.(*escrowtypes.DeliveryCondition_Optimistic)
+		return ok && at.Optimistic.DisputeWindowBlocks == bt.Optimistic.DisputeWindowBlocks
+	case *escrowtypes.DeliveryCondition_ZkDelivery:
+		bt, ok := b.Condition.(*escrowtypes.DeliveryCondition_ZkDelivery)
+		return ok &&
+			bytes.Equal(at.ZkDelivery.SchemaCommitment, bt.ZkDelivery.SchemaCommitment) &&
+			at.ZkDelivery.VkId == bt.ZkDelivery.VkId
+	default:
+		return false
+	}
 }
 
 // intentLegKeyAmount returns the conservation asset key and Phase-0 quantity of

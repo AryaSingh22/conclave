@@ -247,11 +247,29 @@ approved phase authority** (D-072) — each task below bootstraps from it.
       five latent matcher TODOs); all ten `CONCLAVE-TODO(phase-2)` markers
       dispositioned; v0.53 held as decide-when-reached (2.2-owned), edges scoped
       separate-repo. The completeness-gate review passed before prose.
-- [ ] 2.1 `x/escrow` delivery conditions — three condition classes as §11.2 transition
+- [~] 2.1 `x/escrow` delivery conditions — three condition classes as §11.2 transition
       tables (HASHLOCK / OPTIMISTIC / ZK_DELIVERY); `conclude.go:152` record-ownership
-      handoff; `PenalizeLostDispute` reputation-hook wiring; D5 ratification. Recommended
-      split: **2.1a (HASHLOCK+OPTIMISTIC)** = next session; **2.1b (ZK_DELIVERY/gnark)**
-      = own session, gnark-Go-floor spike with a STOP branch vs the kyber pin (FLAG A).
+      handoff; `PenalizeLostDispute` reputation-hook wiring; D5 ratification. Split into
+      **2.1a (HASHLOCK+OPTIMISTIC)** and **2.1b (ZK_DELIVERY/gnark)**.
+  - [x] 2.1a HASHLOCK + OPTIMISTIC — D-073/D-074/D-075. `x/escrow` stood up (keeper,
+        AppModule, msg server, query, genesis, EndBlock sweep; codespace 15xx). Single
+        authoritative transition gate (`nextState`) → §11-rule-2 exhaustive transition-table
+        test; every illegal transition a load-bearing REJECT. Funding = payment-into-escrow
+        (buyer pays in, seller paid on release / buyer refunded on timeout/lost-dispute);
+        OPTIMISTIC seller bond (10%, returned on honest delivery, slashed-to-buyer +
+        `PenalizeLostDispute` on lost dispute). OPTIMISTIC dispute = seller-reveal of the
+        BUYER-AGREED `DataGrant.ContentHash` (rule-3-enforced, not seller-supplied); narrowed
+        scope recorded (D-073). **CONSENT (D-075):** a condition is solver-attached
+        (`IntentLeg` has no condition field), so it is bound to the seller's SIGNED
+        `IntentPayload.condition` at both solution-validation and the settlement boundary
+        (`ErrConditionNotConsented`, fail-closed) — an untrusted solver cannot impose a
+        delivery obligation/bond the seller never signed. `conclude.go:152` handoff closed
+        (writer-going-forward; x/receipt unaffected — never read escrows). Bilateral-pairing
+        constraint recorded (D-074). Deterministic height-keyed sweep, ordered after
+        x/session. NO ZK/gnark. `make lint test` + determinism vector green.
+  - [ ] 2.1b ZK_DELIVERY/gnark — own session, gnark-Go-floor spike with a STOP branch
+        vs the kyber pin (FLAG A). `MsgSubmitDeliveryProof` + ZK escrow creation currently
+        return `ErrZkNotEnabled`.
 - [ ] 2.2 wasmd + CVM custom bindings (CONCLUDE + escrow) — **owns the D-060 v0.53
       re-evaluation** (spike-then-decide against then-current block-sdk/ibc-go/wasmd;
       do NOT pre-bake the outcome).

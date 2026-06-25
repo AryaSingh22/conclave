@@ -21,6 +21,8 @@ import (
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 
 	"github.com/AryaSingh22/conclave/crypto/reveal"
+	escrowkeeper "github.com/AryaSingh22/conclave/x/escrow/keeper"
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	"github.com/AryaSingh22/conclave/x/session/types"
@@ -122,6 +124,7 @@ type fixture struct {
 	veil    veilkeeper.Keeper
 	sigil   sigilkeeper.Keeper
 	mandate mandatekeeper.Keeper
+	escrow  escrowkeeper.Keeper
 	bank    *mockBank
 }
 
@@ -137,12 +140,14 @@ func setupKeeper(t testingT) *fixture {
 	veilKey := storetypes.NewKVStoreKey(veiltypes.StoreKey)
 	sigilKey := storetypes.NewKVStoreKey(sigiltypes.StoreKey)
 	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
+	escrowKey := storetypes.NewKVStoreKey(escrowtypes.StoreKey)
 	ctx := testutil.DefaultContextWithKeys(
 		map[string]*storetypes.KVStoreKey{
 			types.StoreKey:        sessionKey,
 			veiltypes.StoreKey:    veilKey,
 			sigiltypes.StoreKey:   sigilKey,
 			mandatetypes.StoreKey: mandateKey,
+			escrowtypes.StoreKey:  escrowKey,
 		}, nil, nil,
 	)
 	encCfg := moduletestutil.MakeTestEncodingConfig()
@@ -154,7 +159,8 @@ func setupKeeper(t testingT) *fixture {
 
 	// wire the veil↔session cycle exactly as app.go does: session first, veil
 	// with session, then SetVeilKeeper (Guard 1).
-	sessionK := NewKeeper(encCfg.Codec, runtime.NewKVStoreService(sessionKey), bank, mockDistr{bank: bank}, mockAccount{}, sk, authority)
+	escrowK := escrowkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(escrowKey), bank, sk)
+	sessionK := NewKeeper(encCfg.Codec, runtime.NewKVStoreService(sessionKey), bank, mockDistr{bank: bank}, mockAccount{}, sk, escrowK, authority)
 	veilK := veilkeeper.NewKeeper(
 		encCfg.Codec, runtime.NewKVStoreService(veilKey),
 		reveal.StubScheme{}, bank, mockDistr{bank: bank}, sk, mk,
@@ -167,7 +173,7 @@ func setupKeeper(t testingT) *fixture {
 	require.NoError(t, mk.SetParams(ctx, mandatetypes.DefaultParams()))
 	require.NoError(t, veilK.SetParams(ctx, veiltypes.DefaultParams()))
 	require.NoError(t, sessionK.SetParams(ctx, types.DefaultParams()))
-	return &fixture{ctx: ctx, k: sessionK, veil: veilK, sigil: sk, mandate: mk, bank: bank}
+	return &fixture{ctx: ctx, k: sessionK, veil: veilK, sigil: sk, mandate: mk, escrow: escrowK, bank: bank}
 }
 
 func randAddr() sdk.AccAddress {
@@ -349,7 +355,8 @@ func TestSetVeilKeeperGuard(t *testing.T) {
 	authority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	bank := newMockBank()
 	sk := sigilkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(key), authority)
-	k := NewKeeper(encCfg.Codec, runtime.NewKVStoreService(key), bank, mockDistr{bank: bank}, mockAccount{}, sk, authority)
+	escrowK := escrowkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(key), bank, sk)
+	k := NewKeeper(encCfg.Codec, runtime.NewKVStoreService(key), bank, mockDistr{bank: bank}, mockAccount{}, sk, escrowK, authority)
 	// veilKeeper never set: any settlement path must panic clearly.
 	require.PanicsWithValue(t,
 		"x/session: VeilKeeper is nil — app wiring must call SetVeilKeeper before any block",

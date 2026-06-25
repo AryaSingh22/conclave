@@ -143,13 +143,27 @@ func TestProposeSolution_InvalidSlashes(t *testing.T) {
 			err:    types.ErrGraphTooLarge,
 		},
 		{
-			name: "rule6 delivery condition disabled",
+			// ZK_DELIVERY stays disabled until 2.1b (FLAG A) — rejected at the
+			// conservation gate.
+			name: "rule6 ZK_DELIVERY disabled",
+			build: func(s swap) types.Match {
+				m := s.match()
+				m.Legs[0].Condition = &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{ZkDelivery: &escrowtypes.ZkDeliveryCondition{}}}
+				return m
+			},
+			err: types.ErrConditionsNotEnabled,
+		},
+		{
+			// HASHLOCK/OPTIMISTIC are enabled (D-073) but only in an unambiguous
+			// bilateral DataGrant+payment match. A HASHLOCK on a swap's coin leg
+			// is not a DataGrant → ErrConditionUnsupportedMatch (recorded limit).
+			name: "rule6 conditioned non-bilateral rejected",
 			build: func(s swap) types.Match {
 				m := s.match()
 				m.Legs[0].Condition = &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_Hashlock{Hashlock: &escrowtypes.HashlockCondition{}}}
 				return m
 			},
-			err: types.ErrConditionsNotEnabled,
+			err: types.ErrConditionUnsupportedMatch,
 		},
 		{
 			name: "rule2 leg to non-participant",

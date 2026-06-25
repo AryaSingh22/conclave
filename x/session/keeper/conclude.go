@@ -72,7 +72,19 @@ func (k Keeper) applyMatches(ctx sdk.Context, sessionID uint64, matches []types.
 			return a, nil
 		}
 
+		// Conditioned (HASHLOCK/OPTIMISTIC) DataGrant legs and their paired
+		// coin payment route into x/escrow (D-073 handoff) rather than settling
+		// directly; the returned set marks the legs already consumed so the
+		// normal loop skips them.
+		handled, err := k.openConditionedEscrows(ctx, sessionID, m, resolve)
+		if err != nil {
+			return errorsmod.Wrapf(err, "match %d", mi)
+		}
+
 		for li := range m.Legs {
+			if handled[li] {
+				continue
+			}
 			leg := m.Legs[li]
 			if err := k.applyLeg(ctx, sessionID, leg, resolve); err != nil {
 				return errorsmod.Wrapf(err, "match %d leg %d", mi, li)
@@ -93,11 +105,13 @@ func (k Keeper) applyMatches(ctx sdk.Context, sessionID uint64, matches []types.
 	return nil
 }
 
-// applyLeg settles one directed leg into the cache context.
+// applyLeg settles one directed leg into the cache context. Conditioned
+// (HASHLOCK/OPTIMISTIC) legs and their paired payment are routed into x/escrow
+// by openConditionedEscrows BEFORE this runs and never reach here; a
+// conditioned leg arriving here is an internal invariant break (defense).
 func (k Keeper) applyLeg(ctx sdk.Context, sessionID uint64, leg types.SettleLeg, resolve func(string) (sdk.AccAddress, error)) error {
-	// Phase 0: NONE conditions only (also enforced at validation).
 	if leg.Condition != nil && leg.Condition.Condition != nil {
-		return errorsmod.Wrap(types.ErrConditionsNotEnabled, "settlement leg carries a delivery condition")
+		return errorsmod.Wrap(types.ErrConcludeFailed, "conditioned leg reached direct settlement (should be escrow-routed)")
 	}
 
 	switch {
@@ -136,54 +150,140 @@ func (k Keeper) applyLeg(ctx sdk.Context, sessionID uint64, leg types.SettleLeg,
 		return k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, to, minted)
 
 	case leg.GetData() != nil:
-		// DATA GRANT — authorized creation: instantiate an escrow stub; NO
-		// ledger balance moves or is minted. Authorized because rule 3 bound the
-		// grant to the giver's offer and the receiver's want (D-048).
-		return k.openEscrowStub(ctx, sessionID, leg)
+		// DATA GRANT (NONE condition) — authorized creation: a record-only
+		// x/escrow entry; NO ledger balance moves or is minted. Authorized
+		// because rule 3 bound the grant to the giver's offer and the
+		// receiver's want (D-048). Conditioned DataGrants are handled earlier
+		// (openConditionedEscrows) and never reach this case.
+		return k.openEscrow(ctx, sessionID, leg, sdk.NewCoins(), resolve)
 
 	default:
 		return errorsmod.Wrap(types.ErrInvalidLeg, "leg has no asset")
 	}
 }
 
-// openEscrowStub writes a Phase-0 x/escrow entry for a DataGrant leg (SPEC
-// §6.4: "DataGrant legs instantiate x/escrow entries instead of transferring").
-// Release/dispute logic is Phase 2; this records the conditioned delivery.
-// CONCLAVE-TODO(phase-2): x/escrow takes ownership of these records and adds
-// HASHLOCK/OPTIMISTIC/ZK_DELIVERY resolution.
-func (k Keeper) openEscrowStub(ctx sdk.Context, sessionID uint64, leg types.SettleLeg) error {
+// buildEscrowRecord derives the deterministic escrow id and assembles the
+// x/escrow record for a DataGrant leg. The id derivation (domainEscrow over
+// session_id ‖ content_hash ‖ from‖to) is unchanged from the Phase-0 stub so
+// ids are stable across the D-073 ownership handoff. payer = the data
+// RECIPIENT (buyer, leg.ToSigil) who funds the escrow; payee = the data GIVER
+// (seller, leg.FromSigil) who is paid on release — the conditioned-delivery
+// direction (corrected from the pre-handoff stub, which had no funds so the
+// assignment was inert).
+func (k Keeper) buildEscrowRecord(sessionID uint64, leg types.SettleLeg, amount sdk.Coins) escrowtypes.Escrow {
 	data := leg.GetData()
 	idPayload := append(append([]byte{}, u64be(sessionID)...), data.ContentHash...)
 	idPayload = append(idPayload, []byte(leg.FromSigil+leg.ToSigil)...)
 	escrowID := deriveID(domainEscrow, phase0Chamber, idPayload)
-	idBz, err := types.IDBytes(escrowID)
-	if err != nil {
-		return err
-	}
 
-	esc := escrowtypes.Escrow{
-		Id:            escrowID,
-		SessionId:     sessionID,
-		PayerSigil:    leg.FromSigil,
-		PayeeSigil:    leg.ToSigil,
-		Condition:     escrowtypes.DeliveryCondition{}, // NONE oneof
-		State:         escrowtypes.ESCROW_STATE_ACTIVE,
-		CreatedHeight: uint64(ctx.BlockHeight()),
-		ChamberId:     phase0Chamber,
+	cond := escrowtypes.DeliveryCondition{} // NONE oneof
+	if leg.Condition != nil {
+		cond = *leg.Condition
 	}
-	bz, err := k.cdc.Marshal(&esc)
+	return escrowtypes.Escrow{
+		Id:         escrowID,
+		SessionId:  sessionID,
+		PayerSigil: leg.ToSigil,   // buyer funds the escrow
+		PayeeSigil: leg.FromSigil, // seller is paid on release
+		Amount:     amount,
+		Condition:  cond,
+		ChamberId:  phase0Chamber,
+	}
+}
+
+// openEscrow writes a DataGrant escrow record through x/escrow (D-073: x/escrow
+// is the writer; x/session no longer touches 0x09). x/escrow sets the lifecycle
+// fields, moves any funds, and rebuilds its indexes. NONE-condition grants pass
+// an empty amount (record-only); conditioned grants pass the buyer's payment
+// and the committed content hash (see openConditionedEscrows).
+//
+// implements SPEC §6.4 "DataGrant legs instantiate x/escrow entries".
+func (k Keeper) openEscrow(ctx sdk.Context, sessionID uint64, leg types.SettleLeg, payment sdk.Coins, resolve func(string) (sdk.AccAddress, error)) error {
+	esc := k.buildEscrowRecord(sessionID, leg, payment)
+	payerAddr, err := resolve(esc.PayerSigil)
 	if err != nil {
 		return err
 	}
-	if err := k.storeService.OpenKVStore(ctx).Set(types.EscrowKey(phase0Chamber, idBz), bz); err != nil {
+	payeeAddr, err := resolve(esc.PayeeSigil)
+	if err != nil {
 		return err
 	}
-	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeEscrowOpened,
-		sdk.NewAttribute(types.AttributeKeyEscrowID, escrowID),
-		sdk.NewAttribute(types.AttributeKeySessionID, strconv.FormatUint(sessionID, 10)),
-	))
-	return nil
+	var contentHash []byte
+	if leg.GetData() != nil {
+		contentHash = leg.GetData().ContentHash
+	}
+	return k.escrowKeeper.CreateEscrow(ctx, esc, payerAddr, payeeAddr, contentHash)
+}
+
+// intentConditionForSigil loads the signed IntentPayload.condition of the
+// match intent submitted by a sigil (the consent the seller actually signed,
+// D-075). Returns ok=false if no intent in the match was submitted by that
+// sigil.
+func (k Keeper) intentConditionForSigil(ctx sdk.Context, m types.Match, sigil string) (*escrowtypes.DeliveryCondition, bool, error) {
+	for _, id := range m.IntentIds {
+		rec, payload, err := k.veil().GetOpenIntent(ctx, phase0Chamber, id)
+		if err != nil {
+			return nil, false, errorsmod.Wrapf(err, "loading intent %s", id)
+		}
+		if rec.Intent.SenderSigil == sigil {
+			return payload.Condition, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// openConditionedEscrows routes each HASHLOCK/OPTIMISTIC DataGrant leg in a
+// match (and its paired coin payment) into x/escrow, returning the set of leg
+// indexes consumed so applyMatches skips them. validateSolution has already
+// proven the conditioned-match shape (one DataGrant seller→buyer plus coin
+// payment legs buyer→seller, two sigils — D-073/ErrConditionUnsupportedMatch);
+// this re-derives the payment defensively. The buyer's payment is escrowed
+// (released to the seller on a valid release, refunded to the buyer on timeout/
+// lost dispute); the seller bond is posted inside CreateEscrow.
+func (k Keeper) openConditionedEscrows(ctx sdk.Context, sessionID uint64, m types.Match, resolve func(string) (sdk.AccAddress, error)) (map[int]bool, error) {
+	handled := make(map[int]bool)
+	for li := range m.Legs {
+		leg := m.Legs[li]
+		if leg.Condition == nil || leg.Condition.Condition == nil {
+			continue
+		}
+		if leg.GetData() == nil {
+			return nil, errorsmod.Wrapf(types.ErrConditionUnsupportedMatch, "match leg %d: conditioned leg is not a DataGrant", li)
+		}
+		seller, buyer := leg.FromSigil, leg.ToSigil
+
+		// CONSENT (D-075), enforced again at the settlement boundary so no path
+		// to escrow creation can bind a seller to a condition it did not sign,
+		// even one that skips solution validation: the seller's signed
+		// IntentPayload.condition must equal the (unsigned, solver-built)
+		// SettleLeg.condition.
+		signed, ok, err := k.intentConditionForSigil(ctx, m, seller)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || !conditionEqual(signed, leg.Condition) {
+			return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: seller %s did not sign this condition", li, seller)
+		}
+
+		// Collect the payment: every coin leg buyer→seller in this match.
+		payment := sdk.NewCoins()
+		for pj := range m.Legs {
+			if pj == li {
+				continue
+			}
+			p := m.Legs[pj]
+			if p.GetCoin() != nil && p.FromSigil == buyer && p.ToSigil == seller {
+				payment = payment.Add(*p.GetCoin())
+				handled[pj] = true
+			}
+		}
+
+		if err := k.openEscrow(ctx, sessionID, leg, payment, resolve); err != nil {
+			return nil, err
+		}
+		handled[li] = true
+	}
+	return handled, nil
 }
 
 // concludeSolution drives the SPEC §6.4 CONCLUDING phase for a chosen solution.

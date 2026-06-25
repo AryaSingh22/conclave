@@ -37,6 +37,10 @@ type Keeper struct {
 	distrKeeper   types.DistrKeeper
 	accountKeeper types.AccountKeeper
 	sigilKeeper   types.SigilKeeper
+	// escrowKeeper owns the SPEC §6.5 conditioned-delivery escrows (D-073
+	// ownership handoff). CONCLUDE writes escrow records through it instead of
+	// into the session store; the call runs inside the atomic Conclude cache.
+	escrowKeeper types.EscrowKeeper
 
 	// veilKeeper is wired AFTER construction via SetVeilKeeper to break the
 	// veil↔session dependency cycle (veil needs SessionBoundary/IntakeRevealed;
@@ -56,6 +60,7 @@ func NewKeeper(
 	distrKeeper types.DistrKeeper,
 	accountKeeper types.AccountKeeper,
 	sigilKeeper types.SigilKeeper,
+	escrowKeeper types.EscrowKeeper,
 	authority string,
 ) *Keeper {
 	if _, err := sdk.AccAddressFromBech32(authority); err != nil {
@@ -68,6 +73,7 @@ func NewKeeper(
 		distrKeeper:   distrKeeper,
 		accountKeeper: accountKeeper,
 		sigilKeeper:   sigilKeeper,
+		escrowKeeper:  escrowKeeper,
 		authority:     authority,
 	}
 }

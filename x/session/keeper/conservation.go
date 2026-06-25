@@ -98,8 +98,13 @@ func CheckConservation(matches []types.Match) (NetFlows, error) {
 			if leg.FromSigil == leg.ToSigil {
 				return nil, errorsmod.Wrapf(types.ErrInvalidLeg, "match %d leg %d: self-trade %s", mi, li, leg.FromSigil)
 			}
-			if leg.Condition != nil && leg.Condition.Condition != nil {
-				return nil, errorsmod.Wrapf(types.ErrConditionsNotEnabled, "match %d leg %d", mi, li)
+			// Phase 2 (2.1a, D-073): HASHLOCK and OPTIMISTIC conditions are
+			// enabled; only ZK_DELIVERY remains disabled until 2.1b (gnark,
+			// FLAG A). A ZK leg can never balance/conclude. The full condition
+			// policy (class + bilateral pairing) is enforced in validateSolution;
+			// this pure structural check rejects the still-disabled class.
+			if c := leg.Condition; c != nil && c.GetZkDelivery() != nil {
+				return nil, errorsmod.Wrapf(types.ErrConditionsNotEnabled, "match %d leg %d: ZK_DELIVERY deferred to 2.1b", mi, li)
 			}
 			key, amount, err := legAssetKey(leg)
 			if err != nil {

@@ -29,6 +29,8 @@ import (
 	commitmenttypes "github.com/cosmos/ibc-go/v8/modules/core/23-commitment/types"
 
 	"github.com/AryaSingh22/conclave/crypto/reveal"
+	escrowkeeper "github.com/AryaSingh22/conclave/x/escrow/keeper"
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
@@ -123,6 +125,7 @@ func setupFixture(t *testing.T) *fixture {
 	veilKey := storetypes.NewKVStoreKey(veiltypes.StoreKey)
 	sigilKey := storetypes.NewKVStoreKey(sigiltypes.StoreKey)
 	mandateKey := storetypes.NewKVStoreKey(mandatetypes.StoreKey)
+	escrowKey := storetypes.NewKVStoreKey(escrowtypes.StoreKey)
 	// Build the commit multistore exactly as baseapp does — each IAVL store on a
 	// prefixed view of one db (nil per-store db) so they don't collide on Commit.
 	// (testutil.DefaultContextWithKeys shares one db across stores, which is fine
@@ -130,7 +133,7 @@ func setupFixture(t *testing.T) *fixture {
 	// it.)
 	db := dbm.NewMemDB()
 	cms := store.NewCommitMultiStore(db, log.NewNopLogger(), metrics.NewNoOpMetrics())
-	for _, k := range []*storetypes.KVStoreKey{sessionKey, veilKey, sigilKey, mandateKey} {
+	for _, k := range []*storetypes.KVStoreKey{sessionKey, veilKey, sigilKey, mandateKey, escrowKey} {
 		cms.MountStoreWithDB(k, storetypes.StoreTypeIAVL, nil)
 	}
 	require.NoError(t, cms.LoadLatestVersion())
@@ -141,7 +144,8 @@ func setupFixture(t *testing.T) *fixture {
 	bank := newMockBank()
 	sk := sigilkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(sigilKey), authority)
 	mk := mandatekeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(mandateKey), sk, bank, mockAccount{}, authority)
-	sessionK := sessionkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(sessionKey), bank, mockDistr{bank: bank}, mockAccount{}, sk, authority)
+	escrowK := escrowkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(escrowKey), bank, sk)
+	sessionK := sessionkeeper.NewKeeper(encCfg.Codec, runtime.NewKVStoreService(sessionKey), bank, mockDistr{bank: bank}, mockAccount{}, sk, escrowK, authority)
 	veilK := veilkeeper.NewKeeper(
 		encCfg.Codec, runtime.NewKVStoreService(veilKey),
 		reveal.StubScheme{}, bank, mockDistr{bank: bank}, sk, mk,

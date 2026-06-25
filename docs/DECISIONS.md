@@ -2452,3 +2452,226 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   dispositions all ten phase-2 TODOs, holds v0.53 as decide-when-reached and the
   edges as separate-repo; `make lint test` green (no code) at `39cb207`. 2.1a
   begins the Phase-2 build in a fresh session on this approved doc.
+
+## D-073 — Task 2.1a: `x/escrow` stood up — HASHLOCK + OPTIMISTIC condition classes as §11-rule-2 state machines; payment-into-escrow funding + seller-reveal dispute model; conclude.go ownership handoff; D5 ratified
+
+- **Date:** 2026-06-25 (task 2.1a)
+- **SPEC:** §6.5 (condition classes, escrow msgs), §6.4 (DataGrant→escrow), §11
+  rule 2 (transition-table test), rule 5 (never panic), rule 6 (determinism);
+  §14 D5; PHASE2_DESIGN §2.1 / §3; supersedes the conclude.go:152 TODO + the
+  D-033 app-level escrow-registration shim.
+- **Decision (the module).** `x/escrow` is now a real module (keeper, AppModule,
+  msg server, query, genesis, EndBlock sweep) on codespace `15xx`. ZK_DELIVERY is
+  **deferred to 2.1b** (gnark-spike-gated, FLAG A): `MsgSubmitDeliveryProof` and
+  any ZK escrow creation return `ErrZkNotEnabled`. Every state change routes
+  through ONE authoritative gate `nextState(class, from, event)` (a pure function
+  rejecting every illegal tuple with a typed error and performing no side effect);
+  data guards (height, preimage) layer on top in the callers. This is what makes
+  the §11-rule-2 "illegal transitions impossible" assertion provable — the
+  exhaustive `TestTransitionTable_Exhaustive` drives the full class×state×event
+  product and is load-bearing (deleting any guard flips an illegal cell to legal
+  and fails the test).
+- **D5 ratified (not re-opened).** OPTIMISTIC dispute resolution is **hash-mismatch
+  challenge with a seller bond only**; subjective arbitration is out of scope
+  (SPEC §14 D5 default).
+- **Funding model — payment-into-escrow.** A conditioned CONCLUDE routes the
+  buyer's coin payment INTO the escrow module account (not to the seller);
+  `payer = buyer` (data recipient, `SettleLeg.ToSigil`) funds + is refunded;
+  `payee = seller` (data giver, `FromSigil`) is paid on release. HASHLOCK
+  ACTIVE→RELEASED (valid pre-timeout preimage) pays the seller; ACTIVE→REFUNDED
+  (timeout sweep) refunds the buyer. OPTIMISTIC ACTIVE→RELEASED (window elapsed,
+  undisputed sweep) pays the seller; ACTIVE→DISPUTED (in-window `MsgRaiseDispute`,
+  buyer-only); DISPUTED→RELEASED (seller reveals the content preimage); DISPUTED→
+  REFUNDED (resolution sweep, seller failed to prove) refunds the buyer, slashes
+  the bond to the buyer, and fires `PenalizeLostDispute` on the seller.
+- **OPTIMISTIC seller-reveal model + soundness.** "Slash on proven non-delivery
+  via hash mismatch" is mechanized as: a dispute forces the seller to reveal the
+  content preimage of a **buyer-agreed committed hash**; failure to produce a
+  hash-matching preimage within the resolution window (= a second dispute-window)
+  IS the proven mismatch. The committed hash is the leg's `DataGrant.ContentHash`,
+  which is **buyer-agreed**, not seller-supplied: SPEC has no `IntentLeg`
+  condition field, but rule 3 (`solution.go` `checkLimits`, net-inflow-must-be-a-
+  want-key) only lets the buyer receive `data/<ContentHash>` if the buyer's own
+  signed want-leg named that exact hash, and conservation requires the seller's
+  offered hash to be byte-identical. So `H(preimage)==ContentHash` proves the
+  seller delivered **what the buyer asked for**, closing the paid-for-non-delivery
+  hole. **Narrowed scope (recorded):** OPTIMISTIC is therefore "delivery of
+  content hashing to a buyer-agreed commitment whose preimage the seller can
+  re-reveal on-chain on demand" — (1) an honest seller who can't/won't re-reveal
+  the preimage in-window (bulk/streamed/non-preimage-reducible content, or a lost
+  preimage) is slashed despite honest delivery; (2) the reveal publishes the
+  preimage **on-chain**, so a griefing buyer can force public disclosure — route
+  content that must stay confidential after delivery through HASHLOCK (commit a
+  small receipt-of-access token, not the bulk content) or ZK_DELIVERY (2.1b).
+- **Seller bond source/sizing.** The bond is a SEPARATE stake posted by the
+  seller at escrow creation, sized `SellerBondBps = 1000` (10%) of the escrowed
+  payment per denom, slashed in full to the buyer on a lost dispute and returned
+  to the seller on honest delivery (auto-release or successful reveal). An
+  underfunded seller fails the conditioned CONCLUDE leg → match fails → fallback
+  (`ErrInsufficientBond`). The bond is only ever debited from a seller who SIGNED
+  the condition (see the consent binding next / **D-075**), so it is not a
+  solver-manufactured liability.
+- **Consent — the condition is bound to a signed field (D-075).** The
+  `DeliveryCondition` lives only on the solver-built `SettleLeg`, which no party
+  signs; an untrusted solver must not be able to bind a seller to a delivery
+  obligation + bond/slash it never signed. But a signed consent field DOES exist:
+  `IntentPayload.condition` (proto field 3), carried in the signed
+  `MsgSubmitIntent.ciphertext`. 2.1a binds them — a conditioned `SettleLeg` is
+  only honored when its condition (full params) EQUALS the seller (FromSigil)
+  intent's signed `IntentPayload.condition`, enforced at BOTH solution validation
+  (propose-time, slashes a cheating solver) and the settlement boundary
+  (`openConditionedEscrows`, the authoritative guard no Conclude path can skip).
+  A seller's default NONE rejects any imposed condition → the conditioned match
+  fails closed → fallback (`ErrConditionNotConsented`). Full detail in **D-075**.
+- **Hash + committed-hash storage.** Release is gated on
+  `SHA-256(preimage) == committed` (raw-byte preimage, constant-time compare,
+  fresh-randomness-free §11.6, never panics §11.5). HASHLOCK's committed hash is
+  `HashlockCondition.payload_hash` (in the record); OPTIMISTIC's is the
+  `DataGrant.ContentHash`, persisted in a `0x04|escrow_id` side-record at creation
+  because `OptimisticCondition` carries no hash field — **logic-only, no proto
+  change**. (Genesis limitation: that side-record is not in the genesis proto, so
+  a mid-flight OPTIMISTIC escrow does not round-trip its commit across export/
+  import — drain disputes before an upgrade, the drain-before-rotate discipline.)
+- **Ownership handoff — writer-going-forward.** x/escrow owns its store
+  (`0x01` record, `0x02` participant index, `0x03` sweep index, `0x04` OPTIMISTIC
+  commit); `conclude.go` calls `escrowKeeper.CreateEscrow` inside the atomic
+  Conclude cache instead of writing the old session-store `0x09`. No in-place
+  migration is needed: it is a fresh chain with no live `0x09` state, and **the
+  bootstrap finding that x/receipt never read the escrow stubs** (it reads
+  receipts, `0x07`/`0x08`) means the handoff orphans no reader. Escrow ids are
+  byte-identical to the Phase-0 derivation (`deriveID` over
+  `session_id‖content_hash‖from‖to`). Records + participant indexes are retained
+  through terminal states (queryable, spirit of D-017); only the sweep entry is
+  deleted on a terminal transition. NONE-condition DataGrants remain record-only
+  (no funds, no sweep), now written through x/escrow.
+- **Deterministic timeout sweep.** EndBlock iterates the `0x03` index (keyed by
+  the escrow's current sweep height = `timeout_height`) ascending up to the block
+  height, ids collected then processed in sorted order — never map iteration
+  (§11.6). Every sweep outcome is terminal, so the sweep cannot loop. A dispute
+  moves the entry from the window-end to the resolution deadline. Ordered AFTER
+  x/session in the EndBlocker list so same-block CONCLUDE-created escrows
+  (timeout_height > current) are never swept before they exist. The sim is
+  escrow-inert (no conditioned legs in the seed vector), so the determinism vector
+  is byte-identical.
+- **Reputation hook.** DISPUTED→REFUNDED calls the pre-authored
+  `x/sigil` `PenalizeLostDispute(chamber, sellerSigil)` (task-0.3 hook for "escrow
+  dispute Phase 2"), closing that wiring TODO.
+- **Acceptance.** HASHLOCK + OPTIMISTIC transition tables implemented; EVERY
+  illegal transition is a load-bearing REJECT test (wrong preimage, post-timeout
+  release, dispute-on-HASHLOCK, double-release/post-terminal, dispute-post-window,
+  release-while-DISPUTED, double-dispute, unauthorized dispute, wrong reveal,
+  insufficient bond). conclude.go:152 closed; escrow owns its store; x/receipt
+  reads unbroken. `PenalizeLostDispute` wired; seller-bond slash correct.
+  Deterministic auto-refund sweep. End-to-end conditioned CONCLUDE escrows the
+  payment + posts the bond (session integration test). NO ZK/gnark. `make lint
+  test` + determinism vector green.
+
+## D-074 — Task 2.1a: conditioned escrows require an unambiguous bilateral match (recorded limitation, spirit of D-049)
+
+- **Date:** 2026-06-25 (task 2.1a; constrains D-073)
+- **SPEC:** §6.4 (matcher rules), §6.5; PHASE2_DESIGN §2.1.
+- **Decision.** A match carrying any HASHLOCK/OPTIMISTIC condition must be an
+  **unambiguous bilateral exchange**: exactly one conditioned leg, a DataGrant
+  from seller→buyer, with the only other legs being coin payment legs
+  buyer→seller, across exactly two distinct sigils. `validateSolution`
+  (`validateConditionedMatch`) rejects anything else with
+  `ErrConditionUnsupportedMatch` (session `1426`): multi-party conditioned matches,
+  more than one conditioned leg, a conditioned non-DataGrant leg, or a non-coin
+  counter-payment (e.g. data-for-svc under a condition). ZK_DELIVERY is rejected
+  earlier, at the conservation gate (2.1b).
+- **Rationale.** The payment-into-escrow funding (D-073) needs a single,
+  unambiguous coin payment to escrow against the conditioned deliverable;
+  multi-party or non-coin-paid conditioned settlement needs a richer escrow-
+  funding model than 2.1a builds. This mirrors D-049's discipline (a deliberate,
+  greppable, recorded matcher limitation rather than a silent rejection or an
+  over-broad enablement), and keeps 2.1a bounded. It is liftable when richer
+  conditioned-settlement funding lands.
+- **Acceptance.** `validateConditionedMatch` ACCEPTS a well-formed bilateral
+  data-for-coin conditioned match (unit + end-to-end CONCLUDE tests) and REJECTS
+  the non-bilateral / wrong-class / multi-conditioned shapes; `make lint test`
+  green.
+
+## D-075 — Task 2.1a: a delivery condition must be SIGNED by the seller (SettleLeg.condition bound to IntentPayload.condition) — closing the solver-attached-condition consent gap
+
+- **Date:** 2026-06-25 (task 2.1a; closes the D-073 consent gap; review-driven)
+- **SPEC:** §1.1 (solvers are untrusted), §6.4 (solution validation), §6.5; the
+  signed field is `IntentPayload.condition` (`intent.proto` field 3).
+- **Problem (raised at the 2.1a review).** The `DeliveryCondition` attaches to the
+  solver-built `SettleLeg` (`session.proto`), and `IntentLeg` has no condition
+  field — so as first built, 2.1a let an UNTRUSTED solver bind a seller to a
+  delivery obligation and the OPTIMISTIC dispute/slash state machine the seller
+  never signed. The seller-bond "bounded grief" framing understated it: on the
+  can't-reveal path (D-073 narrowed scope) a NON-CONSENTING seller takes a real
+  10% slash. This is the mandate-chokepoint principle from the other side — an
+  agent must not take slashable exposure via a leg attribute no signature covers.
+- **Consent-provenance finding (with cites).** A signed consent field already
+  exists: `IntentPayload.condition` (proto field 3), part of the signed
+  `MsgSubmitIntent.ciphertext`. But the matcher read it NOWHERE — `grep` of
+  `.Condition` across `x/veil` + `x/session` non-test code showed zero binding;
+  `SettleLeg.condition` was never compared to the seller's signed payload. So the
+  signed field existed but was ignored → effectively solver-attached.
+- **Decision.** Bind them, no proto change: a conditioned `SettleLeg` is honored
+  ONLY when its condition — including full parameters (HASHLOCK payload_hash +
+  timeout_blocks; OPTIMISTIC dispute_window_blocks) — EQUALS the seller (the
+  conditioned DataGrant leg's `FromSigil`) intent's signed
+  `IntentPayload.condition`. Enforced at TWO layers: (1) **solution validation**
+  (`validateConditionConsent` in `validateSolution`) so a solver proposing an
+  unsigned/mismatched condition has its solution rejected as invalid and is
+  slashed (D-024 incentive); (2) the **settlement boundary**
+  (`openConditionedEscrows` in `conclude.go`, via `intentConditionForSigil`) — the
+  AUTHORITATIVE guard, since `Conclude` does not re-run `validateSolution`, so no
+  path to escrow creation can skip the consent check. Mismatch / no-signed-
+  condition → `ErrConditionNotConsented` (session `1427`) → the conditioned match
+  fails closed → fallback. Default (seller signed NONE) rejects every imposed
+  condition. `conditionEqual` compares class + all params (a solver may not alter
+  the timeout, payload hash, or dispute window the seller signed).
+- **Scope of the consent requirement.** Bound to the SELLER (the `FromSigil` that
+  bears the delivery obligation + bond/slash exposure — the party the untrusted
+  solver could manufacture liability for). 2.1a does NOT yet bind the buyer's
+  signed condition (see the forward items + the buyer-exposure determination
+  below).
+- **Buyer-side exposure — DETERMINED (yes, bounded).** The buyer (the payer/
+  `ToSigil`) never faces a slash or loss: there is no buyer bond and its escrowed
+  payment is ALWAYS either released to the seller or refunded to the buyer. But
+  the buyer IS exposed to two UNSIGNED impositions, the symmetric form of the
+  same disease: (a) a solver-attached condition escrows the buyer's payment under
+  a dispute/timeout TIMELINE the buyer did not sign (HASHLOCK locks the payment
+  until a preimage or the timeout; OPTIMISTIC delays finality by the dispute
+  window) — a liquidity/finality imposition, not a loss; and (b) a solver can
+  DROP or ALTER a condition the buyer DID sign (the signed→NONE/other
+  "downgrade"), denying the buyer protection it asked for. Both are milder than
+  the seller's slash but are real unconsented impositions on a non-signing party.
+  The proper closure is symmetric buyer-side consent, with a genuine design
+  nuance: the buyer cannot pre-commit to a HASHLOCK `payload_hash` (the
+  receipt-of-access preimage is generated post-delivery, by the seller's
+  delivery), so buyer consent needs a CLASS/window-level form, not the seller's
+  exact-param equality. Recorded, not silently deferred.
+- **Forward items (named, not floating — the §2.6 "nothing floats behind a
+  phrase" discipline).** Owned, greppable, to be picked up as real work:
+  - **D-075-FW-1 — buyer-side consent (the symmetric hole).** Bind the buyer's
+    signed condition to the SettleLeg too, closing the imposed-timeline (a) and
+    downgrade (b) exposures above. Design nuance: class/window-level consent for
+    HASHLOCK (buyer can't pre-commit the `payload_hash`). Target: a consent-
+    completeness pass (own task) once the per-leg field (FW-2) exists, or sooner
+    at payload level if buyer downgrade is judged pressing.
+  - **D-075-FW-2 — per-leg signed `IntentLeg.condition` (proto refinement).** Add
+    a condition field to `IntentLeg` so a multi-leg intent consents per data leg
+    (the payload-level `IntentPayload.condition` suffices only for the bilateral
+    single-conditioned-leg 2.1a shape, D-074). Proto change → its own task (2.1b-
+    adjacent or later); re-validate against the kyber pin per FLAG D if it touches
+    the toolchain.
+  - **D-075-FW-3 — signed→NONE/other downgrade.** A solver dropping or weakening a
+    condition a party signed (subsumed by FW-1's buyer binding + the existing
+    seller binding, but named so it is not lost): the seller binding already
+    rejects a seller-signed condition settled as a different one; FW-1 extends the
+    same to the buyer.
+- **Acceptance.** Load-bearing consent tests: a solver attaching an OPTIMISTIC
+  condition the seller signed NONE for is REJECTED with `ErrConditionNotConsented`
+  at BOTH settlement (`TestConcludeConditioned_UnsignedConditionRejected` — no
+  escrow opened, no bond debited) and validation
+  (`TestProposeConditioned_UnsignedRejectedAtValidation` — invalid solution); a
+  params-mismatch (signed window 50, settled 999) is REJECTED
+  (`TestConcludeConditioned_MismatchedConditionRejected`); the CONSENTED path
+  (seller signs the exact condition) opens the funded escrow + posts the bond
+  (`TestConcludeConditioned_Hashlock/_Optimistic`). `make lint test` + determinism
+  vector green.
