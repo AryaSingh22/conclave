@@ -3,9 +3,13 @@ package keeper
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
+
+	errorsmod "cosmossdk.io/errors"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/AryaSingh22/conclave/crypto/zkdelivery"
 	"github.com/AryaSingh22/conclave/x/escrow/types"
 )
 
@@ -159,4 +163,38 @@ func (k Keeper) RevealOptimistic(ctx sdk.Context, esc types.Escrow, preimage []b
 		return err
 	}
 	return k.finalizeRelease(ctx, esc, classOptimistic, to)
+}
+
+// ReleaseZk executes the ZK_DELIVERY ACTIVE→RELEASED transition: the submitted
+// groth16 proof must verify under the escrow's signed vk_id over its
+// schema_commitment AND its escrow id. The public witness is reconstructed from
+// the ESCROW RECORD (id + seller-signed schema_commitment), never from the
+// submitter, so the proof is bound to THIS instance — a valid proof for another
+// escrow with the same schema is rejected (D-072 replay defense). Knowledge of a
+// verifying proof authorizes release (signer unconstrained, like HASHLOCK). On
+// success the escrowed payment pays the payee (seller); ZK_DELIVERY has no bond.
+// Verification is deterministic and never panics (recover→INVALID inside
+// zkdelivery.Verify).
+//
+// implements SPEC §6.5 ZK_DELIVERY release.
+func (k Keeper) ReleaseZk(ctx sdk.Context, esc types.Escrow, proof []byte) error {
+	zk := esc.Condition.GetZkDelivery()
+	if zk == nil {
+		return types.ErrWrongClass
+	}
+	idBz, err := types.IDBytes(esc.Id)
+	if err != nil {
+		return err
+	}
+	if err := zkdelivery.Verify(zk.VkId, proof, idBz, zk.SchemaCommitment); err != nil {
+		if errors.Is(err, zkdelivery.ErrUnknownVK) {
+			return errorsmod.Wrap(types.ErrUnknownVk, err.Error())
+		}
+		return errorsmod.Wrap(types.ErrInvalidProof, err.Error())
+	}
+	to, err := nextState(classZk, esc.State, evtZkRelease)
+	if err != nil {
+		return err
+	}
+	return k.finalizeRelease(ctx, esc, classZk, to)
 }

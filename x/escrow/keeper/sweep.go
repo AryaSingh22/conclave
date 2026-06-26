@@ -13,7 +13,8 @@ import (
 // current block height, in ascending (height, id) order, and fires the due
 // transition for each: HASHLOCK timeout → REFUNDED; OPTIMISTIC window elapsed
 // (undisputed) → RELEASED; OPTIMISTIC dispute-resolution deadline (seller never
-// proved delivery) → REFUNDED + bond slash + reputation penalty. The order is
+// proved delivery) → REFUNDED + bond slash + reputation penalty; ZK_DELIVERY
+// timeout (no valid proof arrived) → REFUNDED. The order is
 // fixed by the sorted index, never by map iteration, so every node sweeps
 // identically. A panic on any malformed record is recovered into an error
 // rather than halting the node (§11.5).
@@ -87,6 +88,14 @@ func (k Keeper) sweepOne(ctx sdk.Context, idBz []byte) error {
 			return err
 		}
 		return k.finalizeRefund(ctx, esc, classOptimistic, to)
+
+	case class == classZk && esc.State == types.ESCROW_STATE_ACTIVE:
+		// no valid proof arrived before the timeout → refund the buyer (no bond).
+		to, err := nextState(classZk, esc.State, evtZkTimeout)
+		if err != nil {
+			return err
+		}
+		return k.finalizeRefund(ctx, esc, classZk, to)
 
 	default:
 		// A sweep entry for a non-sweepable (terminal/NONE) escrow should never

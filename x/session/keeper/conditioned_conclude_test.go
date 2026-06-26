@@ -10,6 +10,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
+	"github.com/AryaSingh22/conclave/crypto/zkdelivery"
+	"github.com/AryaSingh22/conclave/crypto/zkdelivery/zktest"
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/session/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
@@ -62,6 +64,24 @@ func (f *fixture) submitOpenCond(t testingT, owner sdk.AccAddress, sigilID strin
 	id, err := f.veil.SubmitIntent(f.ctx, msg)
 	require.NoError(t, err)
 	return id
+}
+
+// setupBilateralBoth is setupBilateral with BOTH parties signing a condition —
+// the shape a ZK_DELIVERY escrow requires (D-076 buyer consent: the buyer must
+// sign the same condition as the seller, since ZK release is seller-driven on a
+// schema not otherwise tied to the buyer's want).
+func (f *fixture) setupBilateralBoth(t testingT, buyerSigned, sellerSigned *escrowtypes.DeliveryCondition) bilateral {
+	t.Helper()
+	b := bilateral{dataHash: contentHash("dataset-cond"), payment: sdk.NewInt64Coin(usdcDenom, 100_000_000)}
+	b.buyer, b.seller = randAddr(), randAddr()
+	b.buyerSigil = f.registerSigil(t, b.buyer)
+	b.sellerSigil = f.registerSigil(t, b.seller)
+	f.bank.fund(b.buyer.String(), sdk.NewCoins(b.payment))
+
+	b.buyerID = f.submitOpenCond(t, b.buyer, b.buyerSigil, []veiltypes.IntentLeg{coinLeg(b.payment)}, []veiltypes.IntentLeg{dataLeg(b.dataHash)}, 100, buyerSigned)
+	b.sellerID = f.submitOpenCond(t, b.seller, b.sellerSigil, []veiltypes.IntentLeg{dataLeg(b.dataHash)}, []veiltypes.IntentLeg{coinLeg(b.payment)}, 100, sellerSigned)
+	b.sessionID = f.openSession(t)
+	return b
 }
 
 // match builds the bilateral settlement with the given condition on the data
@@ -135,6 +155,96 @@ func TestConcludeConditioned_Optimistic(t *testing.T) {
 	// drained (its refunded uclv intent bond remains, D-041).
 	require.Equal(t, sdk.NewCoins(b.payment).Add(bond...), f.bank.balanceOf(escrowModuleAddr()))
 	require.True(t, f.bank.balanceOf(b.seller.String()).AmountOf(usdcDenom).IsZero(), "seller bond posted")
+}
+
+// TestConcludeConditioned_Zk is the end-to-end ZK_DELIVERY path (D-076): a
+// conditioned CONCLUDE opens a funded ZK escrow (buyer payment in, NO seller
+// bond), and a groth16 proof bound to THAT escrow instance releases it to the
+// seller — the §6 demo's "ZK-verified data" leg, exercised through the real
+// CONCLUDE→escrow handoff and the real verifier.
+func TestConcludeConditioned_Zk(t *testing.T) {
+	f := setupKeeper(t)
+	payload := []byte("delivered ciphertext digest")
+	schema := zktest.SchemaCommitment(payload)
+	cond := &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
+		ZkDelivery: &escrowtypes.ZkDeliveryCondition{SchemaCommitment: schema, VkId: zkdelivery.VKIDDeliveryV1},
+	}}
+	b := f.setupBilateralBoth(t, cond, cond) // BOTH parties SIGN this exact ZK condition (D-076)
+
+	require.NoError(t, f.k.Conclude(f.ctx, b.sessionID, b.match(cond)))
+
+	esc := mustEscrow(t, f)
+	require.Equal(t, escrowtypes.ESCROW_STATE_ACTIVE, esc.State)
+	require.NotNil(t, esc.Condition.GetZkDelivery())
+	require.Equal(t, sdk.NewCoins(b.payment), esc.Amount, "buyer payment escrowed")
+	// ZK has no seller bond → the escrow account holds exactly the payment.
+	require.Equal(t, sdk.NewCoins(b.payment), f.bank.balanceOf(escrowModuleAddr()))
+
+	// a proof bound to THIS escrow id releases it to the seller.
+	idBz, err := escrowtypes.IDBytes(esc.Id)
+	require.NoError(t, err)
+	proof, err := zktest.Prove(idBz, schema, payload)
+	require.NoError(t, err)
+	require.NoError(t, f.escrow.ReleaseZk(f.ctx, esc, proof))
+
+	released, err := f.escrow.GetEscrow(f.ctx, 0, esc.Id)
+	require.NoError(t, err)
+	require.Equal(t, escrowtypes.ESCROW_STATE_RELEASED, released.State)
+	require.Equal(t, b.payment.Amount, f.bank.balanceOf(b.seller.String()).AmountOf(usdcDenom), "seller paid on proof release")
+}
+
+// TestConcludeConditioned_Zk_BuyerNotConsented is the load-bearing buyer-side
+// consent watch (D-076, outcome B): the SELLER signs a ZK condition but the
+// BUYER signed a PLAIN intent (NONE). The settlement-boundary guard must REJECT
+// it — no escrow opened, the buyer's payment not routed into a release gate it
+// never agreed to. If the buyer-side gate were removed, the escrow would open
+// and this test would fail red (it is the buyer-side mirror of
+// TestConcludeConditioned_UnsignedConditionRejected).
+func TestConcludeConditioned_Zk_BuyerNotConsented(t *testing.T) {
+	f := setupKeeper(t)
+	cond := &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
+		ZkDelivery: &escrowtypes.ZkDeliveryCondition{SchemaCommitment: zktest.SchemaCommitment([]byte("p")), VkId: zkdelivery.VKIDDeliveryV1},
+	}}
+	b := f.setupBilateral(t, cond) // seller signs the ZK cond; buyer signed NONE
+
+	err := f.k.Conclude(f.ctx, b.sessionID, b.match(cond))
+	require.ErrorIs(t, err, types.ErrConditionNotConsented)
+	require.Equal(t, 0, countEscrows(t, f), "no ZK escrow opened for a non-consenting buyer")
+}
+
+// TestConcludeConditioned_Zk_BuyerMismatch proves the buyer gate binds the FULL
+// params: both sign, but the buyer signed a DIFFERENT schema_commitment than the
+// one settled — the buyer did not agree to release against THIS schema.
+func TestConcludeConditioned_Zk_BuyerMismatch(t *testing.T) {
+	f := setupKeeper(t)
+	sellerCond := &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
+		ZkDelivery: &escrowtypes.ZkDeliveryCondition{SchemaCommitment: zktest.SchemaCommitment([]byte("seller-schema")), VkId: zkdelivery.VKIDDeliveryV1},
+	}}
+	buyerCond := &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
+		ZkDelivery: &escrowtypes.ZkDeliveryCondition{SchemaCommitment: zktest.SchemaCommitment([]byte("buyer-wanted-other")), VkId: zkdelivery.VKIDDeliveryV1},
+	}}
+	b := f.setupBilateralBoth(t, buyerCond, sellerCond)
+
+	err := f.k.Conclude(f.ctx, b.sessionID, b.match(sellerCond))
+	require.ErrorIs(t, err, types.ErrConditionNotConsented)
+	require.Equal(t, 0, countEscrows(t, f))
+}
+
+// TestProposeConditioned_Zk_BuyerNotConsentedAtValidation proves the buyer gate
+// also fires at SOLUTION VALIDATION (propose time): a solver proposing a ZK
+// condition the buyer never signed has its solution rejected as invalid.
+func TestProposeConditioned_Zk_BuyerNotConsentedAtValidation(t *testing.T) {
+	f := setupKeeper(t)
+	cond := &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
+		ZkDelivery: &escrowtypes.ZkDeliveryCondition{SchemaCommitment: zktest.SchemaCommitment([]byte("p")), VkId: zkdelivery.VKIDDeliveryV1},
+	}}
+	b := f.setupBilateral(t, cond) // seller signs; buyer signed NONE
+	solver := randAddr()
+	f.registerSolver(t, solver, minSolverBond())
+
+	err := f.propose(t, solver, b.sessionID, b.match(cond))
+	require.ErrorIs(t, err, types.ErrInvalidSolution)
+	require.ErrorIs(t, err, types.ErrConditionNotConsented)
 }
 
 // mustEscrow returns the single escrow in the store (test convenience).

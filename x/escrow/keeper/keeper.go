@@ -1,10 +1,11 @@
 // Package keeper implements x/escrow — conditioned-delivery escrows for
 // CONCLUDE DataGrant legs (SPEC §6.5). It owns the escrow records (D-073
-// ownership handoff from x/session) and resolves the HASHLOCK and OPTIMISTIC
-// condition classes as explicit state machines; ZK_DELIVERY lands in task
-// 2.1b. Every state change routes through the single authoritative transition
-// gate (transition.go) so illegal transitions are provably impossible
-// (SPEC §11 rule 2).
+// ownership handoff from x/session) and resolves the HASHLOCK, OPTIMISTIC, and
+// ZK_DELIVERY condition classes as explicit state machines (ZK_DELIVERY added
+// in task 2.1b, D-076: release is gated on a groth16 proof verified by
+// crypto/zkdelivery). Every state change routes through the single
+// authoritative transition gate (transition.go) so illegal transitions are
+// provably impossible (SPEC §11 rule 2).
 package keeper
 
 import (

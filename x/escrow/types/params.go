@@ -19,6 +19,18 @@ const (
 	// (D-073). It is slashed in full to the buyer (payer) on a lost dispute
 	// and returned to the seller on release. 1000 bps = 10%.
 	SellerBondBps int64 = 1000
+
+	// ZkDeliveryTimeoutBlocks is the protocol-wide auto-refund window for a
+	// ZK_DELIVERY escrow (D-076, task 2.1b): if no valid groth16 proof is
+	// submitted within this many blocks of creation, the EndBlock sweep refunds
+	// the buyer (ACTIVE→REFUNDED, PHASE2_DESIGN §2.1 criterion 4). Unlike
+	// HASHLOCK's timeout_blocks and OPTIMISTIC's dispute_window_blocks (carried
+	// per-escrow in the condition), ZkDeliveryCondition has no timeout field, so
+	// the window is a protocol constant rather than a party-chosen value — the
+	// 2.1b scope-minimizing choice (no proto change, gnark is the single hard
+	// thing; mirrors 2.1a's side-record move, D-073). A per-condition ZK timeout
+	// (proto field) is a recorded forward item. ~1 day at 6s blocks.
+	ZkDeliveryTimeoutBlocks uint64 = 14400
 )
 
 // SellerBond returns the OPTIMISTIC dispute bond for one payment amount:

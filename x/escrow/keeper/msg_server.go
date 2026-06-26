@@ -24,7 +24,9 @@ var _ types.MsgServer = msgServer{}
 // (ReleaseHashlock); OPTIMISTIC releases a DISPUTED escrow when the seller
 // reveals the content preimage (RevealOptimistic). Release is knowledge-gated
 // (any signer with a valid preimage authorizes it — standard HTLC, D-073), so
-// the signer need only be well-formed. ZK_DELIVERY is rejected until 2.1b.
+// the signer need only be well-formed. ZK_DELIVERY does NOT release via this
+// preimage path — it releases only via MsgSubmitDeliveryProof — so a
+// MsgReleaseEscrow against a ZK escrow is a wrong-class reject.
 func (m msgServer) ReleaseEscrow(goCtx context.Context, msg *types.MsgReleaseEscrow) (*types.MsgReleaseEscrowResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	if _, err := sdk.AccAddressFromBech32(msg.Signer); err != nil {
@@ -43,9 +45,8 @@ func (m msgServer) ReleaseEscrow(goCtx context.Context, msg *types.MsgReleaseEsc
 		if err := m.Keeper.RevealOptimistic(ctx, esc, msg.Preimage); err != nil {
 			return nil, err
 		}
-	case classZk:
-		return nil, types.ErrZkNotEnabled
 	default:
+		// classZk (releases via MsgSubmitDeliveryProof) and classNone both reject.
 		return nil, types.ErrWrongClass
 	}
 	return &types.MsgReleaseEscrowResponse{}, nil
@@ -81,8 +82,27 @@ func (m msgServer) RaiseDispute(goCtx context.Context, msg *types.MsgRaiseDisput
 }
 
 // SubmitDeliveryProof implements SPEC §6.5 MsgSubmitDeliveryProof
-// (ZK_DELIVERY). The groth16 verifier lands in task 2.1b (gnark-spike-gated,
-// FLAG A); until then this rejects rather than silently accepting.
+// (ZK_DELIVERY, task 2.1b). It releases a ZK escrow when the submitted groth16
+// proof verifies under the escrow's signed vk_id over its schema_commitment and
+// escrow id (the instance binding — ReleaseZk reconstructs the public witness
+// from the record). Release is knowledge-gated like HASHLOCK: any well-formed
+// signer presenting a verifying proof authorizes it. A malformed/invalid/
+// replayed proof rejects (ErrInvalidProof) and never panics; a non-ZK escrow is
+// a wrong-class reject.
 func (m msgServer) SubmitDeliveryProof(goCtx context.Context, msg *types.MsgSubmitDeliveryProof) (*types.MsgSubmitDeliveryProofResponse, error) {
-	return nil, types.ErrZkNotEnabled
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	if _, err := sdk.AccAddressFromBech32(msg.Signer); err != nil {
+		return nil, err
+	}
+	esc, err := m.Keeper.GetEscrow(ctx, phase0Chamber, msg.EscrowId)
+	if err != nil {
+		return nil, err
+	}
+	if classOf(esc) != classZk {
+		return nil, types.ErrWrongClass
+	}
+	if err := m.Keeper.ReleaseZk(ctx, esc, msg.Proof); err != nil {
+		return nil, err
+	}
+	return &types.MsgSubmitDeliveryProofResponse{}, nil
 }

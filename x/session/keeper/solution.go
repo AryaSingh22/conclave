@@ -204,9 +204,9 @@ func (k Keeper) validateSolution(ctx sdk.Context, session types.Session, matches
 			}
 		}
 
-		// rule 6 (Phase 2, 2.1a): condition policy. ZK_DELIVERY is rejected at
-		// conservation; HASHLOCK/OPTIMISTIC require an unambiguous bilateral
-		// match (D-074) AND the seller's SIGNED consent (D-075).
+		// rule 6 (Phase 2): condition policy. All three classes
+		// (HASHLOCK/OPTIMISTIC, D-073; ZK_DELIVERY, D-076) require an unambiguous
+		// bilateral match (D-074) AND the seller's SIGNED consent (D-075).
 		if err := validateConditionedMatch(m); err != nil {
 			return errorsmod.Wrapf(err, "match %d", mi)
 		}
@@ -399,15 +399,16 @@ func checkLimits(mi matchIntent, flow map[string]math.Int) error {
 	return nil
 }
 
-// validateConditionedMatch enforces the 2.1a condition policy (SPEC §6.5,
-// D-073). A match carrying any HASHLOCK/OPTIMISTIC condition must be an
-// unambiguous bilateral exchange: exactly one conditioned leg, a DataGrant
+// validateConditionedMatch enforces the condition policy (SPEC §6.5, D-073/
+// D-076). A match carrying ANY condition (HASHLOCK/OPTIMISTIC/ZK_DELIVERY) must
+// be an unambiguous bilateral exchange: exactly one conditioned leg, a DataGrant
 // from seller→buyer, with the only other legs being coin payment legs
 // buyer→seller, across exactly two distinct sigils. This is the pairing the
 // escrow funding (payment-into-escrow + seller bond) depends on; multi-party,
 // multi-conditioned, or non-coin-paid conditioned matches are a deliberate,
 // recorded limitation (spirit of D-049), liftable when richer escrow funding
-// lands. ZK_DELIVERY is already rejected at conservation (2.1b owns it).
+// lands. ZK_DELIVERY is a DataGrant leg like the others, so it routes through
+// this same bilateral + consent gate (D-076).
 func validateConditionedMatch(m types.Match) error {
 	condIdx := -1
 	for li := range m.Legs {
@@ -460,11 +461,12 @@ func validateConditionedMatch(m types.Match) error {
 // able to bind a seller to a delivery obligation and the OPTIMISTIC bond/slash
 // state machine the seller never signed. Every conditioned leg's condition must
 // EQUAL the seller (FromSigil) intent's signed IntentPayload.condition (carried
-// in the signed ciphertext). The seller's default NONE rejects any imposed
+// in the signed ciphertext); for ZK_DELIVERY the BUYER (ToSigil) must sign it
+// too (D-076 — see the inline note). The default NONE rejects any imposed
 // condition, so the conditioned match fails closed → fallback. The signed
 // per-leg consent field (an IntentLeg.condition proto addition) is the longer-
-// term refinement; this binds to the existing signed payload-level field with
-// no proto change.
+// term refinement (D-075-FW-2); this binds to the existing signed payload-level
+// field with no proto change.
 func validateConditionConsent(m types.Match, byID map[string]matchIntent) error {
 	for li := range m.Legs {
 		leg := m.Legs[li]
@@ -477,6 +479,25 @@ func validateConditionConsent(m types.Match, byID map[string]matchIntent) error 
 		}
 		if !conditionEqual(seller.payload.Condition, leg.Condition) {
 			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: seller %s did not sign this condition", li, leg.FromSigil)
+		}
+		// ZK_DELIVERY (D-076): the BUYER (ToSigil) must ALSO have signed the
+		// exact condition. ZK release is seller-driven (the seller submits the
+		// proof) on an advance-"committed schema/hash" (SPEC §6.5) the buyer can
+		// know at intent time, and it is NOT tied to the buyer's want-key — so
+		// without buyer consent an untrusted solver could route a non-consenting
+		// buyer's payment into a seller-chosen release gate (the buyer-side
+		// mirror of the D-075 seller hole). Exact-param consent also ties release
+		// to the schema the buyer agreed to. HASHLOCK/OPTIMISTIC buyer consent
+		// stays D-075-FW-1 (post-delivery receipt token / ContentHash-tied — the
+		// buyer cannot pre-commit those).
+		if leg.Condition.GetZkDelivery() != nil {
+			buyer, ok := intentBySigil(byID, leg.ToSigil)
+			if !ok {
+				return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no buyer intent for sigil %s", li, leg.ToSigil)
+			}
+			if !conditionEqual(buyer.payload.Condition, leg.Condition) {
+				return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: buyer %s did not sign this ZK condition", li, leg.ToSigil)
+			}
 		}
 	}
 	return nil

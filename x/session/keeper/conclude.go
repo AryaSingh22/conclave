@@ -264,6 +264,20 @@ func (k Keeper) openConditionedEscrows(ctx sdk.Context, sessionID uint64, m type
 		if !ok || !conditionEqual(signed, leg.Condition) {
 			return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: seller %s did not sign this condition", li, seller)
 		}
+		// ZK_DELIVERY (D-076): the BUYER must ALSO have signed the exact
+		// condition — the authoritative buyer-side mirror of the seller guard,
+		// since ZK release is seller-driven on a schema not otherwise tied to the
+		// buyer's want (see validateConditionConsent). HASHLOCK/OPTIMISTIC buyer
+		// consent stays D-075-FW-1.
+		if leg.Condition.GetZkDelivery() != nil {
+			bsigned, bok, err := k.intentConditionForSigil(ctx, m, buyer)
+			if err != nil {
+				return nil, err
+			}
+			if !bok || !conditionEqual(bsigned, leg.Condition) {
+				return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: buyer %s did not sign this ZK condition", li, buyer)
+			}
+		}
 
 		// Collect the payment: every coin leg buyer→seller in this match.
 		payment := sdk.NewCoins()

@@ -7,9 +7,11 @@ import (
 // conditionClass is the resolved condition-class of an escrow. Each class
 // admits a DIFFERENT legal sub-graph over the shared EscrowState enum
 // (PHASE2_DESIGN §3): HASHLOCK never reaches DISPUTED; OPTIMISTIC is the only
-// class that uses DISPUTED; NONE (the Phase-0 record-only DataGrant stub) has
-// no transitions at all. Modeling them as separate sub-graphs is what makes
-// the SPEC §11-rule-2 "illegal transitions impossible" assertion meaningful.
+// class that uses DISPUTED; ZK_DELIVERY gates RELEASED on a verifying groth16
+// proof (not a preimage or timer) and, like HASHLOCK, never reaches DISPUTED;
+// NONE (the Phase-0 record-only DataGrant stub) has no transitions at all.
+// Modeling them as separate sub-graphs is what makes the SPEC §11-rule-2
+// "illegal transitions impossible" assertion meaningful.
 type conditionClass int
 
 const (
@@ -48,6 +50,8 @@ const (
 	evtOptimisticDispute                            // OPTIMISTIC: dispute raised in-window
 	evtOptimisticReveal                             // OPTIMISTIC: seller reveals preimage under dispute
 	evtOptimisticResolve                            // OPTIMISTIC: dispute resolution sweep (seller failed to prove)
+	evtZkRelease                                    // ZK_DELIVERY: seller submits a verifying groth16 proof
+	evtZkTimeout                                    // ZK_DELIVERY: timeout sweep, no valid proof
 )
 
 // nextState is the SINGLE authoritative transition gate (SPEC §11 rule 2). It
@@ -129,6 +133,26 @@ func nextState(class conditionClass, from types.EscrowState, evt transitionEvent
 		}
 		if from != types.ESCROW_STATE_DISPUTED {
 			return types.ESCROW_STATE_UNSPECIFIED, types.ErrNotDisputed
+		}
+		return types.ESCROW_STATE_REFUNDED, nil
+
+	case evtZkRelease:
+		// ZK_DELIVERY releases ONLY on a verifying proof (the data guard layered
+		// in the caller); a preimage/dispute cannot release it.
+		if class != classZk {
+			return types.ESCROW_STATE_UNSPECIFIED, types.ErrWrongClass
+		}
+		if from != types.ESCROW_STATE_ACTIVE {
+			return types.ESCROW_STATE_UNSPECIFIED, types.ErrTerminalState
+		}
+		return types.ESCROW_STATE_RELEASED, nil
+
+	case evtZkTimeout:
+		if class != classZk {
+			return types.ESCROW_STATE_UNSPECIFIED, types.ErrWrongClass
+		}
+		if from != types.ESCROW_STATE_ACTIVE {
+			return types.ESCROW_STATE_UNSPECIFIED, types.ErrTerminalState
 		}
 		return types.ESCROW_STATE_REFUNDED, nil
 

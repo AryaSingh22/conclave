@@ -1,7 +1,8 @@
 // Package escrow implements x/escrow — conditioned-delivery escrows for
-// CONCLUDE DataGrant legs (SPEC §6.5): the HASHLOCK and OPTIMISTIC condition
-// classes as explicit state machines, the deterministic timeout sweep, and the
-// dispute reputation hook. ZK_DELIVERY lands in task 2.1b.
+// CONCLUDE DataGrant legs (SPEC §6.5): the HASHLOCK, OPTIMISTIC, and
+// ZK_DELIVERY condition classes as explicit state machines, the deterministic
+// timeout sweep, and the dispute reputation hook. ZK_DELIVERY (task 2.1b,
+// D-076) gates release on a groth16 proof verified by crypto/zkdelivery.
 package escrow
 
 import (

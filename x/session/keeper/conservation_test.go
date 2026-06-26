@@ -49,16 +49,9 @@ func TestCheckConservation_Units(t *testing.T) {
 		{"self-trade rejected", []types.SettleLeg{coinSettleLeg("a", "a", "x", 10)}, types.ErrInvalidLeg},
 		{"empty endpoint rejected", []types.SettleLeg{coinSettleLeg("", "b", "x", 10)}, types.ErrInvalidLeg},
 		{"non-positive amount rejected", []types.SettleLeg{coinSettleLeg("a", "b", "x", 0)}, types.ErrInvalidLeg},
-		// ZK_DELIVERY stays disabled at the conservation gate (2.1b owns it,
-		// FLAG A); HASHLOCK/OPTIMISTIC are now enabled (D-073) and pass the pure
-		// structural check (their full policy is in validateSolution).
-		{"ZK condition rejected", []types.SettleLeg{{
-			FromSigil: "a", ToSigil: "b",
-			Asset: &types.SettleLeg_Coin{Coin: ptrCoin(sdk.Coin{Denom: "x", Amount: math.NewInt(10)})},
-			Condition: &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
-				ZkDelivery: &escrowtypes.ZkDeliveryCondition{},
-			}},
-		}}, types.ErrConditionsNotEnabled},
+		// All three condition classes are enabled (D-073/D-076); the conservation
+		// gate no longer policies conditions (that is validateSolution's job), so
+		// a conditioned leg balances exactly like its underlying asset leg.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,8 +158,6 @@ func TestConservation_ExecutionPreservesSupply(t *testing.T) {
 		require.Equal(rt, moduleBefore, f.bank.balanceOf(sessionModuleAddr).AmountOf(usdcDenom), "module nets zero")
 	})
 }
-
-func ptrCoin(c sdk.Coin) *sdk.Coin { return &c }
 
 // countEscrows counts the escrow records owned by x/escrow (post-D-073
 // handoff: escrows live in the x/escrow store, not the session store).

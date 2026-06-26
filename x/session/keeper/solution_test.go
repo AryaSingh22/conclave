@@ -143,15 +143,16 @@ func TestProposeSolution_InvalidSlashes(t *testing.T) {
 			err:    types.ErrGraphTooLarge,
 		},
 		{
-			// ZK_DELIVERY stays disabled until 2.1b (FLAG A) — rejected at the
-			// conservation gate.
-			name: "rule6 ZK_DELIVERY disabled",
+			// ZK_DELIVERY is enabled (D-076) but, like the other classes, only in
+			// an unambiguous bilateral DataGrant+payment match; a ZK condition on
+			// a swap's coin leg routes through the SAME bilateral gate and rejects.
+			name: "rule6 ZK_DELIVERY non-bilateral rejected",
 			build: func(s swap) types.Match {
 				m := s.match()
 				m.Legs[0].Condition = &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{ZkDelivery: &escrowtypes.ZkDeliveryCondition{}}}
 				return m
 			},
-			err: types.ErrConditionsNotEnabled,
+			err: types.ErrConditionUnsupportedMatch,
 		},
 		{
 			// HASHLOCK/OPTIMISTIC are enabled (D-073) but only in an unambiguous

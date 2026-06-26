@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/AryaSingh22/conclave/crypto/zkdelivery"
 	"github.com/AryaSingh22/conclave/x/escrow/types"
 )
 
@@ -86,18 +87,41 @@ func (k Keeper) getCommit(ctx sdk.Context, idBz []byte) ([]byte, error) {
 
 // conditionWindow returns the per-escrow timeout/dispute window (blocks) for an
 // escrow's condition class and whether the class is swept at all. NONE has no
-// timer; ZK is rejected upstream (and here, defensively).
+// timer. HASHLOCK/OPTIMISTIC carry their window in the condition; ZK_DELIVERY
+// has no per-condition timeout field, so it uses the protocol constant
+// ZkDeliveryTimeoutBlocks (D-076) — the auto-refund deadline for a proof that
+// never arrives.
 func conditionWindow(esc types.Escrow) (window uint64, swept bool, err error) {
 	switch classOf(esc) {
 	case classHashlock:
 		return esc.Condition.GetHashlock().TimeoutBlocks, true, nil
 	case classOptimistic:
 		return esc.Condition.GetOptimistic().DisputeWindowBlocks, true, nil
-	case classNone:
+	case classZk:
+		return types.ZkDeliveryTimeoutBlocks, true, nil
+	default: // classNone
 		return 0, false, nil
-	default: // classZk
-		return 0, false, types.ErrZkNotEnabled
 	}
+}
+
+// validateZkCondition checks a ZK_DELIVERY condition at escrow creation: the
+// named vk_id must resolve to a compiled-in verifying key (the registry is the
+// 2.1b vk_id-registry decision, D-076), and the schema_commitment must be a
+// non-empty field element (≤32 bytes, the BN254 scalar width the verifier
+// reconstructs). Both are SIGNED by the seller (D-075 consent: conditionEqual
+// compares schema_commitment + vk_id), so this validates what the seller
+// actually committed to.
+func validateZkCondition(zk *types.ZkDeliveryCondition) error {
+	if zk == nil {
+		return errorsmod.Wrap(types.ErrInvalidEscrow, "ZK_DELIVERY condition is empty")
+	}
+	if !zkdelivery.KnownVK(zk.VkId) {
+		return errorsmod.Wrapf(types.ErrUnknownVk, "vk_id %q", zk.VkId)
+	}
+	if n := len(zk.SchemaCommitment); n == 0 || n > 32 {
+		return errorsmod.Wrapf(types.ErrInvalidEscrow, "schema_commitment must be 1..32 bytes, got %d", n)
+	}
+	return nil
 }
 
 // CreateEscrow records a conditioned-delivery escrow and moves its funds into
@@ -106,17 +130,25 @@ func conditionWindow(esc types.Escrow) (window uint64, swept bool, err error) {
 // x/session CONCLUDE inside the atomic cache context (D-073 ownership handoff:
 // x/escrow is the writer, x/session no longer touches 0x09). For a NONE
 // condition it writes the Phase-0 fund-less DataGrant stub record unchanged.
-// HASHLOCK/OPTIMISTIC escrows enter ACTIVE with a sweep-index entry at their
-// timeout/window height; the OPTIMISTIC committed content hash (the
+// HASHLOCK/OPTIMISTIC/ZK_DELIVERY escrows enter ACTIVE with a sweep-index entry
+// at their timeout/window height; the OPTIMISTIC committed content hash (the
 // buyer-agreed DataGrant.ContentHash) is persisted for the dispute-reveal
-// check.
+// check. ZK_DELIVERY funds like HASHLOCK (buyer payment in, no seller bond);
+// release is gated on a groth16 proof, refund on the ZkDeliveryTimeoutBlocks
+// sweep.
 //
 // implements SPEC §6.5 escrow instantiation (the §6.4 "DataGrant legs
 // instantiate x/escrow entries" handoff).
 func (k Keeper) CreateEscrow(ctx sdk.Context, esc types.Escrow, payerAddr, payeeAddr sdk.AccAddress, contentHash []byte) error {
 	class := classOf(esc)
 	if class == classZk {
-		return types.ErrZkNotEnabled
+		// Fail closed at creation if the ZK condition names an unknown circuit
+		// or a malformed commitment — otherwise the escrow could fund and then
+		// be unreleasable. A rejected conditioned CONCLUDE leg falls back
+		// (D-073), so a bad ZK condition never settles.
+		if err := validateZkCondition(esc.Condition.GetZkDelivery()); err != nil {
+			return err
+		}
 	}
 	idBz, err := types.IDBytes(esc.Id)
 	if err != nil {

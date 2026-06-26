@@ -323,27 +323,7 @@ func TestSweep_BatchSameHeight(t *testing.T) {
 	require.True(t, f.bank.get(types.ModuleName).IsZero(), "escrow account fully drained")
 }
 
-// ===========================================================================
-// ZK_DELIVERY is not enabled until 2.1b
-// ===========================================================================
-
-func TestZk_CreateRejected(t *testing.T) {
-	f := setupEscrow(t)
-	esc := types.Escrow{
-		Id: testID(40), PayerSigil: buyerSigil, PayeeSigil: sellerSigil,
-		Condition: types.DeliveryCondition{Condition: &types.DeliveryCondition_ZkDelivery{
-			ZkDelivery: &types.ZkDeliveryCondition{},
-		}},
-	}
-	err := f.k.CreateEscrow(f.ctx, esc, f.buyer, f.selr, nil)
-	require.ErrorIs(t, err, types.ErrZkNotEnabled)
-}
-
-func TestZk_SubmitProofRejected(t *testing.T) {
-	f := setupEscrow(t)
-	_, err := f.ms().SubmitDeliveryProof(f.ctx, &types.MsgSubmitDeliveryProof{Signer: f.buyer.String(), EscrowId: testID(40), Proof: []byte("p")})
-	require.ErrorIs(t, err, types.ErrZkNotEnabled)
-}
+// ZK_DELIVERY tests live in zk_test.go (they need the test-only prover).
 
 // ===========================================================================
 // NONE-condition record-only escrow (the Phase-0 DataGrant stub, post-handoff)

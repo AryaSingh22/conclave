@@ -247,10 +247,11 @@ approved phase authority** (D-072) — each task below bootstraps from it.
       five latent matcher TODOs); all ten `CONCLAVE-TODO(phase-2)` markers
       dispositioned; v0.53 held as decide-when-reached (2.2-owned), edges scoped
       separate-repo. The completeness-gate review passed before prose.
-- [~] 2.1 `x/escrow` delivery conditions — three condition classes as §11.2 transition
+- [x] 2.1 `x/escrow` delivery conditions — three condition classes as §11.2 transition
       tables (HASHLOCK / OPTIMISTIC / ZK_DELIVERY); `conclude.go:152` record-ownership
       handoff; `PenalizeLostDispute` reputation-hook wiring; D5 ratification. Split into
-      **2.1a (HASHLOCK+OPTIMISTIC)** and **2.1b (ZK_DELIVERY/gnark)**.
+      **2.1a (HASHLOCK+OPTIMISTIC, D-073/074/075)** and **2.1b (ZK_DELIVERY/gnark, D-076)**;
+      both complete.
   - [x] 2.1a HASHLOCK + OPTIMISTIC — D-073/D-074/D-075. `x/escrow` stood up (keeper,
         AppModule, msg server, query, genesis, EndBlock sweep; codespace 15xx). Single
         authoritative transition gate (`nextState`) → §11-rule-2 exhaustive transition-table
@@ -267,9 +268,39 @@ approved phase authority** (D-072) — each task below bootstraps from it.
         (writer-going-forward; x/receipt unaffected — never read escrows). Bilateral-pairing
         constraint recorded (D-074). Deterministic height-keyed sweep, ordered after
         x/session. NO ZK/gnark. `make lint test` + determinism vector green.
-  - [ ] 2.1b ZK_DELIVERY/gnark — own session, gnark-Go-floor spike with a STOP branch
-        vs the kyber pin (FLAG A). `MsgSubmitDeliveryProof` + ZK escrow creation currently
-        return `ErrZkNotEnabled`.
+  - [x] 2.1b ZK_DELIVERY/gnark — D-076. **Spike outcome (a):** gnark works on the CURRENT
+        toolchain (no Go bump, kyber pin intact) by PINNING `gnark v0.13.0` + `gnark-crypto
+        v0.18.0` (floor go 1.23.0 = the directive); latest v0.15.0 needs go 1.25.7 and
+        v0.14.0 needs go 1.24.0 (the bump D-066 avoided), so v0.13.0 is the highest line ≤
+        1.23. Determinism vector re-run AFTER the dep add = byte-identical to baseline (the
+        threshold/Veil path unperturbed). New `crypto/zkdelivery`: a BN254 groth16
+        `DeliveryCircuit` (MiMC) proving `MiMC(payload)==schema_commitment` bound to the
+        escrow id; **vk_id registry = COMPILED-IN** (`//go:embed` VK, 396 B; matches escrow's
+        compile-time-constant posture, D-073; PK 116 KB test-only in `zktest`, never in the
+        consensus binary). **Replay/instance binding (D-072):** the verifier reconstructs the
+        public witness (escrow id + signed schema_commitment) from the RECORD, never from the
+        submitter — a proof for escrow A is REJECTED against escrow B (watched test fails red
+        if the id binding is removed); same-instance replay → `ErrTerminalState`. Transition
+        table: `evtZkRelease` (ACTIVE→RELEASED on a verifying proof) / `evtZkTimeout`
+        (ACTIVE→REFUNDED); funds like HASHLOCK (payment-in, no bond); release-without-proof /
+        invalid-proof → `ErrInvalidProof`, `ReleaseEscrow`-on-ZK → `ErrWrongClass`, dispute-on-
+        ZK → `ErrNoDisputePath`; exhaustive table now covers `classZk`. Auto-refund timeout =
+        a compile-time constant `ZkDeliveryTimeoutBlocks` (no proto change — FW-1/FW-2 NOT
+        folded in, scope discipline). Determinism: on-chain only `groth16.Verify` (fixed VK,
+        randomness-free, recover→INVALID, never panics); setup toxic-waste off-chain (the `gen`
+        tool, analog of DKG `crypto/rand`). ZK routes through the SAME bilateral (D-074) +
+        signed-consent (D-075) gate; the conservation-gate ZK rejection is lifted. **Buyer-side
+        consent gate (review-driven):** the 2.1a consent gate was seller-only, but ZK release is
+        seller-driven on a `schema_commitment` not tied to the buyer's want, so a NONE-buyer
+        could be matched into a ZK escrow — the buyer-side mirror of the D-075 seller hole. Fix:
+        for ZK the BUYER must ALSO sign the exact condition (both chokepoints, fail-closed →
+        fallback); exact-param, so it also ties release to the buyer-agreed schema. ZK-only
+        (HASHLOCK post-delivery token / OPTIMISTIC ContentHash-tied buyer consent stays FW-1);
+        reuses the existing signed field, no FW-2 proto work. End-to-end conditioned ZK CONCLUDE
+        (both signing) opens a funded escrow + a bound proof releases it; NONE-buyer match
+        rejected (watched). Trusted-setup
+        MPC ceremony + circuit-soundness audit = mainnet gates (carried to 1.8-style audit).
+        `make lint test` + determinism vector green; 2.1a HASHLOCK/OPTIMISTIC suites green.
 - [ ] 2.2 wasmd + CVM custom bindings (CONCLUDE + escrow) — **owns the D-060 v0.53
       re-evaluation** (spike-then-decide against then-current block-sdk/ibc-go/wasmd;
       do NOT pre-bake the outcome).
