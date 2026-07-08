@@ -11,6 +11,7 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 
 	clienthelpers "cosmossdk.io/client/v2/helpers"
+	corestoretypes "cosmossdk.io/core/store"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
@@ -62,9 +63,14 @@ import (
 	solomachine "github.com/cosmos/ibc-go/v8/modules/light-clients/06-solomachine"
 	ibctm "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
 
+	"github.com/CosmWasm/wasmd/x/wasm"
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
+	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
+
 	blocksdkabci "github.com/skip-mev/block-sdk/v2/abci"
 	"github.com/skip-mev/block-sdk/v2/block"
 
+	"github.com/AryaSingh22/conclave/app/cvm"
 	"github.com/AryaSingh22/conclave/app/unordered"
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	"github.com/AryaSingh22/conclave/crypto/reveal"
@@ -129,6 +135,11 @@ type ConclaveApp struct {
 	IBCKeeper        *ibckeeper.Keeper // must be a pointer so SetRouter works
 	TransferKeeper   ibctransferkeeper.Keeper
 
+	// WasmKeeper runs the SPEC §0 CVM contract runtime (CosmWasm, task 2.2,
+	// D-078) on the D-077 v0.50 dependency line. Contracts reach Conclave
+	// modules ONLY through the app/cvm bindings wired at construction.
+	WasmKeeper wasmkeeper.Keeper
+
 	// Conclave keepers (wired manually, same pattern as IBC; modules land
 	// in SPEC §10 task order)
 	SigilKeeper   sigilkeeper.Keeper
@@ -171,6 +182,7 @@ type ConclaveApp struct {
 
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
+	ScopedWasmKeeper     capabilitykeeper.ScopedKeeper
 
 	// simulation manager
 	sm *module.SimulationManager
@@ -260,6 +272,7 @@ func NewConclaveApp(
 	app.CapabilityKeeper = capabilitykeeper.NewKeeper(app.appCodec, capabilityKey, capabilityMemKey)
 	app.ScopedIBCKeeper = app.CapabilityKeeper.ScopeToModule(ibcexported.ModuleName)
 	app.ScopedTransferKeeper = app.CapabilityKeeper.ScopeToModule(ibctransfertypes.ModuleName)
+	app.ScopedWasmKeeper = app.CapabilityKeeper.ScopeToModule(wasmtypes.ModuleName)
 	// seal the capability keeper: all scoped keepers must be created above
 	app.CapabilityKeeper.Seal()
 
@@ -276,7 +289,9 @@ func NewConclaveApp(
 
 	ibcRouter := porttypes.NewRouter()
 	ibcRouter.AddRoute(ibctransfertypes.ModuleName, transfer.NewIBCModule(app.TransferKeeper))
-	app.IBCKeeper.SetRouter(ibcRouter)
+	// SetRouter is deferred to the CosmWasm section below: the router seals on
+	// set, and the wasm IBC route can only be added once the wasm keeper exists
+	// (which in turn needs the Conclave keepers for its CVM bindings).
 
 	if err := app.RegisterModules(
 		capability.NewAppModule(app.appCodec, *app.CapabilityKeeper, false),
@@ -415,6 +430,79 @@ func NewConclaveApp(
 
 	// ---- end Conclave modules ----
 
+	// ---- CosmWasm / CVM (task 2.2, D-077/D-078) ----
+	//
+	// wasmd v0.54.x on the D-077 v0.50 line. The app/cvm bindings wired here
+	// are the ONLY write surface a contract has into Conclave modules: a
+	// curated escrow-msg allowlist with the calling contract's own address
+	// stamped as signer, and Any/Stargate passthrough disabled. MsgConclude is
+	// structurally unreachable from a contract — settlement authorship stays
+	// module-authority-only (§6.4); CONCLUDE is read-only to contracts through
+	// the CVM query plugins.
+
+	wasmKey := storetypes.NewKVStoreKey(wasmtypes.StoreKey)
+	if err := app.RegisterStores(wasmKey); err != nil {
+		panic(err)
+	}
+	// legacy param subspace, required by wasmd for param migrations (the live
+	// params are in the wasm store; genesis default is the PERMISSIONED
+	// posture — see permissionedWasmModule in wasm.go)
+	wasmSubspace := app.ParamsKeeper.Subspace(wasmtypes.ModuleName)
+
+	wasmNodeConfig, err := wasm.ReadNodeConfig(appOpts)
+	if err != nil {
+		panic("reading wasm node config: " + err.Error())
+	}
+	// the wasm store key doubles as the ante TX-counter store, wasmd's own
+	// pattern (the counter feeds contract env metadata, not consensus msgs)
+	wasmCounterStore := runtime.NewKVStoreService(wasmKey)
+
+	app.WasmKeeper = wasmkeeper.NewKeeper(
+		app.appCodec,
+		runtime.NewKVStoreService(wasmKey),
+		app.AccountKeeper,
+		app.BankKeeper,
+		app.StakingKeeper,
+		distrkeeper.NewQuerier(app.DistrKeeper),
+		app.IBCKeeper.ChannelKeeper, // ICS4Wrapper: no fee middleware in this stack
+		app.IBCKeeper.ChannelKeeper,
+		app.IBCKeeper.PortKeeper,
+		app.ScopedWasmKeeper,
+		app.TransferKeeper,
+		app.MsgServiceRouter(),
+		app.GRPCQueryRouter(),
+		wasmVMDir(appOpts),
+		wasmNodeConfig,
+		wasmtypes.VMConfig{},
+		wasmkeeper.BuiltInCapabilities(),
+		govAuthority,
+		// the CVM binding surface (task 2.2): both plugin sets are allowlists
+		wasmkeeper.WithMessageEncoders(cvm.MessageEncoders()),
+		wasmkeeper.WithQueryPlugins(cvm.QueryPlugins(app.appCodec, app.SessionKeeper, app.EscrowKeeper)),
+	)
+
+	ibcRouter.AddRoute(wasmtypes.ModuleName, wasm.NewIBCHandler(app.WasmKeeper, app.IBCKeeper.ChannelKeeper, app.IBCKeeper.ChannelKeeper))
+	app.IBCKeeper.SetRouter(ibcRouter)
+
+	if err := app.RegisterModules(
+		permissionedWasmModule{wasm.NewAppModule(app.appCodec, &app.WasmKeeper, app.StakingKeeper, app.AccountKeeper, app.BankKeeper, app.MsgServiceRouter(), wasmSubspace)},
+	); err != nil {
+		panic(err)
+	}
+
+	// wasm state-sync snapshot extension: compiled code blobs live outside the
+	// IAVL tree and need their own snapshot items. The manager is nil in unit
+	// tests (no snapshot store configured).
+	if manager := app.SnapshotManager(); manager != nil {
+		if err := manager.RegisterExtensions(
+			wasmkeeper.NewWasmSnapshotter(app.CommitMultiStore(), &app.WasmKeeper),
+		); err != nil {
+			panic(err)
+		}
+	}
+
+	// ---- end CosmWasm / CVM ----
+
 	// register streaming services
 	if err := app.RegisterStreamingServices(appOpts, app.kvStoreKeys()); err != nil {
 		panic(err)
@@ -434,10 +522,22 @@ func NewConclaveApp(
 	overrideModules := map[string]module.AppModuleSimulation{
 		authtypes.ModuleName: auth.NewAppModule(app.appCodec, app.AccountKeeper, authsims.RandomGenesisAccounts, app.GetSubspace(authtypes.ModuleName)),
 	}
-	app.sm = module.NewSimulationManagerFromAppModules(app.ModuleManager.Modules, overrideModules)
+	// x/wasm ships sim operations (random contract stores/executes) and a
+	// randomized sim genesis. The determinism vector is custom-only-ops
+	// (D-057/D-063) and contracts are deliberately sim-inert, so wasm is
+	// EXCLUDED from the simulation manager; its sim genesis stays the app
+	// default (the permissioned posture, wasm.go).
+	simModules := make(map[string]interface{}, len(app.ModuleManager.Modules))
+	for name, mod := range app.ModuleManager.Modules {
+		if name == wasmtypes.ModuleName {
+			continue
+		}
+		simModules[name] = mod
+	}
+	app.sm = module.NewSimulationManagerFromAppModules(simModules, overrideModules)
 	app.sm.RegisterStoreDecoders()
 
-	anteHandler := app.setAnteHandler(app.txConfig)
+	anteHandler := app.setAnteHandler(app.txConfig, wasmNodeConfig, wasmCounterStore)
 
 	// The Block SDK laned mempool + proposal handlers replace the interim
 	// NoOpMempool wholesale (SPEC §6.7 lanes; D-032 supersedes D-031).
@@ -469,7 +569,7 @@ func NewConclaveApp(
 // and returns it for reuse by the lane definitions (SPEC §6.7): lanes verify
 // proposal txs with the production ante chain, so proposal-time checks are
 // exactly the CheckTx checks.
-func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) sdk.AnteHandler {
+func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig, wasmNodeConfig wasmtypes.NodeConfig, wasmCounterStore corestoretypes.KVStoreService) sdk.AnteHandler {
 	anteHandler, err := NewAnteHandler(
 		HandlerOptions{
 			HandlerOptions: ante.HandlerOptions{
@@ -479,9 +579,12 @@ func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig) sdk.AnteHandler
 				FeegrantKeeper:  app.FeeGrantKeeper,
 				SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 			},
-			IBCKeeper:        app.IBCKeeper,
-			MandateKeeper:    app.MandateKeeper,
-			UnorderedManager: app.UnorderedManager,
+			IBCKeeper:             app.IBCKeeper,
+			MandateKeeper:         app.MandateKeeper,
+			UnorderedManager:      app.UnorderedManager,
+			WasmKeeper:            &app.WasmKeeper,
+			WasmNodeConfig:        wasmNodeConfig,
+			TXCounterStoreService: wasmCounterStore,
 		},
 	)
 	if err != nil {

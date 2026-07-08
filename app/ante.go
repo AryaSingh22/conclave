@@ -3,11 +3,16 @@ package app
 import (
 	"errors"
 
+	corestoretypes "cosmossdk.io/core/store"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 
 	ibcante "github.com/cosmos/ibc-go/v8/modules/core/ante"
 	ibckeeper "github.com/cosmos/ibc-go/v8/modules/core/keeper"
+
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
+	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 
 	"github.com/AryaSingh22/conclave/app/unordered"
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
@@ -23,6 +28,13 @@ type HandlerOptions struct {
 	IBCKeeper        *ibckeeper.Keeper
 	MandateKeeper    mandatekeeper.Keeper
 	UnorderedManager unordered.Manager
+
+	// CosmWasm (task 2.2): the wasm ante decorators need the keeper's gas
+	// register, the node's wasm config (simulation gas cap), and the
+	// TX-counter store service.
+	WasmKeeper            *wasmkeeper.Keeper
+	WasmNodeConfig        wasmtypes.NodeConfig
+	TXCounterStoreService corestoretypes.KVStoreService
 }
 
 // NewAnteHandler constructs the ordered Conclave ante decorator chain.
@@ -67,9 +79,22 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 	if !options.UnorderedManager.Initialized() {
 		return nil, errors.New("unordered manager is required for ante builder")
 	}
+	if options.WasmKeeper == nil {
+		return nil, errors.New("wasm keeper is required for ante builder")
+	}
+	if options.TXCounterStoreService == nil {
+		return nil, errors.New("wasm tx counter store service is required for ante builder")
+	}
 
 	anteDecorators := []sdk.AnteDecorator{
 		ante.NewSetUpContextDecorator(),
+		// wasm decorators directly after context setup (wasmd's own ante
+		// order, task 2.2): cap simulation gas, count txs per block for the
+		// contract env, expose the gas register, track contract call frames
+		wasmkeeper.NewLimitSimulationGasDecorator(options.WasmNodeConfig.SimulationGasLimit),
+		wasmkeeper.NewCountTXDecorator(options.TXCounterStoreService),
+		wasmkeeper.NewGasRegisterDecorator(options.WasmKeeper.GetGasRegister()),
+		wasmkeeper.NewTxContractsDecorator(),
 		// the only accepted TxBody extension option is UnorderedTxExtension
 		// (SPEC §6.7, D-026); everything else stays rejected
 		ante.NewExtensionOptionsDecorator(unorderedtypes.ExtensionOptionChecker),

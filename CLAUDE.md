@@ -239,7 +239,9 @@ green and the task is reviewed + committed.
 
 One task per session, in order. Mark complete only after `make lint test` is
 green and the task is reviewed + committed. **`docs/PHASE2_DESIGN.md` is the
-approved phase authority** (D-072) — each task below bootstraps from it.
+approved phase authority** (D-072; **Rev 2** as-built reconciliation, D-078 —
+scoreboard, resolved FLAGs A/B, 2.2 resume checklist, new task 2.7) — each
+task below bootstraps from it.
 
 - [x] 2.0 Phase-2 design ledger authored — `docs/PHASE2_DESIGN.md` (D-072). Docs-only
       (no source/proto/logic touched; `make lint test` green at `39cb207`). Per-task
@@ -301,9 +303,21 @@ approved phase authority** (D-072) — each task below bootstraps from it.
         rejected (watched). Trusted-setup
         MPC ceremony + circuit-soundness audit = mainnet gates (carried to 1.8-style audit).
         `make lint test` + determinism vector green; 2.1a HASHLOCK/OPTIMISTIC suites green.
-- [ ] 2.2 wasmd + CVM custom bindings (CONCLUDE + escrow) — **owns the D-060 v0.53
-      re-evaluation** (spike-then-decide against then-current block-sdk/ibc-go/wasmd;
-      do NOT pre-bake the outcome).
+- [x] 2.2 wasmd + CVM custom bindings — **DONE (D-077 + D-079).** STOP #1: stay
+      v0.50 (D-077 — block-sdk frozen = decisive; v0.53-wasmd line needs go 1.24 =
+      kyber collision). STOP #2 approved: wasmd v0.54.9 (SDK v0.50.15 / ibc-go
+      v8.8.0 exact match; go 1.23.2 — two-pin ceiling intact), READ-ONLY CONCLUDE,
+      permissioned gov-only upload (Nobody/Nobody default genesis). CVM bindings =
+      `app/cvm`: escrow-msg allowlist {release/prove/dispute} with contract-address
+      signer stamping, Any/Stargate passthrough disabled, bounded session/receipt/
+      escrow query plugins; three-layer no-forge model watched by encoder units +
+      a real-contract (reflect via wasmvm) e2e incl. the positive contract-releases-
+      hashlock path + gas assertion. wasm msgs ride the GENERAL lane; x/wasm
+      excluded from the sim manager (vector wasm-inert, byte-identical on the
+      iavl-1.2.4 tree). FIRST CGO DEP (libwasmvm; musl builds need
+      libwasmvm_muslc). DEVIATION surfaced (D-079): the localnet contract-release
+      smoke is deferred to the §6 exit demo — needs a CVM-schema contract binary
+      (Rust toolchain); reflect's typed Custom cannot spell it.
 - [ ] 2.3 x402 gateway — **SEPARATE REPO** (`conclave-x402-gateway`); in-repo deliverable
       = the node-side gRPC surface contract.
 - [ ] 2.4 7683 resolver — **SEPARATE REPO** (`conclave-7683-resolver`); in-repo deliverable
@@ -313,7 +327,15 @@ approved phase authority** (D-072) — each task below bootstraps from it.
 - [ ] 2.6 Matcher-richness hardening pass — owns latent TODOs: partial-fill/cycle-aware
       fallback, partial-fill cycles + alt numeraire anchoring, §5.1 limit-rate honoring,
       multi-intent-per-sigil, multi-asset in-kind skim. One determinism-focused session
-      behind the existing `validateSolution` bar + determinism vector.
+      behind the existing `validateSolution` bar + determinism vector. Rev 2 adds the
+      D-076 flake-hardening item (deterministic `randAddr()` fixture seeding,
+      `x/mandate/keeper/keeper_test.go:101`).
+- [ ] 2.7 Escrow consent completeness (NEW in Rev 2, D-078) — owns the D-075/D-076 FW
+      seams: FW-1 (HASHLOCK/OPTIMISTIC class/window-level buyer-side consent; ZK's
+      exact-param gate shipped in 2.1b), FW-2 (per-leg `IntentLeg.condition` proto
+      refinement, incl. the does-it-relax-D-074 plan-stop question), and the
+      timeouts→params promotion (`ZkDeliveryTimeoutBlocks` et al., plan-stop). Off the
+      exit path; sequenced after 2.6; proto change ⇒ determinism vector re-baseline.
 
 **Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
 data from a Conclave agent; receipt IBC-verified on a second chain (spans

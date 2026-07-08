@@ -2827,3 +2827,257 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   escrow) and validation (`TestProposeConditioned_Zk_BuyerNotConsentedAtValidation`), and a
   buyer-schema mismatch is REJECTED (`TestConcludeConditioned_Zk_BuyerMismatch`). `make lint
   test` + determinism vector green; 2.1a's HASHLOCK/OPTIMISTIC suites still green.
+
+## D-077 — Task 2.2 D-060 RE-EVALUATION (UPDATES D-060): stay on SDK v0.50 for Phase 2; wasmd integrates on the v0.50 line — the answer is unchanged but the binding reason has MOVED
+
+- **Date:** 2026-06-26 (task 2.2 dependency spike, STOP #1; approved)
+- **SPEC:** §14 D8, §3 (version pins), §0 (CVM contract runtime); PHASE2_DESIGN
+  §2.2 (FLAG B spike-then-decide) + FLAG A (toolchain/kyber-pin risk).
+- **UPDATES D-060** (the Phase-1 D8 resolution) with task-time current-release
+  evidence, exactly as PHASE2_DESIGN §2.2 criterion 1 requires ("Record the result
+  as a new DECISIONS entry updating D-060 — the doc does not pre-bake the
+  outcome"). Builds on **D-066** (the kyber-bls12381 v0.3.1 pin + the go-1.24-bump
+  avoidance the toolchain axis tests against) and is the dependency baseline the
+  **D-072–076** escrow surface + the 2.2 CVM bindings build on.
+- **Decision: do NOT bump to SDK v0.53 for Phase 2. Keep cosmos-sdk v0.50.x,
+  block-sdk/v2 v2.1.5 (the laned mempool), ibc-go v8, the goleveldb replace pin,
+  go 1.23.x, and the `app/unordered/sigverify.go` fork (D-027) + the D-026 TxBody
+  extension-option unordered encoding. Integrate wasmd on the v0.50 line.** The
+  outcome matches D-060, but D-060's flip-rule ("bump only when ALL of (a)(b)(c)")
+  still fails on (a), and the DECISIVE constraints have shifted — recorded loudly
+  rather than rubber-stamped.
+- **Empirical spike (throwaway, Go module proxy / current tags — the same method
+  as D-060's Phase-1 spike, not a stale memory assumption). Our pins: cosmos-sdk
+  v0.50.15, go 1.23 (`go 1.23.0` + `toolchain go1.23.12`). Kyber ceiling (D-066):
+  must not cross into go 1.24 (forces kyber-bls12381 v0.3.4).**
+  | Dependency | v0.50 line | v0.53 line | Go floor |
+  |---|---|---|---|
+  | `skip-mev/block-sdk/v2` | **v2.1.5** (our pin, SDK v0.50.3) | **none** — frozen, no v2.1.6 / v2.2.0 / `/v3` | 1.22.4 |
+  | `cosmos/ibc-go` | v8.8.0 / v9.0.2 (both SDK v0.50.9) | v10.3.0+ → SDK v0.53 (v10.7.0→v0.53.4) | 1.23.8 |
+  | `CosmWasm/wasmd` | v0.54.x (SDK v0.50.11, ibc-go v8); v0.55.1 (SDK v0.50.12, ibc-go v10.0.0) | v0.61.0 (SDK v0.53.0, ibc-go v10.3.0) | v0.50: 1.23.1–1.23.6; v0.53: v0.61.0=1.23.8 but v0.61.14=**1.24.0**, v0.70=1.25.9 |
+  | `cosmos-sdk` | v0.50.15 (ours) | v0.53.7 (mature) | v0.50→1.22; v0.53→1.23.2 |
+  (wasmd v1.0.0 is a 2021 ghost tag → SDK v0.36 / go 1.12; ignored.)
+- **Flip-condition re-check (a)–(c) + the 2.2-forced axes (d)–(e):**
+  - **(a) MVS-clean block-sdk on v0.53 — STILL NO, and decisive.** block-sdk is
+    frozen at v2.1.5 (v0.50-only); no v2 successor, no `/v3`, effectively
+    unmaintained. Bumping to v0.53 means LOSING the Block-SDK laned mempool — a
+    core §6.7 feature wired in task 0.6 — and rebuilding/replacing it. D-060's
+    rule required ALL of (a)(b)(c); (a) fails. UNCHANGED from Phase-1.
+  - **(b) v0.53-compatible ibc-go — NOW YES (the one condition that FLIPPED).**
+    ibc-go v10.3.0+ targets SDK v0.53 (v10.7.0 → v0.53.4). But it is a v8→v10
+    MAJOR bump (API churn) and is MOOT without (a). (Note for 2.5: ibc-go v8 is
+    still maintained and serves IBC-USDC; the v10 line is NOT required.)
+  - **(c) D-057 sim/FinalizeBlock lifecycle — trivially intact by staying v0.50**
+    (no change); would need re-verification only on a bump.
+  - **(d) wasmd does NOT force v0.53.** A MAINTAINED wasmd line targets SDK v0.50:
+    v0.54.x (ibc-go v8 — matches our current stack exactly) and v0.55.1 (ibc-go
+    v10.0.0, still v0.50). The 2.2 deliverable (CVM bindings for CONCLUDE/escrow)
+    is fully achievable on v0.50. **The forcing function does not force the bump.**
+  - **(e) toolchain vs the kyber pin — v0.50 is SAFE; v0.53 is FRAGILE against the
+    foundation.** v0.50 + wasmd v0.54/v0.55 floors at go 1.23.1–1.23.6
+    (kyber-safe). v0.53 is kyber-safe ONLY pinned to wasmd v0.61.0 (go 1.23.8) —
+    but that line's current patch v0.61.14 already requires **go 1.24** (the exact
+    D-066 collision), and the next SDK line (v0.54 / wasmd v0.70) needs go 1.25. So
+    v0.53 puts us one wasmd patch away from the toolchain collision 2.1b's spike
+    (D-076) was built to avoid.
+- **Why the answer is the same but the REASON moved (the recorded point).** At
+  Phase-1 close (D-060) the blocker was "the whole v0.53 ecosystem isn't ready" —
+  now partly obsolete: ibc-go v10 and wasmd v0.61 ARE ready. Today's binding
+  constraints are different: **(a)** block-sdk is abandoned with no v0.53 path
+  (bumping drops the laned mempool), and **(e)** the v0.53 wasmd line's current
+  patches collide with the kyber pin (go 1.24). Bumping would mean rebuilding the
+  mempool + a v8→v10 IBC major + a determinism re-baseline + a fragile sub-latest
+  wasmd pin — WHILE introducing wasmd — violating D-060's own "isolate variables"
+  discipline at the moment the largest new (CVM) surface lands.
+- **The bump's only real 2.2 prize is not needed by the deliverable.** Native
+  ADR-070 retiring the sigverify fork (`app/unordered/sigverify.go:16`) + the D-026
+  encoding is irrelevant to the CVM-bindings work; the fork is conformance-pinned
+  (a low, bounded, tested cost). The `sigverify.go:16` CONCLAVE-TODO re-points
+  FORWARD again (next v0.53 re-evaluation = 2.5's IBC-line check or a later boundary).
+- **2.2 proceeds on v0.50:** add wasmd (recommended line **v0.54.x** — SDK v0.50.x
+  + ibc-go v8, matching our stack with minimal re-baseline; v0.55.1 only if its
+  fixes are wanted at the cost of a v8→v10 IBC bump — a STOP #2 detail), keep
+  block-sdk + the sigverify fork, stay at go 1.23.x (kyber pin intact), build the
+  CVM CONCLUDE/escrow bindings.
+- **Rationale.** Re-deriving rather than inheriting keeps the §14-D8 contract
+  honest: the spike confirms the v0.50 choice on data current at task time, names
+  the one flipped input (b) so the record is not stale, and isolates the wasmd
+  integration from a mempool rebuild + IBC major + toolchain collision it does not
+  need. The v0.53 re-evaluation remains live for a future boundary (2.5 / Phase 3),
+  re-checked the same empirical way.
+
+## D-078 — PHASE2_DESIGN.md Rev 2: as-built reconciliation after 2.1a/2.1b + the 2.2 STOP-#1 spike; FLAGs A/B recorded RESOLVED; NEW numbered task 2.7 (escrow consent completeness — FW-1 + FW-2); the two-pin go-1.23.x toolchain ceiling named
+
+- **Date:** 2026-07-02 (doc-maintenance session; docs-only — no source/proto/
+  logic touched; the uncommitted 2.2 working tree left intact)
+- **SPEC:** §10 (phase plan); PHASE2_DESIGN.md (the D-072 phase authority);
+  builds on D-073–D-077.
+- **Why a revision.** The phase authority was authored (Rev 1, D-072) before
+  any Phase-2 build. Three sessions later its risk register was stale — FLAG A
+  (gnark/kyber) and FLAG B (v0.53 flip) are RESOLVED with recorded outcomes
+  (D-076 outcome (a); D-077), §2.1 described as future work what is now built
+  (with plan-vs-built deltas the next tasks must not mis-inherit), and the
+  D-075/D-076 FW seams had no numbered owner. A stale authority silently
+  misleads the next session's bootstrap.
+- **What Rev 2 changes (doc-level decisions made here):**
+  - **Task 2.7 created** (escrow consent completeness): owns D-075-FW-1
+    (HASHLOCK/OPTIMISTIC class/window-level buyer consent), D-075-FW-2
+    (per-leg `IntentLeg.condition` proto refinement, incl. the
+    does-it-relax-D-074 plan-stop question), and the timeouts→params
+    promotion (`ZkDeliveryTimeoutBlocks` et al.) as a plan-stop decision.
+    Sequenced after 2.6, off the exit path — the same
+    "a ledger entry, not a floating phrase" discipline that created 2.6.
+  - **Toolchain ceiling named as an invariant (§4):** stay on go 1.23.x until
+    BOTH pins — kyber-bls12381 v0.3.1 (D-066) AND gnark v0.13.0 (D-076) — are
+    re-validated in ONE recorded decision; any dependency whose floor crosses
+    go 1.24 is a STOP, not a bump.
+  - **2.2 resume checklist made load-bearing:** determinism re-baseline on the
+    already-dep-bumped tree (iavl 1.2.2→1.2.4 is on the state-commitment path;
+    math v1.5.0, log v1.6.1 — MVS pre-pulls, wasmd itself NOT yet added)
+    BEFORE wasmd wiring, so any vector drift is attributable to the bumps in
+    isolation; then wasmd v0.54.x pin → bindings STOP #2. The throwaway
+    `scripts/_baseline.sh` / `_d060_spike*.sh` are named for deletion before
+    the 2.2 commit.
+  - **Consent invariants elevated:** D-075/D-076 recorded as constraints on
+    2.2 (bindings must not let contract-originated flows bypass the signed-
+    consent chokepoints) and 2.6 (matcher richness must not settle a condition
+    against a non-signer; a D-074 collision routes to 2.7's FW-2).
+  - **Rev 1 corrections recorded:** the "x/receipt reads escrow records"
+    dependency claim was false (x/receipt never read escrows — D-073);
+    ownership handoff = writer-going-forward, not migration; TODO #5
+    (sigverify fork) re-pointed off 2.2 to 2.5's v0.53 checkpoint per D-077;
+    solution.go marker drift (141→143, 330→349) refreshed by live grep.
+  - **Edge deliverables sharpened to named artifacts:**
+    `docs/edge/X402_SURFACE.md` / `docs/edge/7683_SURFACE.md` (2.3/2.4), each
+    exercised once by script against a running node — "done" is checkable.
+  - **Exit-demo leg-readiness table + mainnet-gate sidebar:** the ZK leg is
+    DONE; the demo can run on the dev VK, mainnet cannot (MPC ceremony +
+    circuit-soundness audit + external audit stay mainnet gates, not
+    Phase-2 tasks).
+- **Also fixed (working-tree hygiene):** the uncommitted D-077 draft had been
+  inserted MID-D-076 (before its "Carried to the 1.8-style audit" /
+  flake-hardening / "Acceptance" bullets, stranding them under the wrong
+  header). Moved D-077 after the end of D-076 so each entry is contiguous;
+  no text altered in either entry.
+- **Rationale.** Result-oriented means the authority states what IS, what
+  remains, and the exact next action (resume 2.2 at checklist step 1) — with
+  every resolved risk carrying its citation instead of its original warning.
+
+## D-079 — Task 2.2: wasmd v0.54.9 integrated (D-077 line); CVM bindings = escrow-msg allowlist + read-only CONCLUDE; three-layer no-forge authority model; permissioned upload; wasm sim-inert; first CGO dependency
+
+- **Date:** 2026-07-02 (task 2.2 build, STOP #2 approved: wasmd v0.54.x /
+  read-only CONCLUDE / permissioned gov-only upload)
+- **SPEC:** §0 (CVM naming), §6.4 (all-or-nothing CONCLUDE), §6.5 (escrow
+  msgs), §6.7 (lanes), §11.5/§11.6 (safety/determinism); PHASE2_DESIGN §2.2
+  Rev 2 (D-078 resume checklist); builds on **D-077** (the v0.50 line),
+  **D-073–076** (the escrow gates the bindings ride), **D-066/D-076** (the
+  go-1.23.x two-pin ceiling the wasmd pin respects).
+- **Dependency pins.** `wasmd v0.54.9` (go directive 1.23.2; cosmos-sdk
+  v0.50.15 and ibc-go v8.8.0 EXACT matches to ours) + `wasmvm/v2 v2.2.8`
+  (go 1.22). Repo directive moved `go 1.23.0`→`go 1.23.2`, toolchain stays
+  `go1.23.12` — INSIDE the §4 two-pin ceiling (kyber v1.3.1/v0.3.1 and gnark
+  v0.13.0 untouched). Ride-alongs: `iavl 1.2.2→1.2.4` (state-commitment
+  path — vector-validated below), `cosmossdk.io/math 1.4.0→1.5.0`,
+  `log 1.4.1→1.6.1`, `go-getter 1.7.4→1.7.5`. block-sdk v2.1.5, cometbft
+  v0.38.23, goleveldb replace: unchanged.
+- **FIRST CGO DEPENDENCY — recorded loudly.** wasmvm links `libwasmvm` (C
+  FFI); everything before 2.2 (kyber, gnark included) was pure Go. Build/
+  test/vector now require `CGO_ENABLED=1` + a C toolchain (default on the WSL
+  builder; verified by an isolated spike: `LibwasmvmVersion()=2.2.8`, exit 0).
+  Ops note for later packaging: static/musl builds need `libwasmvm_muslc`.
+- **Wiring (app.go / app_config.go / ante.go / wasm.go).** wasm store key +
+  keeper (ICS4Wrapper = ChannelKeeper — no fee middleware in this stack), wasm
+  IBC route added and `SetRouter` DEFERRED to after wasm keeper construction
+  (the CVM plugins need the Conclave keepers, so the wasm section sits after
+  the Conclave modules); module registered via `permissionedWasmModule` (a
+  DefaultGenesis override — see posture below); state-sync snapshotter
+  registered when a snapshot manager exists; ante gains wasmd's four
+  decorators (LimitSimulationGas, CountTX on the wasm store, GasRegister,
+  TxContracts) directly after SetUpContext — the fork'd SigVerification
+  pipeline is untouched and the unordered conformance suite stays green.
+  **Lanes (the step-3 plan-stop): wasm msgs ride the GENERAL lane** — the
+  §6.7 partition routes unlisted TypeURLs to general; no new lane, no
+  msgClasses change, lane suites green.
+- **wasmvm dir = node-local disk cache, NEVER consensus state.** Real nodes:
+  `<home>/wasm` (same appOpts pattern as the DKG share store). Tests pass no
+  home → each app instance gets a FRESH temp dir, because wasmvm holds an
+  EXCLUSIVE file lock on its dir and in-process suites construct several apps.
+- **Permissioned posture (STOP #2 decision).** Default genesis ships
+  `CodeUploadAccess=Nobody` + `InstantiateDefaultPermission=Nobody` via the
+  `permissionedWasmModule` DefaultGenesis override; only governance
+  (wasmd's GovAuthorizationPolicy bypasses access config for authority msgs)
+  can store/instantiate or loosen params. Watched by the e2e (non-gov store
+  rejected; gov store/instantiate succeeds).
+- **CVM bindings (`app/cvm`) — the authority model, three layers:**
+  1. **ALLOWLIST (encoder):** custom msgs = exactly
+     {release_escrow, submit_delivery_proof, raise_dispute}; strict JSON
+     (unknown fields rejected, exactly one branch). NO Conclude encoding
+     exists — settlement authorship stays module-authority-only (EndBlock
+     Half-B + authority-gated MsgConclude); the contract-actionable pieces of
+     settlement ARE the escrow legs, each gated by the 2.1 keeper rules
+     (knowledge-gated release/proof, payer-identity-gated dispute).
+  2. **NO PASSTHROUGH:** the Any/Stargate ENCODER is replaced with a hard
+     rejection (wasmd default would encode arbitrary protobuf); Stargate/gRPC
+     QUERIES stay on wasmd's default rejection. Rejections deliberately do
+     NOT wrap wasmd's ErrUnknownMsg (the handler chain treats that as
+     "try next handler" and swallows provenance) — they hard-fail with CVM-
+     attributed errors.
+  3. **SIGNER STAMPING:** every encoded msg carries the CALLING CONTRACT's
+     address as signer (schema has no signer field; wasmd's dispatch
+     independently verifies every signer IS the contract). A forged
+     MsgConclude would need authority==contract (dispatch check) AND
+     authority==gov (keeper check) — structurally impossible.
+  **Consent gates unreachable from CVM (the Rev-2 step-4 constraint):** the
+  allowlist contains NO intent/solution submission — a contract cannot attach
+  a condition at all, so the D-075/D-076 signed-consent chokepoints cannot be
+  bypassed by contract-originated flows; the escrow msgs a contract CAN send
+  act on escrows whose consent was established at creation.
+- **Read surface.** Query plugins expose three BOUNDED point lookups —
+  session, receipt, escrow — as proto-JSON over committed state (the
+  read-only face of CONCLUDE: contracts observe settlement, never author it).
+  No iteration a contract can widen.
+- **Gas.** Contract execution meters wasm gas via wasmd's default GasRegister
+  (ante GasRegisterDecorator); CVM→native EXECUTE dispatches on the same ctx
+  gas meter (native escrow work costs SDK gas exactly as a direct tx);
+  CVM queries are metered through the store reads they perform. Watched by
+  the e2e gas assertion.
+- **Sim/determinism.** x/wasm implements AppModuleSimulation (random contract
+  stores) — EXCLUDED from the simulation manager (custom-only-ops posture,
+  D-057/D-063); its sim genesis stays the permissioned default, so the vector
+  is wasm-inert. Vector run on the wired tree: byte-identical across
+  two independent processes × 5 seeds — validating the iavl 1.2.4 / math
+  1.5.0 ride-alongs on the state-commitment path. (Deviation from the D-078
+  step-2 ordering surfaced at review: the vector ran AFTER wiring, not on the
+  dep-bumps-only tree; it was byte-identical so no bisection was needed.)
+- **Load-bearing tests.** `app/cvm` units pin the allowlist (a "conclude"
+  spelling never encodes), the stamping invariant (naming a signer is
+  rejected), exactly-one-branch, and the Any rejection. The app-level e2e
+  (`app/cvm_bindings_test.go`) runs a REAL contract (wasmd's reflect, via
+  wasmvm) end to end: a contract-emitted custom msg lands in and is rejected
+  by the CVM allowlist WITH its provenance; contract-emitted
+  Any(MsgConclude) is rejected by layer 2; MsgConclude under a contract
+  authority is rejected by the session keeper (layer 3); a contract RELEASES
+  a HASHLOCK escrow with the preimage (positive path: state→RELEASED, payee
+  paid, gas consumed) and CANNOT dispute an escrow whose payer it is not;
+  the CVM querier serves the bounded escrow read and rejects unknown shapes;
+  stargate queries stay rejected; the permissioned posture holds. Dispatch
+  subtests replicate wasmd's SDKMessageHandler steps exactly (production
+  encoder → signer check → real MsgServiceRouter) because reflect's Custom
+  msg/query are TYPED (debug|raw / ping|capitalized) and cannot spell
+  Conclave's schema — which also means:
+- **DEVIATION (Rev-2 step 5) — localnet contract-release smoke deferred to
+  the exit demo.** A live-network smoke needs a contract BINARY that emits
+  CVM custom msgs; reflect cannot, and authoring a CVM-schema contract needs
+  a Rust/wasm32 toolchain (not on the builder). The in-process e2e covers the
+  full wasm→binding→keeper path through real wasmvm execution; the live
+  smoke rides the §6 exit-demo task, whose purpose-built CVM demo contract
+  is its natural vehicle. Surfaced, not silently skipped.
+- **Seams closed/re-pointed.** `session tx.pb.go:322` + `tx.proto` seam
+  comment RESOLVED read-only (comment-only edit, both files in sync, no proto
+  regen); `app/unordered/sigverify.go` TODO re-pointed to 2.5-or-later per
+  D-077.
+- **Rationale.** The bindings inherit the phase's consent/authority
+  discipline instead of inventing a parallel permission system: a contract is
+  just another account-shaped principal, every existing keeper gate applies
+  to it unchanged, and the one msg no principal but the module authority may
+  send remains exactly that.

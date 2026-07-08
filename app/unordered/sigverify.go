@@ -13,11 +13,13 @@ package unordered
 // sequences. The behavioral pin is the conformance suite
 // (app/unordered_conformance_test.go); this header is the provenance pin.
 //
-// CONCLAVE-TODO(phase-2): replace this fork with the SDK's native ADR-070
-// unordered-tx support on the v0.53 bump — SPEC §14 D8 RESOLVED stay-on-v0.50
-// for Phase 1 (D-060); the bump is deferred to the Phase-1→Phase-2 boundary
-// (wasmd task 2.2 forces a dependency revisit) and is viable only once block-sdk
-// ships a v0.53 line. We migrate deliberately, not opportunistically.
+// CONCLAVE-TODO(phase-2+): replace this fork with the SDK's native ADR-070
+// unordered-tx support on the v0.53 bump. The task-2.2 re-evaluation (D-077,
+// updating D-060) RE-RESOLVED stay-on-v0.50: block-sdk remains frozen with no
+// v0.53 line (a bump forfeits the laned mempool) and the v0.53 wasmd line's
+// current patches need go 1.24 (the D-066 kyber collision). Next checkpoint:
+// task 2.5's IBC-line check, or a later boundary once block-sdk has a v0.53
+// path. We migrate deliberately, not opportunistically.
 
 import (
 	"fmt"

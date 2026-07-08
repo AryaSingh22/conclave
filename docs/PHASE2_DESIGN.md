@@ -1,512 +1,521 @@
 # Conclave Phase 2 — Provable Commerce + Edges (Design Document)
 
-**Status:** Approved design (planning session, close of Phase 1 → Phase 2).
-**Baseline:** HEAD `39cb207`, `make lint test` green (lint exit 0; all test
-packages `ok`; 0 FAIL / 0 SKIP — the `-Enabled`-gated sim/determinism suite is
-correctly excluded from `make test`, D-057). Phase-1 build (1.0–1.7) +
-audit-scope (1.8) complete and pushed. The external cryptographic audit is the
-**mainnet** gate, owned externally — it does **not** block Phase-2 build work.
-**Scope:** Implement SPEC §10's five Phase-2 tasks — `x/escrow` delivery
-conditions (2.1), CosmWasm/CVM integration with CONCLUDE + escrow bindings
-(2.2), the x402 gateway (2.3) and 7683 resolver (2.4) edge services, and real
-USDC over IBC + a session-TWAP fee (2.5) — plus a numbered matcher-richness
-hardening pass (2.6) that owns the latent matcher TODOs. Exit: the §1.3 demo
-extended end-to-end across chains (§6 below).
-**Working method:** this document is the Phase-2 plan, reviewed before any build
-task. No module code was written to produce it (only read-only greps to ground
-its claims). Each task below is one working session with a stop-and-review and
-its own plan-stop decisions. Where SPEC §10 is a one-line plan, this document
-flags every under-specification and toolchain risk loudly rather than
-improvising at build time.
+**Status:** Approved design (D-072), **Rev 2 — as-built reconciliation**
+(2026-07-02, D-078). Rev 1 was authored at the Phase-1→Phase-2 boundary
+(baseline `39cb207`) before any Phase-2 build work. Three sessions later parts
+of its risk register were stale: **2.1a + 2.1b are COMPLETE** (`22bdc98`,
+`4122fda`; D-073–D-076) and **2.2 is IN FLIGHT** (STOP #1 dependency spike done
+and approved — D-077, drafted in the working tree, uncommitted). Rev 2 turns
+resolved risks into recorded outcomes with citations and spends its lines only
+where decisions remain. The external cryptographic audit stays the **mainnet**
+gate, owned externally — it does **not** block Phase-2 build work.
+**Scope:** SPEC §10's five Phase-2 tasks — `x/escrow` delivery conditions (2.1,
+**done**), CosmWasm/CVM integration with CONCLUDE + escrow bindings (2.2, **in
+flight**), the x402 gateway (2.3) and 7683 resolver (2.4) edge services, real
+USDC over IBC + a session-TWAP fee (2.5) — plus two numbered follow-on tasks:
+the matcher-richness hardening pass (2.6) and **NEW in Rev 2** the escrow
+consent-completeness pass (2.7, owning the D-075/D-076 FW seams). Exit: the
+§1.3 demo extended end-to-end across chains (§6 below).
+**Working method:** unchanged — one task per session with a stop-and-review and
+its own plan-stop decisions, each recorded in DECISIONS.md in the task that
+makes it. Where this doc names a version, the binding instruction remains
+"re-check the current release at task time" (FLAG D), except where a pin is now
+load-bearing and recorded (§4).
 
 ---
 
-## Three load-bearing flags surfaced up front
+## Section 0 — Scoreboard (result state, one line per task)
 
-SPEC §10 Phase-2 is five sentences. Four places where it is underspecified or
-carries dependency risk change the build plan and are recorded loudly here (and
-will be recorded in DECISIONS at the task that resolves each) rather than
-quietly reshaped:
+| Task | Deliverable | Status | Record |
+|---|---|---|---|
+| 2.1a | `x/escrow` HASHLOCK + OPTIMISTIC, ownership handoff, D5 ratified | **DONE** | `22bdc98`, D-073/074/075 |
+| 2.1b | ZK_DELIVERY (gnark groth16), buyer-side consent gate | **DONE** | `4122fda`, D-076 |
+| 2.2 | wasmd + CVM bindings (read-only CONCLUDE + escrow allowlist) | **DONE** — wasmd v0.54.9 wired, bindings + forge-prevention e2e green; localnet contract smoke deferred to the §6 exit demo (needs a CVM-schema contract binary) | D-077 + D-079 |
+| 2.3 | x402 gateway — in-repo deliverable = node-side surface contract | not started | artifact: `docs/edge/X402_SURFACE.md` |
+| 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | not started | artifact: `docs/edge/7683_SURFACE.md` |
+| 2.5 | IBC USDC + session-TWAP fee (swaps `window.go:138`); owns the NEXT v0.53 checkpoint | not started | — |
+| 2.6 | Matcher-richness hardening (5 matcher TODOs + flake-hardening item) | not started | — |
+| 2.7 | **NEW** — escrow consent completeness (FW-1 + FW-2 + timeouts→params) | not started | D-078 |
+| Exit | x402 → ZK-delivery → IBC-verified receipt demo | blocked on 2.2/2.3/2.5 | §6 |
 
-- **FLAG A — gnark (ZK_DELIVERY) may collide with the kyber pin.** The §6.5
-  `ZK_DELIVERY` class needs an on-chain groth16 verifier (gnark). gnark is
-  heavyweight and tends to track a recent Go toolchain. Task 1.3 (**D-066**)
-  deliberately held `drand/kyber` v1.3.1 + `kyber-bls12381` v0.3.1 by **avoiding
-  a go-1.24 toolchain bump** (pre-v0.3.4 kyber, `golang.org/x/*` unchanged) —
-  that pin is the foundation the whole Veil rests on. A gnark that forces a Go
-  bump can therefore ripple into the crypto foundation. Resolution: **isolate
-  `ZK_DELIVERY` into its own session (recommended split 2.1a / 2.1b)** and gate
-  it on a gnark-Go-floor spike whose failure mode is a STOP, not a workaround
-  (§2.1b). See also FLAG D.
-- **FLAG B — the v0.53 flip is DECIDE-WHEN-REACHED, not now.** SPEC §14 D8 /
-  **D-060** resolved "stay on SDK v0.50 through Phase 1" and named the
-  Phase-1→Phase-2 boundary (the wasmd task) as the re-evaluation point. The flip
-  conditions (a)/(b)/(c) depend on **then-current** block-sdk / ibc-go / wasmd
-  releases, which will have moved by the time 2.2 runs. This document records
-  *that the decision exists* and *that 2.2 is its trigger and owner* — it does
-  **not** pre-bake a v0.50-vs-v0.53 outcome (§2.2). 2.5 shares the IBC-line
-  sub-question (b).
-- **FLAG C — the edge services (2.3, 2.4) are SEPARATE-REPO deliverables.** Per
-  SPEC §9 both are off-chain gRPC clients of the node holding no
-  consensus-critical logic. They are **not** in-repo modules; the in-repo build
-  and `make test` must not expect their code. Their design-doc deliverable is the
-  **node-side gRPC surface** each depends on, recorded as a stable contract — the
-  service code and its tests live in `conclave-x402-gateway` /
-  `conclave-7683-resolver` (§2.3, §2.4).
-- **FLAG D — dependency currency is a per-task check.** wasmd, ibc-go, and gnark
-  all move fast. Every place this doc names a version, the binding instruction is
-  "**re-check the current release at task time**," not "use the version named
-  here" (those are recorded only to make the flip-conditions concrete, the same
-  way D-060 recorded its spike). The cross-cutting risk is the Go-toolchain-bump
-  interaction (gnark/wasmd vs the kyber pin) that FLAGs A and B both touch.
+**Exit-demo leg readiness (§6):** ZK_DELIVERY escrow leg **DONE** (end-to-end
+conditioned ZK CONCLUDE proven: both parties signing opens a funded escrow, a
+bound proof releases it — `TestConcludeConditioned_Zk`). CVM leg **DONE
+in-process** (2.2, D-079: a real contract releases a HASHLOCK escrow through
+the bindings under wasmvm; the LIVE-localnet slice moved to the demo itself,
+which owns the purpose-built CVM-schema demo contract). x402 ingress (2.3) and
+IBC settlement/receipt (2.5) not started. 2.4 and 2.6/2.7 are off the exit
+path.
+
+**Working-tree state Rev 2 reconciles (uncommitted, from the 2.2 session):**
+the D-077 draft in DECISIONS.md (placement fixed in this revision — it had been
+inserted mid-D-076); `go.mod`/`go.sum` dependency bumps (go directive
+1.23.0→1.23.2, iavl 1.2.2→**1.2.4**, math v1.4.0→v1.5.0, log v1.6.1, new
+indirects); three throwaway spike scripts (`scripts/_baseline.sh`,
+`_d060_spike.sh`, `_d060_spike2.sh` — untracked, delete or move out before the
+2.2 commit). **Live note (2026-07-02):** while Rev 2 was being written the 2.2
+session resumed — `wasmd v0.54.9` + `wasmvm/v2 v2.2.8` are now pinned (the
+D-077-recommended v0.54.x line) and app wiring is underway (`app/wasm.go`,
+`app/cvm/`, ante/app_config edits). The iavl bump sits on the state-commitment
+path — the §2.2 checklist's determinism re-baseline is still mandatory; since
+wiring has begun, any vector drift must be **bisected** (dep-bumps-only point
+vs wasmd wiring) rather than attributed wholesale.
 
 ---
 
-## Section 1 — Phase-2 dependency spine
+## The four load-bearing flags — Rev 2 disposition
 
-Phase 2 is sequenced by genuine dependency, mirroring SPEC §10's order:
+Rev 1 surfaced four places where SPEC §10 was underspecified or carried
+dependency risk. Two are now resolved with recorded outcomes; two remain live:
+
+- **FLAG A — gnark vs the kyber pin: RESOLVED (D-076, spike outcome (a)).**
+  gnark works on the CURRENT toolchain with **gnark v0.13.0 + gnark-crypto
+  v0.18.0 pinned** (floor go 1.23.0). The collision Rev 1 feared is real but
+  avoided, not gone: gnark v0.14.0 needs go 1.24.0 (the exact bump D-066
+  avoided) and v0.15.0 needs go 1.25.7. The determinism vector was re-run after
+  the dependency add and came back byte-identical. Consequence: the toolchain
+  ceiling is now guarded by **two** pins, not one (§4).
+- **FLAG B — the v0.53 flip: RESOLVED (D-077, 2.2 STOP #1).** Stay on SDK
+  v0.50 for Phase 2; integrate wasmd on the v0.50 line (recommended **wasmd
+  v0.54.x** — SDK v0.50.11 + ibc-go v8, matching our stack; v0.55.1 only at
+  the cost of a v8→v10 IBC major, a STOP #2 detail). The answer matches D-060
+  but the binding reason MOVED: flip-condition (a) still fails because
+  **block-sdk is frozen at v2.1.5 with no v0.53 path** (bumping means losing
+  the §6.7 laned mempool), and axis (e) showed the v0.53 wasmd line's current
+  patches (v0.61.14+) already require go 1.24 — one patch away from the kyber
+  collision. Condition (b) FLIPPED (ibc-go v10.3.0+ targets v0.53) but is moot
+  without (a); for 2.5, **ibc-go v8 is still maintained and suffices**. The
+  next v0.53 re-evaluation is re-pointed to 2.5's IBC-line check or a later
+  boundary (this also re-points TODO #5, §5).
+- **FLAG C — edge services (2.3, 2.4) are SEPARATE-REPO: still live.** Per
+  SPEC §9 both are off-chain gRPC clients holding no consensus-critical logic;
+  the in-repo build and `make test` must not expect their code. Rev 2 sharpens
+  the in-repo deliverable from "a recorded contract" to a **named artifact
+  each** (§2.3/§2.4) so "done" is checkable.
+- **FLAG D — dependency currency is a per-task check: still live, narrowed.**
+  The generic "re-check at task time" now has a hard boundary: any dependency
+  choice must clear the **two-pin go-1.23.x ceiling** (§4). D-077's spike table
+  is the current snapshot; 2.5 re-checks ibc-go at task time.
+
+---
+
+## Section 1 — Phase-2 dependency spine (updated)
 
 ```
-2.1 x/escrow ───────────────► 2.2 wasmd/CVM ──┐
-   (HASHLOCK→OPTIMISTIC          (CONCLUDE +    │
-    →ZK_DELIVERY)                 escrow         │
-        │                         bindings)      │
-        │                            │           │
-        │   ┌────────────────────────┘           │
-        ▼   ▼                                     ▼
-   2.3 x402 gateway        2.4 7683 resolver   2.5 IBC USDC + session-TWAP fee
-   (separate repo)         (separate repo)     (shares IBC line with 2.2)
-        └───────────────┬──────────────────────────┘
+2.1 x/escrow ✅ DONE ─────────► 2.2 wasmd/CVM ◄── IN FLIGHT ──┐
+   (HASHLOCK+OPTIMISTIC           (CONCLUDE + escrow           │
+    D-073/074/075;                 bindings; D-060 re-eval      │
+    ZK_DELIVERY D-076)             DONE = D-077)                │
+        │                            │                          │
+        │   ┌────────────────────────┘                          │
+        ▼   ▼                                                   ▼
+   2.3 x402 gateway        2.4 7683 resolver     2.5 IBC USDC + session-TWAP fee
+   (separate repo)         (separate repo)       (ibc-go v8 suffices, D-077;
+        │                        │                owns next v0.53 checkpoint)
+        └───────────────┬────────┴──────────────────────┘
                         ▼
-        2.6 matcher-richness hardening pass (owns the latent matcher TODOs)
+        2.6 matcher-richness hardening (5 matcher TODOs + flake item)
+                        ▼
+        2.7 escrow consent completeness (FW-1 + FW-2; off the exit path)
                         ▼
         Phase-2 exit demo (§6): x402 → ZK-delivery → IBC-verified receipt
 ```
 
-- **2.2 depends on 2.1** — the CVM custom bindings expose escrow msgs, which must
-  exist first. 2.2 also owns the **D-060 v0.53 re-evaluation** (FLAG B).
-- **2.3 / 2.4 depend on the node's gRPC surface only** (FLAG C); they can be
-  built in their own repos against a running node once that surface is stable.
+- **2.2 depended on 2.1** — satisfied; the escrow msg surface the bindings
+  expose now exists (`MsgReleaseEscrow` / `MsgRaiseDispute` /
+  `MsgSubmitDeliveryProof`, live since 2.1).
+- **2.3 / 2.4 depend on the node's gRPC surface only** (FLAG C); buildable in
+  their own repos against a running node once the surface contract is written.
   2.3 settles in `uusdc` and runs on mock USDC until 2.5 brings the real denom.
-- **2.5 shares the IBC-line question (b) with 2.2** and swaps the fee seam
-  (`window.go:138`).
-- **2.6 is independent of the commerce/edge work** and is sequenced last so the
-  risky consensus-matcher changes land in one determinism-focused session.
+- **2.5** swaps the fee seam (`window.go:138`) and — per D-077 — inherits the
+  next v0.53/ibc-line re-evaluation checkpoint.
+- **2.6 and 2.7 are independent of the commerce/edge work** and off the exit
+  path; sequenced last so risky consensus-matcher changes (2.6) and proto/
+  consent changes (2.7) each land in one determinism-focused session.
 
 ---
 
 ## Section 2 — Per-task design
 
-Each task is one working session with a stop-and-review and its own plan-stop
-decisions, mirroring SPEC §10 and PHASE1_DESIGN §5. State machines carry an
-explicit §11.2 transition-table acceptance criterion (illegal transitions
-provably impossible).
+### 2.1 — `x/escrow` delivery conditions — ✅ COMPLETE (as built)
 
-### 2.1 — `x/escrow`: delivery conditions (HASHLOCK / OPTIMISTIC / ZK_DELIVERY)
+Both sessions done: **2.1a** (`22bdc98`, D-073/074/075) and **2.1b**
+(`4122fda`, D-076). `make lint test` + determinism vector green at each close.
+What shipped, and where it deviated from Rev 1's plan (the deltas are the
+valuable part — they correct assumptions the next tasks might otherwise
+inherit):
 
-**What it is.** Stand up the `x/escrow` module for real: keeper, `AppModule`,
-msg server, genesis, and EndBlock sweeps. The error codespace `15xx` is already
-reserved (CLAUDE.md §13). The protos already exist and are generated —
-`escrow.proto` (the `DeliveryCondition` oneof, the `EscrowState` enum
-`UNSPECIFIED/ACTIVE/RELEASED/REFUNDED/DISPUTED`, the `Escrow` record),
-`tx.proto` (`MsgReleaseEscrow` / `MsgRaiseDispute` / `MsgSubmitDeliveryProof`),
-`query.proto`, `genesis.proto`. 2.1 writes the **logic** SPEC §6.5 deferred:
-the three condition classes as state machines, the record-ownership handoff from
-x/session, the reputation dispute hook, and the D5 dispute-model ratification.
+**As built (2.1a — HASHLOCK + OPTIMISTIC, D-073).** Full module: keeper,
+`AppModule`, msg server, query, genesis, EndBlock sweep; codespace `15xx`. A
+**single authoritative transition gate (`nextState`)** backs an exhaustive
+§11-rule-2 transition-table test — every illegal transition is a load-bearing
+REJECT, covering all three classes after 2.1b. Funding = payment-into-escrow
+(buyer pays in; seller paid on release; buyer refunded on timeout/lost
+dispute). OPTIMISTIC seller bond = 10%, returned on honest delivery,
+slashed-to-buyer + `PenalizeLostDispute` on a lost dispute (the reputation
+hook is wired). Dispute = seller-reveal of the **buyer-agreed**
+`DataGrant.ContentHash` (rule-3-enforced, not seller-supplied). Deterministic
+height-keyed sweep, ordered after x/session. **D5 ratified as narrowed:**
+hash-mismatch challenge + seller bond only; subjective arbitration out of
+scope.
 
-**Dependencies.**
-- **Session-store escrow stubs** — `conclude.go:152` `openEscrowStub` writes a
-  Phase-0 escrow entry per DataGrant leg (key `0x09|chamber|escrow_id`, state
-  ACTIVE, no release logic) into the **x/session** store (D-045). The
-  `CONCLAVE-TODO(phase-2)` there says "x/escrow takes ownership of these records
-  and adds HASHLOCK/OPTIMISTIC/ZK_DELIVERY resolution." This is the ownership
-  handoff 2.1 closes.
-- **Reputation dispute hook** — `x/sigil/keeper/reputation.go`
-  `PenalizeLostDispute` is already authored ("Called by x/escrow dispute
-  resolution (Phase 2)"); 2.1 wires the OPTIMISTIC dispute path to it.
-- **x/receipt** reads escrow/receipt records (D-045) and must keep working across
-  the ownership handoff (ICS-23 proofs unaffected).
-- Phase-1 complete (the Veil is real; DataGrant legs flow through a real Reveal).
+**As built (2.1b — ZK_DELIVERY, D-076).** `crypto/zkdelivery`: BN254 groth16
+`DeliveryCircuit` (MiMC) proving `MiMC(payload) == schema_commitment` bound to
+the escrow id. **vk_id registry = COMPILED-IN** (`//go:embed` VK, 396 B; PK
+116 KB test-only in `zktest`, never in the consensus binary). **Replay defense
+is instance-bound:** the verifier reconstructs the public witness (escrow id +
+signed `schema_commitment`) from the RECORD, never from the submitter — a
+proof for escrow A is rejected against escrow B (watched test); same-instance
+replay → `ErrTerminalState`. Timeout = compile-time constant
+`ZkDeliveryTimeoutBlocks` (no proto change — scope discipline; see 2.7).
+On-chain there is only `groth16.Verify` (fixed VK, randomness-free,
+recover→INVALID, never panics on adversarial proof bytes).
 
-**Acceptance criteria.**
+**Two consent invariants Rev 1 did not plan (found during build — protect them
+in 2.2's bindings and 2.6's matcher work):**
+- **D-075 — seller-signed condition.** A delivery condition is solver-attached
+  (`IntentLeg` has no condition field), so it is bound to the seller's SIGNED
+  `IntentPayload.condition` at BOTH solution-validation and the settlement
+  boundary (`ErrConditionNotConsented`, fail-closed). An untrusted solver
+  cannot impose a delivery obligation/bond the seller never signed.
+- **D-076 — buyer-side consent for ZK.** ZK release is seller-driven on an
+  advance-committed schema untethered to the buyer's want, so for ZK the BUYER
+  must ALSO sign the exact condition (both chokepoints, fail-closed →
+  fallback). ZK-only; the HASHLOCK/OPTIMISTIC class/window-level buyer consent
+  is deferred as **FW-1** (→ 2.7).
 
-1. **Module wired:** keeper + `AppModule` + msg server + genesis registered in
-   `app/`; `15xx` errors in `x/escrow/types/errors.go`; every exported keeper
-   method cites its SPEC §6.5 clause (§13).
-2. **HASHLOCK state machine (§11.2 transition table):**
+**Plan-vs-built corrections (Rev 1 claims now known wrong or superseded):**
+- The ownership handoff chose **writer-going-forward** (x/session stops
+  writing `0x09`; `conclude.go:152` TODO closed), not in-place migration.
+- Rev 1's dependency claim "x/receipt reads escrow records and must keep
+  working across the handoff" was **false** — x/receipt never read escrows;
+  the handoff had no receipt-side constraint.
+- **D-074 (recorded limitation):** conditioned escrows require an unambiguous
+  **bilateral** match; multi-party conditioned graphs are out of 2.1's scope
+  (FW-2's per-leg field is the seam that could relax this — a 2.7 plan-stop
+  question).
+- The conservation-gate ZK rejection (`ErrConditionsNotEnabled`) is LIFTED —
+  all three classes enabled; conservation no longer polices conditions.
 
-   | From | Event | To | Guard |
-   |---|---|---|---|
-   | ACTIVE | `MsgReleaseEscrow{preimage}` | RELEASED | `H(preimage) == payload_hash` ∧ height < timeout |
-   | ACTIVE | EndBlock sweep | REFUNDED | height ≥ `created_height + timeout_blocks` |
+**Forward obligations opened by 2.1 (each has an owner):**
+- **FW-1 + FW-2 → task 2.7** (buyer consent for HASHLOCK/OPTIMISTIC; per-leg
+  `IntentLeg.condition` proto refinement).
+- **Flake-hardening → 2.6-adjacent:** `TestIssueMandateReplace` flaked once on
+  a `randAddr()`-seeded fixture (`x/mandate/keeper/keeper_test.go:101`,
+  `secp256k1.GenPrivKey()` per call); not a 2.1b regression (proven); fix =
+  deterministic fixture seeding, folded into 2.6's determinism session.
+- **Mainnet gates (NOT phase exit):** VK trusted-setup MPC ceremony (embedded
+  VK is single-party dev `groth16.Setup`); circuit soundness/completeness
+  audit (MiMC opening + EscrowID public-input binding); gnark-verifier-in-
+  consensus audit unit. All carried to the 1.8-style audit scope.
+- **Richer typed-schema circuit** (structural conformance, multi-field/Merkle
+  payloads) — recorded forward item, Phase-3 candidate; the demo does not need
+  it.
 
-   Illegal (asserted impossible): release with wrong preimage; release at/after
-   timeout; `MsgRaiseDispute` on a HASHLOCK; release from RELEASED/REFUNDED
-   (double-release / post-refund).
-3. **OPTIMISTIC state machine (§11.2 transition table):**
-
-   | From | Event | To | Guard |
-   |---|---|---|---|
-   | ACTIVE | EndBlock sweep | RELEASED | height ≥ `created_height + dispute_window_blocks` ∧ no dispute |
-   | ACTIVE | `MsgRaiseDispute` | DISPUTED | height < window end |
-   | DISPUTED | hash-mismatch proven | REFUNDED | + seller-bond slash + `PenalizeLostDispute` |
-   | DISPUTED | challenge fails (hash matches) | RELEASED | — |
-
-   Illegal: dispute after the window; auto-release while DISPUTED; double-dispute;
-   release/refund from a terminal state.
-4. **ZK_DELIVERY state machine (§11.2 transition table):**
-
-   | From | Event | To | Guard |
-   |---|---|---|---|
-   | ACTIVE | `MsgSubmitDeliveryProof{proof}` | RELEASED | groth16 verifies `proof` under `vk_id` over `schema_commitment` |
-   | ACTIVE | EndBlock sweep | REFUNDED | timeout reached, no valid proof |
-
-   Illegal: release without a proof; release on an invalid proof; replay of a
-   spent proof; release from a terminal state.
-5. **Record-ownership handoff:** the `conclude.go:152` TODO is closed — escrow
-   records are owned by `x/escrow` (the chosen mechanism is a 2.1 plan-stop
-   decision, below); x/receipt's reads and ICS-23 proofs still resolve.
-6. **Determinism + safety:** groth16 verification and preimage hashing are
-   fresh-randomness-free and deterministic on-chain (§11.6); every
-   `MsgSubmitDeliveryProof` / `MsgReleaseEscrow` proof/preimage path wraps
-   `recover → INVALID` and never panics on user input (§11.5 — a panic here is a
-   release blocker).
-7. `make lint test` green; per-keeper table tests (happy + ≥2 failure paths) and
-   the three transition tables present (§11.1–§11.2).
-
-**Decisions for the 2.1 plan-stop.**
-- **D5 ratification (DECISIONS entry when 2.1 runs):** OPTIMISTIC dispute
-  resolution is **hash-mismatch challenge + seller bond only**; subjective
-  arbitration is explicitly out of scope (SPEC §14 D5 default). Ratified, not
-  re-opened.
-- **Ownership-handoff mechanism:** in-place migration of the `0x09` session-store
-  stubs into an x/escrow store at the upgrade boundary, **vs.** x/escrow becomes
-  the writer from `conclude.go` going forward (session stops writing `0x09`).
-  Whichever is chosen must keep x/receipt's reads valid.
-- **Seller-bond source and sizing** for the OPTIMISTIC dispute slash (does the
-  bond come from the escrowed `amount`, a separate seller bond posted at escrow
-  creation, or the intent bond?) and the slash fraction.
-- **Hashlock hash function + preimage encoding** (`payload_hash` is `bytes`; pin
-  the hash and the receipt-of-access encoding).
-- **`vk_id` registry:** where verification keys live — a genesis param map, an
-  on-chain registry msg, or a compiled-in set — and whether `vk_id` is
-  governance-gated.
-- **Timeout / auto-refund sweep:** the `(state, timeout_height)` index and the
-  EndBlock sweep that fires HASHLOCK/ZK refunds and OPTIMISTIC auto-releases
-  deterministically (§5.2/§5.3 index discipline).
-- **Session split (recommend-and-confirm, see 2.1a/2.1b):** confirm at the
-  plan-stop whether `ZK_DELIVERY` is its own session, gated on the gnark spike.
-
-#### 2.1a — HASHLOCK + OPTIMISTIC (recommended first session)
-
-Pure in-repo work on the stable v0.50 baseline: no new heavyweight dependency,
-no toolchain risk. Delivers the module skeleton, the ownership handoff, the
-reputation-hook wiring, the D5 ratification, and the first two condition-class
-state machines (HASHLOCK, OPTIMISTIC) with their §11.2 transition tables. This
-is the session that follows directly from the approved doc.
-
-#### 2.1b — ZK_DELIVERY (separate session, gnark-spike-gated)
-
-`ZK_DELIVERY` adds the gnark groth16 verifier — the one Phase-2 dependency that
-can collide with the crypto foundation (FLAG A). 2.1b **begins** with a
-throwaway spike establishing gnark's Go-toolchain floor and its interaction with
-the D-066 kyber pin (`kyber-bls12381` v0.3.1, held by avoiding a go-1.24 bump).
-The spike's outcome branches the session, and the failure mode is a **STOP**,
-not a workaround — a dependency conflict with the foundation the whole Veil
-rests on is a decision, not an obstacle to route around:
-
-- **(a) gnark works on the current toolchain** (no Go bump, kyber pin intact) →
-  **proceed.** Implement the verifier, the `vk_id` registry, and the
-  ZK_DELIVERY state machine.
-- **(b) gnark needs a newer Go that kyber also tolerates** → **proceed with the
-  bump, recorded.** Note the toolchain change in DECISIONS, re-run the
-  determinism vector + the full crypto suite to confirm the kyber path is
-  byte-identical under the new toolchain, then implement.
-- **(c) gnark needs a Go that BREAKS the kyber pin** → **STOP and decide.**
-  Surface the conflict as a plan-stop decision with options — a different/older
-  gnark line, a kyber version that tolerates the new toolchain (re-validating the
-  threshold-encryption construction against any kyber API change), or **defer
-  ZK_DELIVERY** to a later session/Phase-3 with the foundation untouched. Do not
-  push the bump through against the crypto pin.
-
-Acceptance for 2.1b is the ZK_DELIVERY transition table (above) + a determinism
-re-confirmation of the crypto path under whatever toolchain the spike selects.
-
-### 2.2 — wasmd + CVM custom bindings
+### 2.2 — wasmd + CVM custom bindings — DONE (D-077 + D-079; resume checklist retired, outcomes in D-079)
 
 **What it is.** Integrate CosmWasm (`wasmd`) and expose CONCLUDE + escrow to
-contracts via custom bindings. SPEC §0 names the contract runtime **CVM**; the
-seam is `session/types/tx.pb.go:322` — "`MsgConclude` … authority must be the
-module authority; CONCLAVE-TODO(phase-2): exposed to CVM via custom bindings."
-2.2 also **owns the D-060 v0.53 re-evaluation** (FLAG B): the wasmd integration
-is exactly the dependency revisit D-060 named as its trigger.
+contracts via custom bindings; the seam is `session/types/tx.pb.go:322`
+(`MsgConclude` is module-authority-only; "exposed to CVM via custom
+bindings"). 2.2 owned the D-060 v0.53 re-evaluation — **that STOP is done**.
 
-**Dependencies.** 2.1 (escrow msgs must exist for the bindings to expose); the
-D-060 flip-condition inputs (then-current block-sdk / ibc-go / wasmd).
+**STOP #1 result (D-077, approved, drafted uncommitted).** Stay on SDK v0.50:
+keep cosmos-sdk v0.50.x, block-sdk/v2 v2.1.5, ibc-go v8, the goleveldb pin, go
+1.23.x, and the sigverify fork (D-027/D-026). Decisive: block-sdk is frozen at
+v2.1.5 (no v0.53 path — a bump forfeits the laned mempool), and the v0.53
+wasmd line's current patches need go 1.24 (kyber collision). Recommended wasmd
+line: **v0.54.x** (SDK v0.50.11, ibc-go v8, go floor 1.23.1–1.23.6 —
+two-pin-safe). The sigverify-fork retirement re-points forward to 2.5-or-later.
 
-**Acceptance criteria (shape — the dependency outcome is spike-gated).**
-1. **D-060 spike-then-decide (first sub-task, FLAG B):** re-check D-060's three
-   flip conditions against **then-current** releases — (a) an MVS-clean block-sdk
-   release targeting SDK v0.53 exists; (b) a v0.53-compatible ibc-go line is
-   adopted (shared with 2.5); (c) the D-057 sim/FinalizeBlock lifecycle is intact
-   or cheaply replaced. Record the result as a **new DECISIONS entry updating
-   D-060** — the doc does not pre-bake the outcome. The decision is "v0.50 vs
-   v0.53 for Phase 2," made on data current at task time.
-2. **wasmd wired** on whichever SDK line the spike selects, with the laned
-   mempool (§6.7) and determinism (§11.6) preserved; full regression of the
-   Phase-0/1 suites on the chosen dependency baseline.
-3. **CVM custom bindings:** a contract can query open sessions / receipts and
-   invoke escrow msgs, under a **re-examined CONCLUDE authority model** —
-   `MsgConclude` is module-authority-only today; bindings must not let an
-   arbitrary contract forge a CONCLUDE (the all-or-nothing settlement invariant,
-   §6.4, must hold). Gas metering defined for CVM → native-module calls.
-4. `make lint test` green on the chosen dependency baseline.
+**Resume checklist (in order — each step gates the next):**
+1. **Commit hygiene:** land D-077 (placement fixed by Rev 2) as the STOP-#1
+   record; delete/relocate the throwaway `scripts/_baseline.sh` /
+   `_d060_spike*.sh` before the task commit.
+2. **Determinism re-baseline BEFORE wasmd wiring.** The working tree already
+   carries iavl 1.2.2→**1.2.4** + math v1.5.0 + log v1.6.1 (MVS pre-pulls;
+   wasmd not yet added). iavl is on the state-commitment path: run
+   `make lint test` + the determinism vector on the dep-bumped tree in
+   isolation, so any drift is attributable to the bumps and not to wasmd. If
+   the vector shifts, that is a STOP (re-baseline is a recorded decision, not
+   a silent re-pin). *Live note: wiring began while Rev 2 was written — if the
+   vector is first run after wiring, bisect any drift between the
+   dep-bumps-only point and the wasmd point instead.*
+3. **Pin wasmd v0.54.x** (confirm current patch at resume time — FLAG D; check
+   its go floor stays ≤1.23.x, the §4 ceiling) and wire keeper/`AppModule`,
+   preserving the block-sdk laned mempool (§6.7). Plan-stop: which lane wasm
+   txs ride.
+4. **CVM custom bindings (STOP #2 — the remaining plan-stop):** contract
+   queries for open sessions/receipts + escrow msg invocation under a
+   re-examined CONCLUDE authority model — bindings must not let an arbitrary
+   contract forge a CONCLUDE (§6.4 all-or-nothing holds) **or bypass the
+   D-075/D-076 consent gates** (a contract-submitted condition is still
+   solver-attached from the chain's view; the signed-consent chokepoints must
+   hold for contract-originated flows). Gas metering for CVM → native calls.
+   STOP #2 also fixes v0.54-vs-v0.55 and the binding surface.
+5. **Regression + demo hook:** full Phase-0/1 suites + determinism vector on
+   the final baseline; `scripts/localnet4.sh` smoke where a contract invokes
+   an escrow release via the binding (this is the 2.2 slice of the §6 exit
+   demo).
 
-**Decisions for the 2.2 plan-stop.**
-- **v0.50 vs v0.53** (the re-evaluated D-060), with the spike data attached.
-- **wasmd version** + whether it forces a Go-toolchain bump (FLAG A adjacency —
-  if 2.1b already bumped, this is consistent; if not, re-check against the kyber
-  pin).
-- **Binding surface + contract-permission model:** which msgs/queries are
-  exposed, and the authority model that prevents contract-forged CONCLUDE/escrow.
-- **Gas metering** for contract calls into native modules.
+**Acceptance criteria (updated).** (1) ~~D-060 spike~~ **done** (D-077).
+(2) wasmd wired on v0.50/v0.54.x, laned mempool + determinism preserved, full
+regression green. (3) Bindings live under the authority + consent model above,
+gas metering defined. (4) `make lint test` green on the final baseline.
 
 ### 2.3 — x402 gateway (SEPARATE REPO: `conclave-x402-gateway`)
 
-**What it is.** An off-chain x402 facilitator (SPEC §9). Outward it speaks
-Coinbase's x402 HTTP handshake (402 → `X-PAYMENT` → verify → `X-PAYMENT-RESPONSE`);
-inward it submits intents/transfers on Conclave on behalf of the paying agent,
-**fronts gas** (gasless for clients), and settles in `uusdc`. Stateless except a
-hot wallet + replay-nonce store. **This is a separate-repo deliverable** (FLAG
-C) — an off-chain gRPC client, not an in-repo module; the in-repo build does not
-expect its code.
+**What it is.** An off-chain x402 facilitator (SPEC §9): outward the Coinbase
+x402 HTTP handshake (402 → `X-PAYMENT` → verify → `X-PAYMENT-RESPONSE`);
+inward it submits intents/transfers on behalf of the paying agent, fronts gas
+(gasless clients), settles in `uusdc`. Stateless except a hot wallet +
+replay-nonce store. Separate-repo (FLAG C).
 
-**Dependencies (node-side surface this design records as a stable contract).**
-- Tx submission for `MsgSubmitIntent` (and transfers) on behalf of a paying
-  agent, via a **Mandate-bound gateway key** (the §6.2 ante enforces the ceiling;
-  fee-abstraction, §6.2 `FeeAbstractionDecorator`, lets the gateway front gas).
-- Intent / session / receipt **gRPC queries** (§6.6 `Receipts`, `Receipt`,
-  `ReceiptProof`) for outward `X-PAYMENT-RESPONSE` settlement confirmation.
-- `uusdc` settlement denom (mock until 2.5 supplies the real IBC USDC denom).
+**In-repo deliverable (sharpened): `docs/edge/X402_SURFACE.md`** — the
+node-side surface contract, now written against msgs that exist:
+- `MsgSubmitIntent` (+ transfers) via a **Mandate-bound gateway key** (§6.2
+  ante enforces the ceiling; `FeeAbstractionDecorator` lets the gateway front
+  gas). The intent carries a `spend_commitment` (D-065) the gateway derives
+  from the quoted price.
+- gRPC queries: intent/session state + §6.6 `Receipts` / `Receipt` /
+  `ReceiptProof` for `X-PAYMENT-RESPONSE` settlement confirmation.
+- `uusdc` settlement denom (mock until 2.5 supplies the real IBC denom — the
+  contract doc names the denom as a parameter, not a constant).
 
-**Acceptance criteria.** The design doc's in-repo deliverable for 2.3 is the
-**node-side gRPC surface contract** (the bullets above), confirmed stable and
-documented for the separate-repo team. The gateway's own implementation and
-tests live in `conclave-x402-gateway` and are **not** part of `make test`.
+**Acceptance.** The surface doc exists, is confirmed stable against a running
+node (each named endpoint exercised once by script), and is the interface the
+separate repo builds against. Gateway implementation/tests are NOT in
+`make test`.
 
-**Decisions for the 2.3 plan-stop (most live in the gateway repo).** Hot-wallet +
-replay-nonce model; which Mandate-bound key the gateway operates under and its
-ceiling; the gas-fronting accounting (how fronted CLV gas reconciles against
-`uusdc` settlement).
+**Plan-stop decisions (mostly gateway-repo):** hot-wallet + replay-nonce
+model; which Mandate-bound key + ceiling; gas-fronting accounting (fronted CLV
+vs `uusdc` settlement reconciliation).
 
 ### 2.4 — 7683 resolver (SEPARATE REPO: `conclave-7683-resolver`)
 
-**What it is.** Consumes ERC-7683 orders from EVM origin chains, translates them
-into `SealedIntent`s (the resolver pattern — 7683 standardizes how solvers
-consume orders, not the settlement venue), and posts fills back via a
-per-origin-chain verification bridge (SPEC §9). **Separate-repo** (FLAG C),
-off-chain gRPC client; not an in-repo module.
+**What it is.** Consumes ERC-7683 orders from EVM origin chains, translates
+them into `SealedIntent`s, posts fills back via a per-origin-chain
+verification bridge (SPEC §9). Separate-repo (FLAG C).
 
-**Dependencies (node-side surface this design records).**
-- `MsgSubmitIntent` submission (the translated SealedIntent), including a
-  `spend_commitment` derived from the 7683 order (§4/D-065 — the commitment is
-  the give-leg upper bound the ante binds).
-- The receipt / ICS-23 **proof surface** (§6.6 `ReceiptProof`) so a settled fill
-  can be proven back to the origin-chain bridge.
+**In-repo deliverable (sharpened): `docs/edge/7683_SURFACE.md`** —
+- `MsgSubmitIntent` submission for the translated intent, including the
+  7683-order → `spend_commitment` mapping (§4/D-065) and — new since Rev 1 —
+  the **condition-consent rule**: if the translated intent carries a delivery
+  condition, the D-075/D-076 signing requirements apply to the translated
+  payload (the resolver signs what its principal authorized, or submits
+  unconditioned).
+- The receipt / ICS-23 proof surface (§6.6 `ReceiptProof`) for fill-back
+  verification on the origin chain.
 
-**Acceptance criteria.** The in-repo deliverable is the node-side surface
-contract (submission + receipt proofs for fill-back verification); the resolver
-implementation and tests live in `conclave-7683-resolver` and are not part of
-`make test`.
+**Acceptance.** Surface doc exists and is exercised as in 2.3. Resolver code
+lives in its own repo, not in `make test`.
 
-**Decisions for the 2.4 plan-stop (most in the resolver repo).** Per-origin-chain
-bridge mechanism; the 7683-order → SealedIntent translation, including how the
-order's value maps to `spend_commitment` and which counterparty class it targets.
+**Plan-stop decisions (mostly resolver-repo):** per-origin-chain bridge
+mechanism; order→intent translation incl. value→`spend_commitment` and target
+counterparty class.
 
 ### 2.5 — Real USDC via IBC + session-TWAP fee
 
-**What it is.** Two coupled changes. (1) Replace mock `uusdc` with **real USDC
-over IBC** (an `ibc/<hash>` denom). (2) Replace the **fixed
-`fee_conversion_rate`** in the §6.2 `FeeAbstractionDecorator` with a **TWAP
-derived from session clearing prices** — the seam is `mandate/keeper/window.go:138`:
-"task 2.5 replaces the fixed `fee_conversion_rate` with a TWAP from session
-clearing prices."
+**What it is.** (1) Replace mock `uusdc` with real USDC over IBC
+(`ibc/<hash>` denom). (2) Replace the fixed `fee_conversion_rate` in the §6.2
+`FeeAbstractionDecorator` with a TWAP from session clearing prices — seam
+`mandate/keeper/window.go:138`. **New in Rev 2:** per D-077, 2.5 also owns the
+**next v0.53 re-evaluation checkpoint** (the sigverify-fork TODO #5 re-points
+here) — re-run the D-077-style empirical spike at task time; if block-sdk is
+still frozen, record and move on (five minutes, not a session).
 
-**Dependencies.** An IBC line — **shares sub-question (b) with 2.2** (a
-v0.53-compatible ibc-go adoption, if 2.2 flipped; otherwise the v0.50 ibc-go v8
-line). Session `clearing_prices` (already written on receipts, §6.6). The
-`ExecuteFeeAbstraction` seam (`window.go`).
+**Dependencies.** IBC line: **ibc-go v8 suffices and is still maintained
+(D-077)** — the v10 line is NOT required; confirm the v8 patch current at task
+time. Session `clearing_prices` (already on receipts, §6.6). The
+`ExecuteFeeAbstraction` seam.
 
 **Acceptance criteria.**
-1. **IBC USDC:** an IBC transfer channel brings real USDC; the `ibc/<hash>` denom
-   is plumbed through the mandate ceilings and the price source that value it.
-2. **Session TWAP:** `fee_conversion_rate` is derived from session clearing
-   prices over a window, computed **float-free** (`sdk.Dec` / `math.Int`,
-   §11.6), deterministic, and persisted/queryable.
-3. **Seam swap:** `ExecuteFeeAbstraction` (`window.go:138`) consumes the TWAP
-   instead of the fixed param; the `CONCLAVE-TODO(phase-2)` there is closed.
-4. **Cold-start:** the TWAP needs price history — fall back to the fixed rate
-   until enough sessions have cleared (a defined warm-up), deterministically.
-5. `make lint test` green; TWAP math has its own determinism test.
+1. **IBC USDC:** a transfer channel brings real USDC; the `ibc/<hash>` denom
+   is plumbed through mandate ceilings and the price source valuing it.
+2. **Session TWAP:** `fee_conversion_rate` derived from clearing prices over a
+   window, float-free (`sdk.Dec`/`math.Int`, §11.6), deterministic,
+   persisted/queryable.
+3. **Seam swap:** `ExecuteFeeAbstraction` consumes the TWAP; the
+   `window.go:138` TODO closes.
+4. **Cold-start:** deterministic fixed-rate fallback until a defined warm-up
+   of cleared sessions exists.
+5. **Skim coherence re-check (owed to 2.6's #10):** confirm the D-051
+   numeraire-only skim narrowing is still coherent under the TWAP fee source.
+6. `make lint test` green; TWAP math has its own determinism test.
 
-**Decisions for the 2.5 plan-stop.**
-- **TWAP window length** and which price pair(s) it averages (USDC/CLV).
-- **Cold-start bootstrap** threshold and the fixed-rate fallback semantics.
-- **IBC version** (shared with 2.2's sub-question (b)).
-- **Denom + price-source handling:** real `ibc/<hash>` USDC vs the mock-`uusdc`
-  migration, and whether real USDC changes the `FaceValuePriceSource` story
-  (AUDIT F-2/F-3; the D-044 price-source swap remains a separate, non-2.5 task
-  unless 2.5's denom work forces it — flag, don't silently expand).
+**Plan-stop decisions.** TWAP window + price pair(s) (USDC/CLV); cold-start
+threshold/fallback semantics; ibc-go v8 patch; denom/price-source handling —
+real-USDC vs `FaceValuePriceSource` (AUDIT F-2/F-3; the D-044 price-source
+swap stays a separate task unless the denom work forces it — flag, don't
+silently expand); the v0.53 checkpoint result.
 
-### 2.6 — Matcher-richness hardening pass (owns the latent matcher TODOs)
+### 2.6 — Matcher-richness hardening pass
 
-**What it is.** A single, determinism-focused session that owns the five latent
-`CONCLAVE-TODO(phase-2)` markers in the matching engine (§5 disposition table).
-These are matching-engine **richness** items sitting on consensus-critical
-(`fallback`, `solution`, `skim`) or solver (`cycles`) code — not one of SPEC
-§10's five named tasks, and not a dependency of the commerce/edge tasks.
-Clustering them keeps risky consensus-matcher changes out of the commerce tasks
-("don't stack hard things") and lets one session re-run the determinism gate
-over the whole matcher-richness surface at once.
+**What it is (unchanged in substance).** One determinism-focused session
+owning the five latent matcher `CONCLAVE-TODO(phase-2)` markers (§5): partial-
+fill/cycle-aware fallback, partial-fill cycles + alternate numeraire
+anchoring, §5.1 limit-rate honoring, multi-intent-per-sigil, multi-asset
+in-kind skim + in-kind payout. All behind the **same `validateSolution` bar**
+and the **same determinism vector** (§11.3) guarding the matcher today.
+**Added in Rev 2:** the flake-hardening item from D-076 (deterministic fixture
+seeding for `x/mandate/keeper` `randAddr()`, `keeper_test.go:101`) rides along
+— it is test-harness determinism discipline, this session's theme.
+**Constraint to respect:** matcher changes that touch conditioned legs must
+preserve the D-074 bilateral constraint and the D-075/D-076 consent gates
+(multi-intent/partial-fill must not create a path where a condition settles
+against a non-signer) — if a richness item collides with D-074, the resolution
+belongs to 2.7's FW-2, not to an ad-hoc 2.6 carve-out.
 
-**Dependencies.** Independent of 2.1–2.5; sequenced after them so the commerce
-work lands first. (#10's multi-asset skim carries a cross-reference to 2.5 — see
-§5.)
+**Acceptance (one-line shape, expanded at its plan-stop).** The five TODOs
+implemented; every node computes the richer matcher identically; determinism
+harness (1.0) green over the new surface; the flake fix in.
 
-**Acceptance criteria (one-line shape, to be expanded at its own plan-stop).**
-The five matcher TODOs (partial-fill/cycle-aware fallback, partial-fill cycles +
-alternate numeraire anchoring, §5.1 limit-rate honoring, multi-intent-per-sigil,
-multi-asset in-kind skim + in-kind payout) implemented behind the **same
-`validateSolution` bar** and the **same determinism vector** (§11.3) that guard
-the matcher today — every node computes the richer matcher identically; the
-determinism harness (1.0) is green over the new surface. This is the gate the
-clustering buys.
+### 2.7 — Escrow consent completeness (NEW in Rev 2; owns the D-075/076 FW seams)
 
----
+**What it is.** The deliberate scope-discipline deferrals from 2.1 become a
+numbered task so they are a ledger entry, not a floating phrase (the same
+discipline that created 2.6):
+- **FW-1 — buyer-side consent for HASHLOCK / OPTIMISTIC** (class/window-level
+  form; ZK's exact-param buyer gate shipped in 2.1b). HASHLOCK's
+  `payload_hash` is a post-delivery token the buyer cannot pre-commit, and
+  OPTIMISTIC's committed hash IS the buyer-tied `DataGrant.ContentHash` — so
+  their consent form is class/window-level, not exact-param.
+- **FW-2 — per-leg `IntentLeg.condition` proto refinement**, replacing the
+  single signed `IntentPayload.condition` chokepoint with a per-leg field.
+  Plan-stop question: whether FW-2 relaxes the D-074 bilateral constraint
+  (multi-party conditioned graphs) or explicitly keeps it.
+- **Escrow timeouts → params:** promote `ZkDeliveryTimeoutBlocks` (and the
+  other compile-time timeout/bond constants, D-073/D-076 posture) to module
+  `Params` — a plan-stop decision, not presumed.
 
-## Section 3 — §11.2 transition-table requirement (why escrow gets three tables)
+**Sequencing.** Off the exit path; after 2.6 (proto change + consent-gate
+rework each demand their own determinism re-run; don't stack them under the
+matcher session). If 2.6 hits the D-074 collision above, 2.7 can be pulled
+earlier — that is a re-sequencing decision to record, not improvise.
 
-SPEC §11.2 requires every state machine — "intent, session, mandate window,
-**escrow**" — to carry an explicit transition-table test asserting illegal
-transitions are impossible. The `EscrowState` enum
-(`UNSPECIFIED/ACTIVE/RELEASED/REFUNDED/DISPUTED`) is shared across the three
-condition classes, but each class admits a **different** legal sub-graph:
-HASHLOCK never reaches DISPUTED; OPTIMISTIC is the only class that uses DISPUTED;
-ZK_DELIVERY gates RELEASED on a proof, not a preimage or a timer. Modeling them
-as three separate transition tables (§2.1 criteria 2–4) — rather than one
-permissive table over the union — is what makes the §11.2 "illegal transitions
-impossible" assertion meaningful: a preimage cannot release a ZK escrow, a
-dispute cannot touch a HASHLOCK, a timed-out escrow cannot release. RELEASED and
-REFUNDED are terminal in every class.
-
----
-
-## Section 4 — Dependency-currency and toolchain flags (per-task, at task time)
-
-Recorded so no task assumes a stale version (FLAG D):
-
-- **2.1b (gnark):** spike the Go-toolchain floor vs the D-066 kyber pin **before**
-  committing; outcome branch (a)/(b)/(c) in §2.1b, (c) is a STOP.
-- **2.2 (wasmd / block-sdk / ibc-go):** the D-060 re-evaluation is the spike;
-  check current releases at task time, not the versions D-060 recorded
-  (cosmos-sdk v0.50.15 / ibc-go v8.8.0 / block-sdk v2.1.5 were the
-  Phase-1-boundary snapshot). Re-check the wasmd Go floor against the kyber pin.
-- **2.5 (ibc-go):** the IBC-line adoption shares 2.2's sub-question (b); confirm
-  the chosen line at task time.
-- **Cross-cutting:** the single highest toolchain risk across Phase 2 is a Go
-  bump (gnark or wasmd) breaking `kyber-bls12381` v0.3.1. Both FLAG A and the
-  2.2 wasmd check route to the same pin; whichever task bumps first records it,
-  and the other re-confirms the crypto determinism vector under the new
-  toolchain.
+**Acceptance (shape).** Buyer consent enforced for all three classes at both
+chokepoints (fail-closed → fallback), watched tests per class; per-leg
+condition field live with the D-074 decision recorded; `make lint test` +
+determinism vector green (proto change ⇒ vector re-baseline recorded).
 
 ---
 
-## Section 5 — Latent-TODO disposition (completeness — nothing floats)
+## Section 3 — §11.2 transition tables: DELIVERED (kept for the record)
 
-Every `CONCLAVE-TODO(phase-2)` marker in the source tree (non-test), each given
-an explicit disposition. The five matcher items are **folded into the numbered
-task 2.6**, not parked behind a phrase — a future session can pick 2.6 up as a
-real ledger entry.
+SPEC §11.2 requires every state machine to carry a transition-table test
+asserting illegal transitions impossible. **As built (D-073/D-076):** one
+authoritative `nextState` gate backs an exhaustive transition-table test over
+all three condition classes; every illegal transition is a load-bearing REJECT
+(wrong preimage, post-timeout release, dispute-on-HASHLOCK
+(`ErrNoDisputePath`), release-on-ZK-without-proof (`ErrInvalidProof`),
+`ReleaseEscrow`-on-ZK (`ErrWrongClass`), any terminal-state re-entry
+(`ErrTerminalState`)). The Rev 1 rationale stands: three per-class legal
+sub-graphs, not one permissive union — HASHLOCK never reaches DISPUTED,
+OPTIMISTIC alone uses DISPUTED, ZK gates RELEASED on a proof. RELEASED and
+REFUNDED are terminal in every class. Rev 1's per-class tables remain the
+normative statement of the legal sub-graphs; the code's exhaustive test is
+their implementation.
 
-| # | Marker | Location | Disposition |
+---
+
+## Section 4 — The toolchain ceiling (Rev 2: a named invariant, two pins)
+
+Rev 1's FLAG D said "re-check versions at task time." The build made the
+boundary concrete. **Invariant: the module stays on go 1.23.x until BOTH pins
+below are deliberately re-validated in one recorded decision.** Any dependency
+whose floor crosses go 1.24 is a STOP, not a bump.
+
+| Pin | Version | Breaks at | Guarded by |
 |---|---|---|---|
-| 1 | escrow takes ownership of records + adds HASHLOCK/OPTIMISTIC/ZK_DELIVERY resolution | `x/session/keeper/conclude.go:152` | **FOLD → 2.1** |
-| 2 | reputation dispute hook (`PenalizeLostDispute`, "called by x/escrow dispute Phase 2") | `x/sigil/keeper/reputation.go` | **FOLD → 2.1** (wiring; hook already authored) |
-| 3 | `MsgConclude` exposed to CVM via custom bindings | `x/session/types/tx.pb.go:322` | **FOLD → 2.2** |
-| 4 | fixed `fee_conversion_rate` → session TWAP ("task 2.5") | `x/mandate/keeper/window.go:138` | **FOLD → 2.5** |
-| 5 | replace the sigverify fork with native ADR-070 (v0.53) | `app/unordered/sigverify.go:16` | **FOLD → 2.2** (the D-060 flip re-evaluation) |
-| 6 | partial-fill and cycle-aware fallback | `x/session/keeper/fallback.go:35` | **FOLD → 2.6** |
-| 7 | partial-fill cycles + alternate numeraire anchoring | `solver/cycles/cycles.go:89` | **FOLD → 2.6** (off-chain twin of #6) |
-| 8 | honor §5.1 limit rate at stated clearing prices | `x/session/keeper/solution.go:330` | **FOLD → 2.6** |
-| 9 | allow multi-intent-per-sigil via intent-tagged legs | `x/session/keeper/solution.go:141` | **FOLD → 2.6** |
-| 10 | multi-asset in-kind skim + in-kind solver payout | `x/session/keeper/skim.go:37` | **FOLD → 2.6**; **2.5 re-confirms** skim/fee coherence after the TWAP fee-source swap |
+| `drand/kyber` + `kyber-bls12381` | v1.3.1 / **v0.3.1** | go 1.24 forces kyber-bls12381 v0.3.4 (API/behavior re-validation of the whole Veil threshold path) | D-066 |
+| `gnark` + `gnark-crypto` | **v0.13.0** / v0.18.0 | gnark v0.14.0 needs go 1.24.0; v0.15.0 needs go 1.25.7 | D-076 |
 
-**On #6–10 → 2.6 (the re-deferral reasoning).** All five are matching-engine
-richness on consensus-critical or solver code. None is one of SPEC §10's five
-named Phase-2 tasks (they were marked `phase-2` = "not Phase 0/1," not "one of
-the five"), and none blocks the commerce/edge tasks. Rather than scatter risky
-consensus-matcher changes across 2.1–2.5, they cluster into the numbered task
-**2.6**, a single determinism-focused pass behind the existing `validateSolution`
-bar and determinism vector (§2.6). **#10's cross-reference to 2.5:** the
-multi-asset skim is matcher capability (the D-051 numeraire-only narrowing), not
-2.5's fee-source plumbing — so it stays in 2.6, but when 2.5 swaps the fee source
-to a TWAP it must re-confirm the skim narrowing is still coherent under the new
-fee model.
-
-(Markers #1–5 are listed for completeness; they are not "latent" — each folds
-into a named §10 task above.)
+Current per-task consequences (D-077 spike snapshot, 2026-06-26):
+- **2.2 (wasmd):** v0.54.x floors at go 1.23.1–1.23.6 → inside the ceiling.
+  The v0.53-SDK wasmd line (v0.61.14+) is already at go 1.24 → outside.
+  block-sdk/v2 frozen at v2.1.5 (v0.50-only) — decisive against the SDK bump.
+- **2.5 (ibc-go):** v8 line maintained, inside the ceiling; v10 not required.
+- **Escape hatch (recorded, not planned):** if a future task MUST cross to go
+  1.24+, the single recorded decision re-validates both pins together —
+  kyber-bls12381 v0.3.4 API delta + gnark v0.14/v0.15 — and re-baselines the
+  determinism vector + full crypto suite. Nobody bumps one pin "in passing."
 
 ---
 
-## Section 6 — Phase-2 exit criterion
+## Section 5 — Latent-TODO disposition (statuses refreshed by live grep, Rev 2)
 
-SPEC §10 Phase-2 exit: *"the §1.3 demo extended — external x402 agent buys
-ZK-verified data from a Conclave agent; receipt verified on a second Cosmos chain
-over IBC."* This single integration proves the phase and spans four tasks:
+| # | Marker | Location (current) | Disposition | Status |
+|---|---|---|---|---|
+| 1 | escrow record ownership + condition resolution | ~~`conclude.go:152`~~ | FOLD → 2.1 | ✅ **CLOSED** (D-073, writer-going-forward) |
+| 2 | reputation dispute hook wiring | ~~`reputation.go`~~ | FOLD → 2.1 | ✅ **CLOSED** (D-073, wired to lost-dispute slash) |
+| 3 | `MsgConclude` exposed to CVM | `x/session/types/tx.pb.go:322` | FOLD → 2.2 | in flight |
+| 4 | fixed `fee_conversion_rate` → session TWAP | `x/mandate/keeper/window.go:138` | FOLD → 2.5 | open |
+| 5 | sigverify fork → native ADR-070 (v0.53) | `app/unordered/sigverify.go:16` | **RE-POINTED by D-077** → 2.5's v0.53 checkpoint or later | open (not 2.2) |
+| 6 | partial-fill + cycle-aware fallback | `x/session/keeper/fallback.go:35` | FOLD → 2.6 | open |
+| 7 | partial-fill cycles + alt numeraire | `solver/cycles/cycles.go:89` | FOLD → 2.6 | open |
+| 8 | honor §5.1 limit rate | `x/session/keeper/solution.go:349` (drift: was 330) | FOLD → 2.6 | open |
+| 9 | multi-intent-per-sigil | `x/session/keeper/solution.go:143` (drift: was 141) | FOLD → 2.6 | open |
+| 10 | multi-asset in-kind skim + payout | `x/session/keeper/skim.go:37` | FOLD → 2.6; 2.5 re-confirms skim/fee coherence | open |
 
-- **2.3 (x402 gateway)** — the external x402-speaking agent pays in without
-  knowing Conclave exists; the gateway fronts gas and submits the intent.
-- **2.1 (ZK_DELIVERY escrow)** — the Conclave agent sells data under a
-  `ZK_DELIVERY` condition; release is gated on the on-chain groth16 proof that
-  the delivered ciphertext matches the committed schema/hash (so "ZK-verified
-  data" is literal, not a label).
-- **2.2 (wasmd/CVM)** — if the selling Conclave agent is a CVM contract (or the
-  flow routes through a contract), the custom bindings drive the
-  escrow/CONCLUDE path; 2.2 is on the exit path because the demo exercises the
-  contract-to-native binding surface.
-- **2.5 (IBC USDC + receipt)** — settlement is in real IBC USDC, and the
-  settlement **Receipt** is IBC-verified (ICS-23) on a second Cosmos chain — the
-  §6.6 receipt-proof surface consumed across an IBC connection.
-
-**2.4 (7683 resolver) is deliberately not on this exit path** — it is the
-parallel *inbound* rail (EVM-origin orders) and is proven by its own repo's
-integration, not by the x402 exit demo. The Phase-2 exit is the x402 → ZK →
-IBC-receipt chain across 2.1 + 2.2 + 2.3 + 2.5; 2.6 hardens the matcher beneath
-all of it but is not part of the exit assertion.
+New since Rev 1 (opened by the build, owned above): **FW-1, FW-2 → 2.7**;
+**flake-hardening → 2.6**; **richer typed-schema circuit → Phase-3 candidate**;
+**mainnet gates** (VK MPC ceremony, circuit-soundness audit, gnark-in-consensus
+audit unit) → the 1.8-style external-audit scope, NOT Phase-2 tasks.
 
 ---
 
-## Consolidated FLAGS and decisions (SPEC §10 under-specifications, with resolutions)
+## Section 6 — Phase-2 exit criterion (with leg readiness)
 
-1. **gnark may collide with the kyber pin** — ZK_DELIVERY isolated to 2.1b,
-   gnark-Go-floor spike with a STOP failure branch (FLAG A, §2.1b).
-2. **v0.53 flip is decide-when-reached** — owned by 2.2, re-checked against
-   then-current releases, not pre-baked (FLAG B / D-060, §2.2).
-3. **Edge services are separate-repo** — 2.3/2.4 deliver a node-side gRPC
-   contract in-repo; the service code lives in its own repo and is not in
-   `make test` (FLAG C, §2.3/§2.4).
-4. **Dependency currency is a per-task check** — wasmd/ibc-go/gnark re-checked at
-   task time; the Go-toolchain-bump-vs-kyber-pin risk is the cross-cutting one
-   (FLAG D, §4).
-5. **D5 dispute model** — hash-mismatch + seller bond only; subjective
-   arbitration out of scope (ratified at the 2.1 plan-stop, §2.1).
-6. **Escrow record ownership** — the `conclude.go:152` handoff closes in 2.1; the
-   migration-vs-rewriter mechanism is a 2.1 plan-stop decision (§2.1, §5 #1).
-7. **The five matcher TODOs are owned by the numbered task 2.6**, not a floating
-   phrase; #10 carries a 2.5 coherence cross-reference (§2.6, §5).
+SPEC §10 exit: *"the §1.3 demo extended — external x402 agent buys ZK-verified
+data from a Conclave agent; receipt verified on a second Cosmos chain over
+IBC."* One integration, four tasks:
+
+| Leg | Task | Status |
+|---|---|---|
+| x402 agent pays in; gateway fronts gas, submits intent | 2.3 | not started |
+| ZK_DELIVERY escrow: groth16 proof releases payment ("ZK-verified" is literal) | 2.1 | ✅ **DONE** (`TestConcludeConditioned_Zk` end-to-end; both-party consent enforced) |
+| CVM contract drives the escrow/CONCLUDE path via bindings | 2.2 | in flight |
+| Settlement in real IBC USDC; Receipt ICS-23-verified on a second chain | 2.5 | not started |
+
+**2.4 stays deliberately off this exit path** (the parallel inbound rail,
+proven by its own repo's integration). 2.6/2.7 harden beneath it but are not
+part of the exit assertion. **Distinct from phase exit — the mainnet gates:**
+the external cryptographic audit (1.8 scope), the VK trusted-setup MPC
+ceremony, and the circuit-soundness audit. The demo can run on the dev VK;
+mainnet cannot.
 
 ---
 
-*Phase-2 design approved at the Phase-1 → Phase-2 boundary (baseline `39cb207`).
-Task 2.1a (`x/escrow` HASHLOCK + OPTIMISTIC) begins the Phase-2 build in a fresh
-session on this approved doc. The conclave convenes.*
+## Consolidated FLAGS and decisions (Rev 2 state)
+
+1. **gnark/kyber collision** — RESOLVED: gnark v0.13.0 pin, no Go bump, vector
+   byte-identical (FLAG A, D-076). Ceiling now two-pin (§4).
+2. **v0.53 flip** — RESOLVED for Phase 2: stay v0.50; block-sdk frozen is
+   decisive; wasmd v0.54.x; next checkpoint owned by 2.5 (FLAG B, D-077).
+3. **Edge services separate-repo** — live; in-repo deliverable sharpened to
+   named artifacts `docs/edge/X402_SURFACE.md` / `docs/edge/7683_SURFACE.md`
+   (FLAG C).
+4. **Dependency currency** — live, narrowed to the §4 two-pin go-1.23.x
+   ceiling; crossing it is a STOP with a single recorded double-re-validation
+   (FLAG D).
+5. **D5 dispute model** — RATIFIED as narrowed: seller-reveal of the
+   buyer-agreed hash + 10% seller bond; subjective arbitration out of scope
+   (D-073).
+6. **Escrow record ownership** — CLOSED: writer-going-forward; x/receipt was
+   never a constraint (D-073, correcting Rev 1).
+7. **Consent invariants** — NEW, load-bearing for 2.2/2.6: D-075 seller-signed
+   condition + D-076 buyer-signed ZK condition, enforced fail-closed at
+   validation and settlement; bindings and matcher-richness work must preserve
+   both; completeness (FW-1/FW-2) owned by **2.7**.
+8. **The five matcher TODOs** — owned by 2.6, now + the flake-hardening item;
+   #10 keeps its 2.5 coherence cross-reference.
+9. **2.2 resume order is load-bearing** — determinism re-baseline on the
+   already-bumped deps (iavl 1.2.4) BEFORE wasmd wiring, so drift is
+   attributable (§2.2 checklist).
+
+---
+
+*Rev 1 approved at the Phase-1→Phase-2 boundary (baseline `39cb207`, D-072).
+Rev 2 (D-078) reconciled to as-built state at `4122fda` + the in-flight 2.2
+working tree: 2.1 complete, FLAGs A/B resolved, task 2.7 added, toolchain
+ceiling named. Next action: resume 2.2 at the §2.2 checklist, step 1. The
+conclave convenes.*

@@ -64,6 +64,8 @@ import (
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
 
+	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
+
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	epochtypes "github.com/AryaSingh22/conclave/x/epoch/types"
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
@@ -120,6 +122,9 @@ var (
 		// buyer's escrowed payment and the OPTIMISTIC seller bond (SPEC §6.5,
 		// D-073). It never mints or burns — funds flow out as release/refund.
 		{Account: escrowtypes.ModuleName},
+		// the wasm module account is wasmd's standard burn sink for
+		// contract-burned funds (task 2.2); it holds no protocol custody
+		{Account: wasmtypes.ModuleName, Permissions: []string{authtypes.Burner}},
 	}
 
 	// blocked account addresses (module accounts that must not receive user funds)
@@ -134,6 +139,7 @@ var (
 		veiltypes.ModuleName,
 		sessiontypes.ModuleName,
 		escrowtypes.ModuleName,
+		wasmtypes.ModuleName,
 		// the gov module account is allowed to receive funds (deposits)
 	}
 
@@ -254,6 +260,12 @@ var (
 						// its InitGenesis is a no-op but the module manager
 						// requires every registered module in the order list.
 						receipttypes.ModuleName,
+						// CosmWasm LAST (wasmd convention): contract genesis may
+						// reference any other module's state. Task 2.2; the
+						// default genesis ships the PERMISSIONED upload posture
+						// (wasm.go). x/wasm has no begin/end blocker in v0.54,
+						// so it appears only here.
+						wasmtypes.ModuleName,
 					},
 				}),
 			},

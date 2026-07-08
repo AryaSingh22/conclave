@@ -319,7 +319,11 @@ func (m *MsgProposeSolutionResponse) GetSolutionId() string {
 
 // MsgConclude applies a settlement graph atomically (all-or-nothing within
 // one cache-wrapped context — SPEC §6.4). authority must be the module
-// authority; CONCLAVE-TODO(phase-2): exposed to CVM via custom bindings.
+// authority. CVM exposure RESOLVED READ-ONLY (task 2.2, D-079): contracts
+// observe settlement through the app/cvm query plugins and act on its escrow
+// legs via the CVM msg allowlist; Conclude itself is not contract-invocable
+// (no custom-msg encoding, Any passthrough disabled, and a contract can
+// never be the module authority).
 type MsgConclude struct {
 	Authority string  `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
 	SessionId uint64  `protobuf:"varint,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
