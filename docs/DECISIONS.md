@@ -3081,3 +3081,69 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   just another account-shaped principal, every existing keeper gate applies
   to it unchanged, and the one msg no principal but the module authority may
   send remains exactly that.
+
+## D-080 — Phase-3 plan + methodology authored: PHASE3_PLAN.md (PROPOSED forward authority, three-class labeling) + METHODOLOGY.md (standalone transferable discipline)
+
+- **Date:** 2026-07-10 (planning/research session at `9722912`, mid-Phase-2 —
+  2.3–2.7 + the §6 exit demo still open; docs-only, no source/proto/logic
+  touched; baseline verified this session: lint exit 0, test exit 0,
+  sim-determinism PASS — 5 seeds `[1,2,7,12,42]` byte-identical across two
+  independent processes).
+- **SPEC:** §10 (Phase 3 = Chambers ALONE — the plan's authority anchor),
+  §8(d) (external audit = mainnet gate), §14 D6 (pre-testnet) / D7
+  (pre-announce); AUDIT_SCOPE_1.8 (O1–O4, L1–L3, T1–T3); PHASE2_DESIGN §4
+  (two-pin ceiling); AUDIT F-2/F-3/F-5/F-6.
+- **Deliverable 1 — `docs/PHASE3_PLAN.md` (PROPOSED, not yet phase
+  authority).** SPEC §10's Phase 3 is quoted as ONE task (Chambers); every
+  section header carries one of three authority classes — [SPEC §10 PHASE 3]
+  (3.11 Chambers only), [SPEC-MANDATED, NOT PHASE-NUMBERED] (3.1 audit, 3.2
+  VK ceremony, 3.9 D6, the D7 gate row), [PROPOSED — BEYOND CURRENT SPEC]
+  (3.3–3.8, 3.10, 3.12). The plan becomes authority only at task 3.0 (a
+  Rev-at-Phase-2-boundary reconciliation, the D-078 pattern) — surfaced as a
+  deviation from D-072's authored-at-the-boundary precedent, forced by the
+  research findings below. Complete debts disposition (§5.1 — every O/L/T/F/
+  FW item, every SPEC §14 open decision → a task or a reasoned deferral) and
+  §5.2 advisories to the remaining Phase-2 tasks.
+- **Deliverable 2 — `docs/METHODOLOGY.md`.** The working discipline codified
+  project-independently: 10 rules, each with a mechanical procedure + a real
+  repo instance (the failure cases load-bearing: the 2.2 fake-stop and its
+  bisection cost, the D-044 phrase-not-task that returned as audit finding
+  F-3, the 2.2 got-lucky sequencing deviation surfaced-not-normalized), plus
+  the per-task execution checklist. Referenced from the plan; Phase-3
+  sessions bootstrap from both.
+- **Research findings that moved recorded positions (searched 2026-07-10;
+  re-verify at task time):** (1) block-sdk **ARCHIVED 2025-01-31**, upstream
+  recommends fork-and-maintain — stronger than D-077's "frozen"; (2) go 1.23
+  **EOL 2025-08-31**; (3) cosmos-sdk **v0.50.x EOL** — active release
+  families are 2025.1 (SDK 0.53/CometBFT 0.38/ibc-go v10) and 2026.1 (SDK
+  0.54/0.39/v11); (4) **ibc-go v8 in no active family** — D-077's "v8 still
+  maintained and suffices" is STALE for 2.5 (recorded as a §5.2 advisory,
+  resolved at 2.5's plan-stop); (5) CometBFT v1/v2 discontinued upstream,
+  work concentrates on v0.38→v0.39 — the VE surface is not stranded; (6) the
+  two gnark Groth16 advisories affect ≤v0.10.0 only — the v0.13.0 pin is
+  unexposed, so the toolchain crossing is a **support-horizon decision, not
+  an exploit fire**; (7) no audited threshold-mempool construction covers the
+  authored surface (Fairblock/FairyRing uses externally-FIXED identities —
+  exactly the divergence Conclave made; no public audit of its threshold-IBE
+  found), so adoption does NOT close O1; the batched-threshold-decryption
+  literature + Aptos validate a **session-scoped-identity re-derivation** as
+  a middle path; (8) x402 foundation targets spec v1.0 Q3 2026 (advisory to
+  2.3); ERC-7683 production-dominant (confirms 2.4); AP2 also names its core
+  primitive "Mandate" (held against the D7 gate).
+- **Key structural decisions of the plan:** the audit is the GATING
+  DEPENDENCY of the whole forward path, opening with an adopt-vs-audit STOP —
+  (a) audit as-built / (b) re-derive to a session-scoped identity (O1 shrinks
+  toward the tlock reference, O4 collapses per-intent→per-session; the
+  boundary-race defeater recorded) / (c) adopt batched-TE, rejected-by-default
+  (FLAG P3-A); the platform task 3.3 is a MIGRATION decision (family choice +
+  block-sdk disposition + both crypto pins re-validated together) and **gates
+  the public testnet 3.8** — the kyber pin (D-066) is itself what holds the
+  project on the EOL toolchain, an ACTIVE conflict resolved at 3.3's STOP #1
+  (FLAG P3-B); the VK ceremony binds the circuit, so 3.12's fate is fixed at
+  3.2's STOP (FLAG P3-G); Chambers honors the spec's design-doc-first
+  guardrail with implementation explicitly gated post-review (FLAG P3-C).
+- **Rationale.** Mirrors the D-071/D-072 pattern — a completeness-gated
+  outline reviewed at a real stop before prose, every known debt in a
+  disposition row — extended with the authority-vs-proposal separation so the
+  plan cannot be read as "the spec's Phase 3 has 12 tasks": it has one, and
+  the plan says so first.

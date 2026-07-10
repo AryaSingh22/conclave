@@ -340,3 +340,21 @@ task below bootstraps from it.
 **Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
 data from a Conclave agent; receipt IBC-verified on a second chain (spans
 2.1+2.2+2.3+2.5; 2.4 is the parallel inbound rail, off the exit path).
+
+## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
+
+Authored 2026-07-10 mid-Phase-2 (research + planning session, docs-only).
+**SPEC §10's Phase 3 is Chambers ALONE**; the plan proposes the surrounding
+production-readiness scope with three-class authority labels in every section
+header ([SPEC §10 PHASE 3] / [SPEC-MANDATED, NOT PHASE-NUMBERED] /
+[PROPOSED — BEYOND CURRENT SPEC]). **NOT yet the phase authority** — task 3.0
+(Rev at the Phase-2 boundary) re-validates it after 2.3–2.7 + the exit demo
+close. Headline structure: 3.1 audit = the gating dependency (opens with an
+adopt-vs-audit STOP); 3.3 platform migration GATES the public testnet (go 1.23
++ SDK v0.50 + ibc-go v8 all EOL, block-sdk archived — D-080 research record);
+3.11 Chambers = the one spec-named task, design-doc-first. Carries §5.2
+advisories for the remaining Phase-2 tasks (x402 v1.0 timing → 2.3; ibc-go v8
+EOL supersedes D-077's "v8 suffices" → 2.5's plan-stop). The transferable
+working discipline is codified in **docs/METHODOLOGY.md** (10 rules + the
+per-task checklist); Phase-3 sessions bootstrap from CLAUDE.md + SPEC +
+DECISIONS + PHASE3_PLAN + METHODOLOGY.
