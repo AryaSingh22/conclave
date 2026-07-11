@@ -178,4 +178,51 @@ message Params {
   // surplus_skim_bps funds the protocol fee pool from settled value
   // (SPEC §6.4 "small skim (param)").
   uint32 surplus_skim_bps = 10;
+  // twap_window_blocks is the height window the session TWAP averages over
+  // (task 2.5: the fee-conversion price source; dev default 1200).
+  uint64 twap_window_blocks = 11;
+  // twap_min_observations is the minimum in-window observation count before
+  // the TWAP is served to consumers; below it consumers fall back to their
+  // fixed cold-start rate (task 2.5; dev default 10).
+  uint64 twap_min_observations = 12;
+}
+
+// PriceObservation is one committed clearing-price sample for a pair: the
+// price a settled match cleared at, tagged with its settlement height
+// (task 2.5). Observations only enter from Conclude, inside the settlement
+// cache, so every sample is a committed consensus value.
+message PriceObservation {
+  // height is the block height the match settled at.
+  uint64 height = 1;
+  // price is quote per base unit at settlement (same orientation as
+  // PricePoint.price).
+  string price = 2 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// TwapRecord is the rolling per-pair price index behind the session TWAP
+// (task 2.5): the in-window observations plus the TWAP computed from them at
+// write time (per-height mean, then mean across heights — spam-damped).
+// Consumers (the §6.2 fee seam) read the stored value; they never recompute.
+message TwapRecord {
+  // base identifies the asset being priced (denom, or data/{schema},
+  // svc/{schema} for non-coin assets).
+  string base = 1;
+  // quote is the asset the price is quoted in.
+  string quote = 2;
+  // observations are the in-window samples, ascending by height; entries
+  // older than twap_window_blocks are pruned on write.
+  repeated PriceObservation observations = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  // twap is the current windowed average (quote per base), recomputed on
+  // every write. Zero when observations is empty.
+  string twap = 4 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
 }

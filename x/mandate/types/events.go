@@ -23,4 +23,14 @@ const (
 	AttributeKeyFee         = "fee"
 	AttributeKeyFeeClv      = "converted_fee_uclv"
 	AttributeKeyFeePayer    = "fee_payer"
+
+	// task 2.5 fee-conversion provenance (additive, D-022 pattern): which
+	// rate source converted the fee and the effective native-per-fee-denom
+	// rate it implied.
+	AttributeKeyConversionSource = "conversion_source"
+	AttributeKeyConversionRate   = "conversion_rate"
+
+	// ConversionSource attribute values.
+	ConversionSourceTwap     = "twap"
+	ConversionSourceFallback = "fallback"
 )

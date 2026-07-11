@@ -38,6 +38,7 @@ const (
 //	0x08 | rid(32)                                        → Receipt    (§6.6 secondary, Half B)
 //	0x09 | chamber(4) | escrow_id(32)                     → Escrow stub (DataGrant legs)
 //	0x0A                                                  → next_session_id (genesis bookkeeping)
+//	0x0B | base_len(2) | base | quote                     → TwapRecord (task 2.5 price index)
 //
 // The §6.6 receipt layout (0x07 primary `chamber|sigil_id|height|receipt_id`,
 // 0x08 secondary `receipt_id`) is pinned here exactly even though receipts are
@@ -59,7 +60,33 @@ var (
 	// boundary block height (D-038), so this is bookkeeping for genesis
 	// fidelity rather than an allocation counter.
 	NextSessionIDKey = []byte{0x0A}
+	// TwapKeyPrefix stores the per-pair clearing-price index behind the
+	// session TWAP (task 2.5). base is length-prefixed because asset keys
+	// (denoms, data/{schema}, svc/{schema}) may contain any byte, so
+	// base|quote alone would be ambiguous.
+	TwapKeyPrefix = []byte{0x0B}
 )
+
+// twapMaxAssetKeyLen bounds each asset key in a TWAP store key. sdk denoms
+// cap at 128 bytes; data/{schema} and svc/{schema} keys are schema-derived
+// and comfortably below this. Pairs whose keys exceed it are not indexed
+// (deterministic skip — they can never be a fee denom anyway).
+const twapMaxAssetKeyLen = 1<<16 - 1
+
+// TwapKey returns 0x0B | base_len(2) | base | quote, or false when either
+// asset key is empty or exceeds twapMaxAssetKeyLen.
+func TwapKey(base, quote string) ([]byte, bool) {
+	if base == "" || quote == "" || len(base) > twapMaxAssetKeyLen || len(quote) > twapMaxAssetKeyLen {
+		return nil, false
+	}
+	key := make([]byte, 0, 1+2+len(base)+len(quote))
+	key = append(key, TwapKeyPrefix...)
+	lenBz := make([]byte, 2)
+	binary.BigEndian.PutUint16(lenBz, uint16(len(base)))
+	key = append(key, lenBz...)
+	key = append(key, base...)
+	return append(key, quote...), true
+}
 
 func chamberBytes(chamberID uint32) []byte {
 	bz := make([]byte, 4)

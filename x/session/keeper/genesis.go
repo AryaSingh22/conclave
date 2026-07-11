@@ -42,6 +42,11 @@ func (k Keeper) InitGenesis(ctx sdk.Context, gs types.GenesisState) {
 			panic(err)
 		}
 	}
+	for i := range gs.TwapRecords {
+		if err := k.SetTwapRecord(ctx, gs.TwapRecords[i]); err != nil {
+			panic(err)
+		}
+	}
 }
 
 // ExportGenesis exports the x/session store to genesis state.
@@ -71,6 +76,13 @@ func (k Keeper) ExportGenesis(ctx sdk.Context) *types.GenesisState {
 	}
 	if bz != nil {
 		gs.NextSessionId = binary.BigEndian.Uint64(bz)
+	}
+
+	if err := k.IterateTwapRecords(ctx, func(rec types.TwapRecord) bool {
+		gs.TwapRecords = append(gs.TwapRecords, rec)
+		return false
+	}); err != nil {
+		panic(err)
 	}
 	return gs
 }

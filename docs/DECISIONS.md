@@ -3147,3 +3147,174 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   disposition row — extended with the authority-vs-proposal separation so the
   plan cannot be read as "the spec's Phase 3 has 12 tasks": it has one, and
   the plan says so first.
+
+## D-081 — Task 2.5 IBC-line decision (UPDATES D-060/D-077): stay on ibc-go v8.8.0 for real USDC; v8-EOL usage is a recorded POSTURE under P3-B, not new risk; the v0.53 checkpoint re-fails on block-sdk
+
+- **Date:** 2026-07-10 (task 2.5 STOP #1, reviewed in isolation and approved
+  before any integration plan or code; baseline verified this session at
+  `b2f633b`: lint exit 0, test exit 0, sim-determinism exit 0 — 5 seeds
+  byte-identical across two independent processes).
+- **SPEC:** §3 (version pins: ibc-go v8.x), §14 D8; PHASE2_DESIGN §2.5
+  (dependencies + the "confirm the v8 patch current at task time" clause,
+  now superseded in its "v8 still maintained" premise); PHASE3_PLAN §3.3 +
+  FLAG P3-B (the platform-migration boundary this decision must not cross);
+  METHODOLOGY Rules 2 (two-stop) and 5 (a dependency conflict is a decision).
+- **UPDATES D-060/D-077:** D-077's parenthetical "ibc-go v8 is still
+  maintained and serves IBC-USDC" was true at 2026-06-26 and is now STALE in
+  its first half (D-080 research finding 4). This entry re-derives the IBC
+  line for 2.5 from task-time evidence rather than inheriting it.
+- **Decision: 2.5 integrates real USDC over IBC on ibc-go v8.8.0 — the pin
+  already in the tree. No IBC major, no SDK family bump, no wasmd move. The
+  family migration (SDK + IBC + wasmd + block-sdk disposition + both crypto
+  pins) remains 3.3's scoped two-stop task, gated before the public testnet.**
+- **Empirical spike (Go module proxy, 2026-07-10 — the D-060/D-077 method):**
+  | Line | Latest | Tagged | SDK target | Go floor | Signal |
+  |---|---|---|---|---|---|
+  | ibc-go v8 (ours) | v8.8.0 | 2025-12-18 | v0.50.9 | 1.21 | no tag in ~7 months; no active family |
+  | ibc-go v9 | v9.0.2 | 2024-12-20 | v0.50.9 | — | dead 18+ months |
+  | ibc-go v10 ≤ v10.1.1 | v10.1.1 | 2025-04-08 | v0.50.12/13 | 1.23.6 | the ONLY v0.50-compatible v10 sub-line — dead 15 months (v10.2.0, 2025-04-30, moved to SDK v0.53.0) |
+  | ibc-go v10 current | v10.7.0 | 2026-05-20 | v0.53.4 | 1.23.8 | active |
+  | ibc-go v11 | v11.1.0 | 2026-05-20 | v0.54.0 | 1.25.9 | active, newest family |
+  | block-sdk/v2 | v2.1.5 | 2024-07-02 | v0.50 only | — | still frozen; no v2.1.6, no /v3 |
+  | wasmd v0.55.1 | — | 2025-05-15 | v0.50.12 + ibc-go v10.0.0 | 1.23.6 | the ibc-v10-on-v0.50 wasmd; same dead sub-line |
+- **Why (a) and not (b)/(c):**
+  - **(a) stay v8.8.0 — CHOSEN.** Real USDC is ICS-20 transfer; the transfer
+    app + `ibc/<hash>` voucher denoms need nothing newer than v8, and the
+    v8.8.0 core + transfer + capability stack is ALREADY WIRED in app.go with
+    wasmd v0.54.9 pinning ibc-go v8 exactly. Zero dependency change, go floor
+    1.21 (the D-078 two-pin go-1.23.x ceiling untouched), no dep-driven
+    determinism re-baseline.
+  - **(b) bump to v10-on-v0.50 (v10.1.1 + wasmd v0.55.1) — REJECTED on the
+    merits.** The only v0.50-compatible v10 sub-line is MORE unmaintained
+    than v8.8.0 (dead since 2025-04/05 vs a Dec-2025 v8 backport), and the
+    move costs a v8→v10 major (capability module removed → app.go churn), a
+    forced wasmd bump, and a determinism re-baseline — for zero USDC
+    functional gain. Newer-numbered is not better-maintained; the Rule-5
+    "never bump a pin in passing" case.
+  - **(c) family bump now (SDK v0.53.7 + ibc-go v10.7.0 + wasmd v0.61.x) —
+    REJECTED for 2.5.** Both D-077 decisive constraints re-verified today:
+    block-sdk still frozen at v2.1.5 with no v0.53 path (bumping = losing/
+    rebuilding the §6.7 laned mempool inside a fee task), and the v0.53
+    wasmd line's current patches need go ≥1.24 (the D-066 kyber collision;
+    a STOP per the D-078 ceiling). This is exactly 3.3's migration; folding
+    it into 2.5 would commit the project to a bigger migration than 2.5
+    needs, against PHASE3_PLAN's explicit gating.
+- **The posture, stated loudly for the future reader/auditor: staying on an
+  EOL ibc-go v8 is NOT 2.5 accepting new risk — it is deepening usage of a
+  pin the project already carries, under the posture PHASE3_PLAN already
+  ratified (FLAG P3-B: the entire v0.50 cluster is off the maintained path;
+  a private/invite localnet may run on the current pins; NOTHING PUBLIC may;
+  3.3 owns the exit and gates the public testnet on it).** 2.5 adds no new
+  CLASS of exposure — the EOL-v8 usage is a recorded posture-decision with a
+  named owner (3.3), not drift.
+- **The v0.53 checkpoint 2.5 owns (D-077 / PHASE2_DESIGN TODO #5): re-run
+  and CLOSED — no bump.** block-sdk is still v2.1.5/frozen, so D-060's
+  flip-condition (a) still fails; the sigverify fork stays; the next
+  re-evaluation is 3.3's STOP #1.
+- **New fact recorded as a 3.3 input:** ibc-go v10.7.0 itself floors at go
+  1.23.8 — INSIDE the current toolchain ceiling. On the v0.53 path the
+  toolchain collision now comes from wasmd (v0.61.14+ → go 1.24), not from
+  ibc-go. Changes nothing for 2.5; feeds 3.3's STOP #1 table.
+
+## D-082 — Task 2.5 BUILD: session TWAP behind §6.2 fee conversion (the `window.go` TODO closes); ibc/<hash> USDC proven through ceilings + price source with the F-2/F-3 boundary PINNED, not moved; determinism vector re-baselined (single cause)
+
+- **Date:** 2026-07-11 (task 2.5 build, after the approved STOP #2 plan;
+  builds on D-081's IBC-line decision — no dependency changes of any kind in
+  this task, which is what makes the re-baseline single-cause).
+- **SPEC:** §6.2 (fee abstraction), §6.4/§6.6 (clearing prices on receipts),
+  §11.6 (determinism); PHASE2_DESIGN §2.5 (the contract); AUDIT F-2/F-3 +
+  D-020/D-044 (the boundary carried); D-051 (skim), D-058/D-064 (the
+  cross-module seam pattern reused); METHODOLOGY Rules 3/6/7/8.
+- **What shipped.** (1) `x/session` price index: every settled match's
+  `PricePoint`s are folded into a per-pair `TwapRecord` (store `0x0B`,
+  length-prefixed pair key) INSIDE the Conclude cache with the receipts —
+  observations commit atomically with the settlement that produced them
+  (`economics.go` after `writeMatchReceipts`). Pruned to the height window
+  on write; TWAP recomputed at write; genesis export/import + validation;
+  gRPC `Twap` query (base/quote as query params — denoms contain `/`).
+  (2) `x/mandate` seam: `TwapSource` (nil-safe, injected via `SetTwapSource`
+  — the SetLiveExposureFn pattern, set before ante capture in app.go);
+  `ExecuteFeeAbstraction` converts at the TWAP when the pair is WARM, else
+  the fixed `fee_conversion_rate`, whose meaning is now "deterministic
+  cold-start fallback" (field unchanged — no mandate proto change).
+  (3) ibctesting surface (`app/ibctesting.go` getters) + a two-chain ICS-20
+  e2e: real channel, USDC minted on the counterparty, `ibc/<hash>` voucher
+  received and driven through face-value pricing, mandate ceilings
+  (ErrMandateExceeded binds in the voucher denom), and cold→warm fee
+  conversion on the live chain store.
+- **Build decisions (the spec did not pin; recorded here, Rule 6):**
+  - **Aggregation = per-height mean, then mean across heights** (approved
+    plan option B): a block stuffed with many cleared sessions counts as ONE
+    height — intra-block spam damping for ~10 lines. Golden Dec outputs
+    pinned in tests (`1.333333333333333333`) so a silent rounding change
+    fails by name.
+  - **Orientation + single rounding:** observations stored as quoted
+    (quote-per-base, the PricePoint orientation). The fee path divides once
+    — `fee/price → TruncateInt` — rather than pre-inverting, so there is ONE
+    rounding and truncation still favors the pool. The event attribute's
+    `conversion_rate` (native-per-fee-denom) is informational.
+  - **Staleness/re-cold semantics:** the stored TWAP reflects the window as
+    of the LAST settlement of the pair; it is served while its newest
+    observation is inside the current window; a whole window with no
+    settlement → cold → fallback (boundary exact, tested at ±1 block).
+    `twap_min_observations` is evaluated against the write-time (pruned)
+    set. Consequence: the ante path is a pure O(1) stored-value read —
+    no iteration, no Dec math on CheckTx.
+  - **Params:** `twap_window_blocks=1200`, `twap_min_observations=10` (dev)
+    in **x/session** (the module that stores/prunes/computes); `0` window =
+    index disabled (recording no-ops, consumers permanently on fallback) —
+    valid but loud. Self-pairs and non-positive prices are never recorded.
+  - **NOT the D-044 problem — the containment argument:** the TWAP has
+    exactly ONE consumer (the fee seam). It is not offered to ceiling
+    valuation; `FaceValuePriceSource` stays wired in x/veil untouched. A
+    manipulated/wrong rate mis-prices gas conversion against a genesis-
+    funded pool with pool-favoring truncation — it cannot move mandate-
+    ceiling value. The D-044/F-3 swap remains Phase-3 task 3.4, which will
+    REUSE this index under its own review.
+  - **F-2 PINNED (more live now, deliberately unmoved):** real IBC vouchers
+    make the unvalued-`MsgTransfer` exposure carry real value. 2.5 does not
+    touch the `spendIntent` switch; instead `TestSpendIntentF2BoundaryPin`
+    asserts MsgTransfer values at zero BY NAME, so 3.4 flips the boundary
+    via a deliberate red, never by drift.
+  - **Skim coherence (§2.5 criterion 5):** the D-051 numeraire-only skim is
+    denom-generic (`plan.numeraire` end to end); an ibc/<hash>-quoted match
+    skims in that denom into the same module account. No TWAP interaction —
+    the skim reads flows, the TWAP reads prices. Confirmed by direct read;
+    the voucher-quoted path is exercised in the e2e via RecordClearingPrices.
+    (Pre-existing quirk, noted not fixed: reputation's whole-USDC scaling
+    `economics.go` divides ANY numeraire by 1e6 — correct for 6-decimal
+    USDC, inherited for others; 2.6/3.4 surface if it matters.)
+  - **The live localnet + relayer USDC demo is the §6 exit demo's scope** —
+    decided at the plan stop (not a D-079-style late deviation); the in-repo
+    acceptance is the ibctesting e2e above.
+- **Determinism vector — RE-BASELINE (Rule 7; the ADR the gate requires):**
+  - Run #1 (proto regen + READ-ONLY plumbing; nothing writes): **byte-
+    identical** to the b2f633b baseline, all 5 seeds (e.g. seed 1
+    `168ED7BF…`, seed 7 `B0B8C6EA…`). DEVIATION NOTE (Rule 8): the plan
+    labeled run #1 "regen alone", but the regenerated QueryServer interface
+    requires the `Twap` method to compile, so the read-only query surface
+    rode along — surfaced here; it writes nothing and the hashes prove it.
+  - Run #2 (write path: params defaults on the InitGenesis path + `0x0B`
+    observation writes at Conclude + the seam): internal two-pass
+    byte-identity PASS, exit 0, NEW baseline hashes —
+    seed 1 `245EF17739F97E7E2F27D162A8EBD6A3CB36CEED23B1D287A8AADA323967CC93`,
+    seed 2 `B48BDA6D29294A4F12F50FDE835233ACB51E513855D0882E3A7BE21CE2954194`,
+    seed 7 `FA562B1DE5CBD34AA925B2A76AB345E44A9860261C33C90F55799C6127B95B76`,
+    seed 12 `E491FB48472320B33E07EA63999F355A27B4B93F3C606BC38B5F03C2F80EA3E9`,
+    seed 42 `6596CCA106CA4A3616C9F4C6B8E92FF9DC75D362FA83AF95D261D88F77259325`.
+    Cause: exactly the feature writes above — no dependency changed in the
+    whole task, so the drift is single-cause by construction (the 2.2
+    lesson, D-079, applied).
+- **Forward item (named owner, Rule 6): the fee-TWAP manipulation surface →
+  3.1 audit input** (PHASE3_PLAN §3.1 engagement scope updated this task).
+  A winning solver sets clearing prices, so the fee rate is steerable at the
+  cost of bonds/skim/gas; windowing + per-height damping + fee-only blast
+  radius bound it — an argument, not a proof; the auditor prices it, and an
+  outlier-clipping hardening task is created only if the bound fails review.
+- **Load-bearing tests (Rule 3):** the seam proof (warm TWAP conversion is
+  UNCHANGED when the fixed param is cranked 7x — red if the seam still reads
+  the param; cold reverts to the fallback — red if the cold gate is
+  bypassed); cold-start min-observations; staleness and prune boundaries
+  exact at ±1 block; golden Dec pins; the F-2 boundary pin; genesis
+  round-trip; the ibc-denom pair through the index; the two-chain e2e.
+  Red-without-the-guard runs recorded in the task record.

@@ -15,4 +15,8 @@ message GenesisState {
   repeated Session sessions = 3 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
   // next_session_id is the id the next session will take.
   uint64 next_session_id = 4;
+  // twap_records is the per-pair price index behind the session TWAP
+  // (task 2.5); exported so the fee-conversion source survives
+  // export/import round-trips.
+  repeated TwapRecord twap_records = 5 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
 }

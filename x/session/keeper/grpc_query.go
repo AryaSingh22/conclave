@@ -6,6 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/AryaSingh22/conclave/x/session/types"
@@ -105,4 +106,39 @@ func (q queryServer) Params(goCtx context.Context, req *types.QueryParamsRequest
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return &types.QueryParamsResponse{Params: params}, nil
+}
+
+// Twap returns the session TWAP for one asset pair (task 2.5): the stored
+// windowed average, its fee-conversion inverse, and the warm gate the fee
+// seam applies. A never-indexed pair answers cold (zeros), not NotFound —
+// cold is a meaningful state the fee seam acts on.
+func (q queryServer) Twap(goCtx context.Context, req *types.QueryTwapRequest) (*types.QueryTwapResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "nil request")
+	}
+	if req.Base == "" || req.Quote == "" {
+		return nil, status.Error(codes.InvalidArgument, "base and quote are required")
+	}
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	resp := &types.QueryTwapResponse{
+		Twap: math.LegacyZeroDec(),
+		Rate: math.LegacyZeroDec(),
+	}
+	rec, found, err := q.GetTwapRecord(ctx, req.Base, req.Quote)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if !found {
+		return resp, nil
+	}
+	resp.ObservationCount = uint64(len(rec.Observations))
+	if !rec.Twap.IsNil() {
+		resp.Twap = rec.Twap
+	}
+	if price, warm := q.TwapPrice(ctx, req.Base, req.Quote); warm {
+		resp.Warm = true
+		resp.Rate = math.LegacyOneDec().Quo(price)
+	}
+	return resp, nil
 }

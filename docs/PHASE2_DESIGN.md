@@ -33,7 +33,7 @@ load-bearing and recorded (§4).
 | 2.2 | wasmd + CVM bindings (read-only CONCLUDE + escrow allowlist) | **DONE** — wasmd v0.54.9 wired, bindings + forge-prevention e2e green; localnet contract smoke deferred to the §6 exit demo (needs a CVM-schema contract binary) | D-077 + D-079 |
 | 2.3 | x402 gateway — in-repo deliverable = node-side surface contract | not started | artifact: `docs/edge/X402_SURFACE.md` |
 | 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | not started | artifact: `docs/edge/7683_SURFACE.md` |
-| 2.5 | IBC USDC + session-TWAP fee (swaps `window.go:138`); owns the NEXT v0.53 checkpoint | not started | — |
+| 2.5 | IBC USDC + session-TWAP fee (swaps `window.go:138`); owns the NEXT v0.53 checkpoint | **DONE** — stay ibc-go v8.8.0 (posture under P3-B); session-TWAP index + fee seam live, vector re-baselined; two-chain ICS-20 e2e; v0.53 checkpoint re-failed on (a); live relayer demo = §6 exit demo | D-081 + D-082 |
 | 2.6 | Matcher-richness hardening (5 matcher TODOs + flake-hardening item) | not started | — |
 | 2.7 | **NEW** — escrow consent completeness (FW-1 + FW-2 + timeouts→params) | not started | D-078 |
 | Exit | x402 → ZK-delivery → IBC-verified receipt demo | blocked on 2.2/2.3/2.5 | §6 |
@@ -323,10 +323,13 @@ counterparty class.
 here) — re-run the D-077-style empirical spike at task time; if block-sdk is
 still frozen, record and move on (five minutes, not a session).
 
-**Dependencies.** IBC line: **ibc-go v8 suffices and is still maintained
-(D-077)** — the v10 line is NOT required; confirm the v8 patch current at task
-time. Session `clearing_prices` (already on receipts, §6.6). The
-`ExecuteFeeAbstraction` seam.
+**Dependencies.** IBC line: ibc-go v8 suffices — **but D-077's "still
+maintained" premise went STALE (D-080 research); the task-time re-check
+(D-081, 2026-07-10) resolved it: stay on v8.8.0, with the EOL usage recorded
+as an explicit posture under PHASE3_PLAN FLAG P3-B (internal-only; 3.3 owns
+the exit and gates the public testnet).** The v10 line is NOT required (its
+only v0.50-compatible sub-line died 2025-04). Session `clearing_prices`
+(already on receipts, §6.6). The `ExecuteFeeAbstraction` seam.
 
 **Acceptance criteria.**
 1. **IBC USDC:** a transfer channel brings real USDC; the `ibc/<hash>` denom

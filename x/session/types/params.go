@@ -23,6 +23,16 @@ const (
 	DefaultEquivocationSlashBps   = 2000   // SPEC §6.4 equivocation = 20%; D-007
 	DefaultSurplusSkimBps         = 50     // SPEC §6.4 "small skim (param)"; dev placeholder (D6)
 
+	// DefaultTwapWindowBlocks is the session-TWAP averaging window (task 2.5):
+	// ~20 min at the §12 dev cadence, spanning hundreds of 3-block sessions.
+	// 0 disables the price index entirely (fee conversion stays on the fixed
+	// fallback rate) — valid but loud, not a default.
+	DefaultTwapWindowBlocks = 1200
+	// DefaultTwapMinObservations is the cold-start floor: below this many
+	// in-window observations the TWAP is withheld and consumers use their
+	// fixed fallback rate (task 2.5).
+	DefaultTwapMinObservations = 10
+
 	// bpsDenominator converts basis points to a fraction.
 	bpsDenominator = 10_000
 )
@@ -45,6 +55,8 @@ func DefaultParams() Params {
 		InvalidSolutionSlashBps: DefaultInvalidSolutionSlashBp,
 		EquivocationSlashBps:    DefaultEquivocationSlashBps,
 		SurplusSkimBps:          DefaultSurplusSkimBps,
+		TwapWindowBlocks:        DefaultTwapWindowBlocks,
+		TwapMinObservations:     DefaultTwapMinObservations,
 	}
 }
 

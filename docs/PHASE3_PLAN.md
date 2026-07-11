@@ -329,8 +329,15 @@ three checkpoints:
    one test, D-066(b)); auditor selected from the threshold-crypto-experienced
    class (R7); audited commit tagged; scope = AUDIT_SCOPE_1.8 **extended
    with**: the D-076 ZK units (circuit soundness: MiMC opening + EscrowID
-   public-input binding; gnark-verifier-in-consensus), T1–T3 verification, and
-   the named Pedersen-DKG DoS probe area (R3).
+   public-input binding; gnark-verifier-in-consensus), T1–T3 verification,
+   the named Pedersen-DKG DoS probe area (R3), and the **fee-TWAP
+   manipulation surface (D-082, task 2.5)** — the §6.2 fee-conversion rate
+   is a windowed average of solver-set clearing prices, so whoever wins
+   solutions can steer it at the cost of bonds/skim/gas; the recorded bound
+   (window averaging + per-height damping + fee-only blast radius, never
+   ceilings) is an ARGUMENT, not a proof — the auditor prices the
+   manipulation economics, and a 2.6-style outlier-clipping hardening task
+   is created IF the audit finds the bound insufficient.
 3. **Findings triage (re-entrant).** Every finding → an ADR: fixed (with a
    watched test), or accepted-risk with reasoning. A refuted O1 re-plans the
    phase through this task's fallback branch — (b) or (c) above.

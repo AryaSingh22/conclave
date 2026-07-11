@@ -126,6 +126,11 @@ func (k Keeper) applyEconomics(ctx sdk.Context, sessionID uint64, plans []matchP
 		if err := k.writeMatchReceipts(ctx, sessionID, plan.match, plan.intents); err != nil {
 			return err
 		}
+		// task 2.5: fold this match's clearing prices into the session-TWAP
+		// index, atomically with the settlement that produced them.
+		if err := k.RecordClearingPrices(ctx, plan.match.ClearingPrices); err != nil {
+			return err
+		}
 		for i := range plan.intents {
 			sigil := plan.intents[i].sigil
 			valueUSDC := plan.settledBySigil[sigil].Quo(uusdcPerWhole)

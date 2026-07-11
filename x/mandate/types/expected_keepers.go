@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 
+	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
@@ -33,4 +34,16 @@ type BankKeeper interface {
 type AccountKeeper interface {
 	GetModuleAddress(name string) sdk.AccAddress
 	GetModuleAccount(ctx context.Context, moduleName string) sdk.ModuleAccountI
+}
+
+// TwapSource supplies the session TWAP behind §6.2 fee conversion (task
+// 2.5): the windowed clearing-price average of base quoted in quote, and
+// whether it is warm enough to serve (in-window, enough observations,
+// positive). Implemented by the x/session keeper and injected at app
+// construction (SetTwapSource) so x/mandate keeps no compile-time x/session
+// edge — the same cycle-breaking pattern as SetLiveExposureFn (D-058/D-064).
+// This is the price index's ONLY consumer: ceiling valuation stays on
+// FaceValuePriceSource (AUDIT F-3 boundary; the D-044 swap is Phase-3 3.4).
+type TwapSource interface {
+	TwapPrice(ctx sdk.Context, base, quote string) (math.LegacyDec, bool)
 }

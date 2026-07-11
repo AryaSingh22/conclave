@@ -373,6 +373,12 @@ func NewConclaveApp(
 	// keeper value is captured by RegisterModules/setAnteHandler below, so the
 	// mandate msg-server and ante copies both observe it.
 	app.MandateKeeper.SetLiveExposureFn(app.VeilKeeper.SumLiveChargedSpendByOwner)
+	// wire the session TWAP behind §6.2 fee conversion (task 2.5): the fee
+	// seam consumes the clearing-price index instead of the fixed rate once
+	// warm. Same set-before-capture contract as SetLiveExposureFn above. The
+	// index's ONLY consumer — ceiling valuation stays on FaceValuePriceSource
+	// (F-3 boundary; the D-044 swap is Phase-3 3.4).
+	app.MandateKeeper.SetTwapSource(app.SessionKeeper)
 	// wire the veil↔epoch cycle (D-068): veil's submit-time epoch-tag check needs
 	// IsDecryptableEpoch; epoch's drain-before-rotate needs HasInFlightForEpoch.
 	// SetEpochKeeper must run BEFORE the veil keeper value is captured by

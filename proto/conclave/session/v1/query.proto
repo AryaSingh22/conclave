@@ -42,6 +42,14 @@ service Query {
   rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
     option (google.api.http).get = "/conclave/session/v1/params";
   }
+
+  // Twap returns the session TWAP for one asset pair (task 2.5): the
+  // windowed clearing-price average, its fee-conversion inverse, and
+  // whether enough observations back it. base/quote ride as query params
+  // because denoms may contain '/' (ibc/<hash>, data/{schema}).
+  rpc Twap(QueryTwapRequest) returns (QueryTwapResponse) {
+    option (google.api.http).get = "/conclave/session/v1/twap";
+  }
 }
 
 message QuerySessionRequest {
@@ -89,4 +97,35 @@ message QueryParamsRequest {}
 
 message QueryParamsResponse {
   Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+message QueryTwapRequest {
+  // base identifies the asset being priced.
+  string base = 1;
+  // quote is the asset the price is quoted in.
+  string quote = 2;
+}
+
+message QueryTwapResponse {
+  // twap is the windowed average price (quote per base); zero when no
+  // in-window observations exist.
+  string twap = 1 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  // rate is the inverse (base per quote) — the §6.2 fee-conversion
+  // orientation; zero when twap is zero.
+  string rate = 2 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  // observation_count is the number of in-window observations.
+  uint64 observation_count = 3;
+  // warm reports observation_count >= params.twap_min_observations — the
+  // condition under which consumers use the TWAP instead of their fallback.
+  bool warm = 4;
 }

@@ -41,6 +41,13 @@ type Keeper struct {
 	// app level) and the veil↔mandate cycle is broken the same way SetVeilKeeper
 	// breaks veil↔session. nil => no adoption (mandate unit tests without veil).
 	liveExposureFn func(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress) (sdk.Coins, error)
+
+	// twapSource, when wired at app construction, supplies the session TWAP
+	// behind §6.2 fee conversion (task 2.5). Injected via SetTwapSource (the
+	// SetLiveExposureFn pattern) so x/mandate keeps no compile-time x/session
+	// edge. nil => ExecuteFeeAbstraction always uses the fixed fallback rate
+	// (mandate unit tests without session).
+	twapSource types.TwapSource
 }
 
 // SetLiveExposureFn wires the x/veil live-exposure scan used by IssueMandate to
@@ -49,6 +56,14 @@ type Keeper struct {
 // the module/ante wiring, so every copy observes it (mirrors SetVeilKeeper).
 func (k *Keeper) SetLiveExposureFn(fn func(ctx sdk.Context, chamberID uint32, grantee sdk.AccAddress) (sdk.Coins, error)) {
 	k.liveExposureFn = fn
+}
+
+// SetTwapSource wires the x/session TWAP behind §6.2 fee conversion (task
+// 2.5). Same contract as SetLiveExposureFn: the app calls this once both
+// keepers exist, BEFORE the keeper value is captured by the module/ante
+// wiring, so every copy observes it.
+func (k *Keeper) SetTwapSource(src types.TwapSource) {
+	k.twapSource = src
 }
 
 // NewKeeper creates a new x/mandate Keeper.

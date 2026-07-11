@@ -46,5 +46,30 @@ func (gs GenesisState) Validate() error {
 			return fmt.Errorf("session %d has unspecified state", ses.Id)
 		}
 	}
+
+	seenPair := make(map[string]bool, len(gs.TwapRecords))
+	for _, rec := range gs.TwapRecords {
+		key, ok := TwapKey(rec.Base, rec.Quote)
+		if !ok {
+			return fmt.Errorf("twap record %s/%s: invalid pair", rec.Base, rec.Quote)
+		}
+		if seenPair[string(key)] {
+			return fmt.Errorf("duplicate twap record %s/%s", rec.Base, rec.Quote)
+		}
+		seenPair[string(key)] = true
+		if rec.Twap.IsNil() || rec.Twap.IsNegative() {
+			return fmt.Errorf("twap record %s/%s: twap must be non-negative", rec.Base, rec.Quote)
+		}
+		prev := uint64(0)
+		for _, ob := range rec.Observations {
+			if ob.Price.IsNil() || !ob.Price.IsPositive() {
+				return fmt.Errorf("twap record %s/%s: observation price must be positive", rec.Base, rec.Quote)
+			}
+			if ob.Height < prev {
+				return fmt.Errorf("twap record %s/%s: observations must be ascending by height", rec.Base, rec.Quote)
+			}
+			prev = ob.Height
+		}
+	}
 	return nil
 }

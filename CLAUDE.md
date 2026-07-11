@@ -322,8 +322,32 @@ task below bootstraps from it.
       = the node-side gRPC surface contract.
 - [ ] 2.4 7683 resolver — **SEPARATE REPO** (`conclave-7683-resolver`); in-repo deliverable
       = the node-side gRPC + receipt-proof surface contract.
-- [ ] 2.5 Real USDC via IBC + session-TWAP fee (swaps the `window.go:138` fee seam;
-      shares the IBC-line question with 2.2).
+- [x] 2.5 Real USDC via IBC + session-TWAP fee — **D-081 (STOP #1) + D-082 (build).**
+      TWO-STOP run: STOP #1 = the IBC-line decision in isolation (stay ibc-go
+      v8.8.0 — the pin already wired; v10-on-v0.50 is a DEADER sub-line;
+      the family bump is 3.3's, still blocked by block-sdk-frozen + the
+      wasmd-v0.53/go-1.24 kyber collision; EOL-v8 usage recorded as POSTURE
+      under P3-B, not drift; the D-077 v0.53 checkpoint re-ran and re-failed
+      on (a)). STOP #2 = the integration+TWAP plan. Shipped: x/session
+      per-pair price index (0x0B, observations folded inside the Conclude
+      cache with the receipts; per-height-mean-then-across-heights TWAP
+      recomputed at write; window/min-obs params 1200/10; genesis + gRPC
+      `Twap` query) + the nil-safe `TwapSource` seam into
+      `ExecuteFeeAbstraction` (warm → fee/price single-rounding truncate-to-
+      pool; cold/stale → `fee_conversion_rate`, now the deterministic
+      fallback — the `window.go:138` TODO closed; conversion provenance
+      events). F-2/F-3 carried EXACTLY: MsgTransfer still zero-valued
+      (PINNED by `TestSpendIntentF2BoundaryPin` — 3.4 flips it by deliberate
+      red), FaceValuePriceSource untouched (the TWAP's ONLY consumer is the
+      fee seam; D-044 swap stays 3.4). IBC-USDC proven by a REAL two-chain
+      ICS-20 e2e (ibctesting; `app/ibctesting.go` getters): voucher lands,
+      values at face, ibc/<hash> ceilings BIND, fee converts cold→warm
+      through the app-wired seam; the live relayer demo = §6 exit demo.
+      Vector sequenced for attribution (NO dep changes all task): run #1
+      post-regen read-only = byte-identical; run #2 post-wiring = NEW
+      baseline (recorded in D-082), two-pass identical. Watched-red proofs:
+      seam / cold-gate / pruning each red-without-guard. Fee-TWAP
+      manipulation surface → 3.1 audit input (PHASE3_PLAN §3.1 updated).
 - [ ] 2.6 Matcher-richness hardening pass — owns latent TODOs: partial-fill/cycle-aware
       fallback, partial-fill cycles + alt numeraire anchoring, §5.1 limit-rate honoring,
       multi-intent-per-sigil, multi-asset in-kind skim. One determinism-focused session

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -132,11 +133,17 @@ func (k Keeper) FeeAbstractionMandate(ctx sdk.Context, feePayer sdk.AccAddress, 
 // ExecuteFeeAbstraction implements the SPEC §6.2 FeeAbstractionDecorator
 // settlement: the foreign-denom fee is deducted from fee_sponsor if set,
 // else from the grantee, into the module fee pool account; the pool pays
-// the fee collector the converted amount in the native denom at the fixed
-// param rate. No mint, no burn — the pool is a genesis-funded CLV float.
+// the fee collector the converted amount in the native denom. No mint, no
+// burn — the pool is a genesis-funded CLV float.
 //
-// CONCLAVE-TODO(phase-2): task 2.5 replaces the fixed fee_conversion_rate
-// with a TWAP from session clearing prices.
+// Conversion rate (task 2.5): the session TWAP — the windowed average of
+// committed clearing prices for the native denom quoted in the fee denom —
+// when the wired TwapSource reports the pair warm; otherwise the fixed
+// fee_conversion_rate param, now the deterministic cold-start fallback
+// (fresh chain, never-priced fee denom, stale window, or unwired source).
+// The TWAP path divides by the price in ONE step (fee/price, then
+// truncate) rather than pre-inverting, so there is a single rounding and
+// truncation still favors the pool.
 func (k Keeper) ExecuteFeeAbstraction(ctx sdk.Context, m types.Mandate, fee sdk.Coins) error {
 	params, err := k.GetParams(ctx)
 	if err != nil {
@@ -153,8 +160,22 @@ func (k Keeper) ExecuteFeeAbstraction(ctx sdk.Context, m types.Mandate, fee sdk.
 	}
 
 	// truncation favors the pool: the fee collector never receives more
-	// native value than the posted rate implies
-	converted := fee[0].Amount.ToLegacyDec().Mul(params.FeeConversionRate).TruncateInt()
+	// native value than the effective rate implies
+	var converted math.Int
+	conversionSource := types.ConversionSourceFallback
+	effectiveRate := params.FeeConversionRate
+	if k.twapSource != nil {
+		if price, warm := k.twapSource.TwapPrice(ctx, params.FeePool.Denom, fee[0].Denom); warm {
+			converted = fee[0].Amount.ToLegacyDec().Quo(price).TruncateInt()
+			conversionSource = types.ConversionSourceTwap
+			// informational (event attribute only): the native-per-fee-denom
+			// rate this conversion worked out to; the math above divided once.
+			effectiveRate = math.LegacyOneDec().Quo(price)
+		}
+	}
+	if conversionSource == types.ConversionSourceFallback {
+		converted = fee[0].Amount.ToLegacyDec().Mul(params.FeeConversionRate).TruncateInt()
+	}
 	if converted.IsPositive() {
 		poolCoin := sdk.NewCoin(params.FeePool.Denom, converted)
 		poolAddr := k.accountKeeper.GetModuleAddress(types.ModuleName)
@@ -173,6 +194,8 @@ func (k Keeper) ExecuteFeeAbstraction(ctx sdk.Context, m types.Mandate, fee sdk.
 		sdk.NewAttribute(types.AttributeKeyFeePayer, payer.String()),
 		sdk.NewAttribute(types.AttributeKeyFee, fee.String()),
 		sdk.NewAttribute(types.AttributeKeyFeeClv, converted.String()),
+		sdk.NewAttribute(types.AttributeKeyConversionSource, conversionSource),
+		sdk.NewAttribute(types.AttributeKeyConversionRate, effectiveRate.String()),
 	))
 	return nil
 }
