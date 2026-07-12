@@ -83,6 +83,11 @@ func (b *mockBank) GetBalance(_ context.Context, addr sdk.AccAddress, denom stri
 	return sdk.NewCoin(denom, b.balances[addr.String()].AmountOf(denom))
 }
 
+// SpendableCoin: the mock has no vesting/locking, so spendable == balance.
+func (b *mockBank) SpendableCoin(_ context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+	return sdk.NewCoin(denom, b.balances[addr.String()].AmountOf(denom))
+}
+
 func (b *mockBank) balanceOf(addr string) sdk.Coins { return b.balances[addr] }
 
 // total sums every balance for a denom (supply-conservation assertions).

@@ -20,4 +20,11 @@ var (
 	ErrEpochNotDecryptable  = errorsmod.Register(ModuleName, 1313, "envelope epoch_id is not a currently-decryptable epoch")
 	ErrInvalidVoteExtension = errorsmod.Register(ModuleName, 1314, "invalid reveal vote extension")
 	ErrEpochMaterial        = errorsmod.Register(ModuleName, 1315, "epoch verification material unavailable for reveal")
+	// ErrBondFundsInsufficient mirrors the bond-escrow SendCoins failure as an
+	// up-front precondition (D-085/G2): distinct from ErrBondInsufficient (bond
+	// below the §6.3 minimum), this is "the submitter cannot fund the bond it
+	// declared". Surfacing it as a precondition lets the ante reject the submit
+	// BEFORE the §6.2 window charge, so a submit that would fail the escrow in
+	// the msg server never strands its optimistic charge.
+	ErrBondFundsInsufficient = errorsmod.Register(ModuleName, 1316, "insufficient spendable funds to escrow the bond")
 )

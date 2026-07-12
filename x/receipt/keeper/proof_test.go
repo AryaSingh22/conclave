@@ -90,6 +90,11 @@ func (b *mockBank) GetBalance(_ context.Context, addr sdk.AccAddress, denom stri
 	return sdk.NewCoin(denom, b.balances[addr.String()].AmountOf(denom))
 }
 
+// SpendableCoin: the mock has no vesting/locking, so spendable == balance.
+func (b *mockBank) SpendableCoin(_ context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+	return sdk.NewCoin(denom, b.balances[addr.String()].AmountOf(denom))
+}
+
 type mockDistr struct{ bank *mockBank }
 
 func (d mockDistr) FundCommunityPool(_ context.Context, amount sdk.Coins, sender sdk.AccAddress) error {

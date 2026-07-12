@@ -18,6 +18,7 @@ import (
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandateante "github.com/AryaSingh22/conclave/x/mandate/ante"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
+	veilkeeper "github.com/AryaSingh22/conclave/x/veil/keeper"
 )
 
 // HandlerOptions extends the SDK's ante HandlerOptions with Conclave-specific
@@ -27,6 +28,7 @@ type HandlerOptions struct {
 
 	IBCKeeper        *ibckeeper.Keeper
 	MandateKeeper    mandatekeeper.Keeper
+	VeilKeeper       veilkeeper.Keeper
 	UnorderedManager unordered.Manager
 
 	// CosmWasm (task 2.2): the wasm ante decorators need the keeper's gas
@@ -42,9 +44,10 @@ type HandlerOptions struct {
 // Pipeline per SPEC §2:
 //
 //	standard SDK decorators
-//	  → UnorderedTxDecorator   (ADR-070 pattern, SPEC §6.7)  — dedup + TTL
-//	  → MandateDecorator       (SPEC §6.2)                   — the agent-safety chokepoint
-//	  → FeeAbstractionDecorator (SPEC §6.2)                  — pay gas in USDC via conversion
+//	  → UnorderedTxDecorator              (ADR-070, SPEC §6.7) — dedup + TTL
+//	  → SubmitIntentPrevalidationDecorator (D-085/G2)          — reject a submit that would fail the veil msg server, before the charge
+//	  → MandateDecorator                  (SPEC §6.2)          — the agent-safety chokepoint
+//	  → FeeAbstractionDecorator           (SPEC §6.2)          — pay gas in USDC via conversion
 //
 // Unordered-tx integration (SPEC §6.7, task 0.5):
 //   - ExtensionOptionsDecorator accepts exactly UnorderedTxExtension;
@@ -113,6 +116,13 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 		unordered.NewIncrementSequenceDecorator(ante.NewIncrementSequenceDecorator(options.AccountKeeper)),
 		ibcante.NewRedundantRelayDecorator(options.IBCKeeper),
 		unordered.NewUnorderedTxDecorator(options.UnorderedManager),
+		// D-085/G2: reject a MsgSubmitIntent that would fail the veil msg
+		// server BEFORE MandateDecorator charges the window, so no ante-passing
+		// submit can strand its optimistic charge (breaking the D-059/D-064
+		// conservation invariant). Runs the SAME preconditions the msg server
+		// runs (one source of truth), covering nested submits like the mandate
+		// walk does.
+		mandateante.NewSubmitIntentPrevalidationDecorator(options.MandateKeeper, options.VeilKeeper),
 		mandateante.NewMandateDecorator(options.MandateKeeper),
 		mandateante.NewFeeAbstractionDecorator(options.MandateKeeper),
 	}

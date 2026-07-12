@@ -77,6 +77,12 @@ func (b *mockBank) GetBalance(_ context.Context, addr sdk.AccAddress, denom stri
 	return sdk.NewCoin(denom, b.balances[addr.String()].AmountOf(denom))
 }
 
+// SpendableCoin mirrors the SDK bank view: for the mock, all held coins are
+// spendable (no vesting/locking), so it equals GetBalance.
+func (b *mockBank) SpendableCoin(_ context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+	return sdk.NewCoin(denom, b.balances[addr.String()].AmountOf(denom))
+}
+
 func (b *mockBank) balanceOf(addr string) sdk.Coins { return b.balances[addr] }
 
 // total sums every balance the mock holds (bond-conservation assertions).
@@ -250,6 +256,59 @@ func (f *fixture) mustRecord(t testingT, id string) types.IntentRecord {
 	rec, err := f.k.GetIntentRecord(f.ctx, 0, id)
 	require.NoError(t, err)
 	return rec
+}
+
+// TestValidateSubmitIntentPreconditions exercises the SINGLE SOURCE OF TRUTH
+// for the payload-independent submit preconditions (D-085/G2) — the function
+// the msg server AND the ante prevalidation decorator both call. Each case is
+// a msg-server failure mode; a gap here is a surviving strand vector in the
+// ante (a submit that passes prevalidation but fails the msg server would
+// strand its charge). The unfundable-bond mode (ErrBondFundsInsufficient) is
+// only provable here, where the mock bank balance is controllable.
+func TestValidateSubmitIntentPreconditions(t *testing.T) {
+	f := setupKeeper(t)
+	owner := randAddr()
+	sigilID := f.registerSigil(t, owner)
+	other := randAddr()
+	otherSigil := f.registerSigil(t, other)
+	f.bank.fund(owner.String(), sdk.NewCoins(sdk.NewInt64Coin(bondDenom, 100_000_000)))
+
+	goodPayload := payloadBytes(t, sdk.NewInt64Coin(usdcDenom, 100_000_000))
+	goodEnv := func() []byte { return envelopeBytes(t, 100, "", sdk.NewInt64Coin(usdcDenom, 100_000_000)) }
+	good := func() *types.MsgSubmitIntent { return submitMsg(owner, sigilID, goodPayload, goodEnv(), minBond()) }
+
+	// happy path: returns env + owner, no error
+	env, gotOwner, err := f.k.ValidateSubmitIntentPreconditions(f.ctx, good())
+	require.NoError(t, err)
+	require.Equal(t, owner, gotOwner)
+	require.Equal(t, uint64(100), env.TtlHeight)
+
+	cases := []struct {
+		name    string
+		mutate  func(m *types.MsgSubmitIntent)
+		wantErr error
+	}{
+		{"wrong chamber", func(m *types.MsgSubmitIntent) { m.ChamberId = 7 }, types.ErrInvalidChamber},
+		{"malformed envelope", func(m *types.MsgSubmitIntent) { m.Envelope = []byte{0xFF, 0xFF} }, types.ErrInvalidEnvelope},
+		{"ttl not beyond height", func(m *types.MsgSubmitIntent) { m.Envelope = envelopeBytes(t, 1, "") }, types.ErrInvalidEnvelope},
+		{"foreign sigil", func(m *types.MsgSubmitIntent) { m.SenderSigil = otherSigil }, types.ErrSigilMismatch},
+		{"bad bond denom", func(m *types.MsgSubmitIntent) { m.Bond = sdk.NewInt64Coin(usdcDenom, 1_000_000) }, types.ErrInvalidBond},
+		{"bond below required", func(m *types.MsgSubmitIntent) { m.Bond = sdk.NewInt64Coin(bondDenom, 500_000) }, types.ErrBondInsufficient},
+	}
+	for _, tc := range cases {
+		m := good()
+		tc.mutate(m)
+		_, _, err := f.k.ValidateSubmitIntentPreconditions(f.ctx, m)
+		require.ErrorIs(t, err, tc.wantErr, "case %q", tc.name)
+	}
+
+	// unfundable bond: a valid bond (≥ required) the submitter cannot pay.
+	poor := randAddr()
+	poorSigil := f.registerSigil(t, poor)
+	f.bank.fund(poor.String(), sdk.NewCoins(sdk.NewInt64Coin(bondDenom, 500_000))) // 0.5 CLV < 1 CLV bond
+	poorMsg := submitMsg(poor, poorSigil, goodPayload, goodEnv(), minBond())
+	_, _, err = f.k.ValidateSubmitIntentPreconditions(f.ctx, poorMsg)
+	require.ErrorIs(t, err, types.ErrBondFundsInsufficient, "unfundable bond must be rejected")
 }
 
 func TestSubmitIntent(t *testing.T) {

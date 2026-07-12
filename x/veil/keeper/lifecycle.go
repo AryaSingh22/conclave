@@ -19,20 +19,40 @@ import (
 // bpsDenominator converts basis points to a fraction.
 const bpsDenominator = 10_000
 
-// SubmitIntent implements SPEC §6.3 MsgSubmitIntent semantics: envelope
-// validation, bond validation against the §6.3 formula, bond escrow into
-// the module account, id assignment (§5.1 derivation via D-009), and
-// storage as SUBMITTED. The payload (ciphertext) is deliberately NOT
-// inspected for validity — malformedness is the Reveal's job even in stub
-// mode (§6.3 INVALID path; Phase 1 cannot inspect ciphertexts here).
-func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (string, error) {
+// ValidateSubmitIntentPreconditions runs EXACTLY the payload-independent
+// preconditions the SubmitIntent msg server enforces before it escrows the
+// bond and writes the record — the checks that never read the (possibly
+// encrypted) IntentPayload. It is the SINGLE SOURCE OF TRUTH for those
+// preconditions: SubmitIntent calls it on the direct/msg-server path, and the
+// SubmitIntentPrevalidationDecorator calls it in the ante BEFORE the SPEC §6.2
+// mandate window charge (D-085/G2). Because BOTH callers use this one
+// function, a submit that would fail in the msg server is rejected in the ante
+// first, so the mandate's optimistic charge (which baseapp commits before the
+// msg runs) never strands — closing the on-demand break of the D-059/D-064
+// conservation invariant that a msg-server-only rejection would leave behind.
+//
+// Every check here mirrors a msg-server early-return, one-for-one:
+//
+//	chamber           → ErrInvalidChamber
+//	envelope structure → ErrInvalidEnvelope (ttl, fee_bid, spend_commitment)
+//	epoch-tag          → ErrEpochNotDecryptable
+//	sender parses      → bech32 error
+//	sender→sender_sigil → ErrSigilMismatch
+//	bond valid/denom/≥required → ErrInvalidBond / ErrBondInsufficient
+//	bond fundable      → ErrBondFundsInsufficient (mirrors the escrow SendCoins)
+//
+// A new payload-independent precondition added to SubmitIntent MUST be added
+// here too, or a new strand opens for the uncovered mode. Returns the parsed
+// envelope and owner so SubmitIntent does not re-derive them.
+func (k Keeper) ValidateSubmitIntentPreconditions(ctx sdk.Context, msg *types.MsgSubmitIntent) (types.IntentEnvelope, sdk.AccAddress, error) {
+	var env types.IntentEnvelope
 	if msg.ChamberId != phase0Chamber {
-		return "", errorsmod.Wrapf(types.ErrInvalidChamber, "msg chamber_id %d", msg.ChamberId)
+		return env, nil, errorsmod.Wrapf(types.ErrInvalidChamber, "msg chamber_id %d", msg.ChamberId)
 	}
 	height := uint64(ctx.BlockHeight())
 	env, err := types.ValidateEnvelope(msg.Envelope, height)
 	if err != nil {
-		return "", err
+		return env, nil, err
 	}
 
 	// D-068 epoch-tag validation (both edges). A non-zero envelope epoch_id must
@@ -44,12 +64,12 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 	// is wired (stub mode) — the check is skipped so stub-mode behavior is
 	// uniform with Phase 0.
 	if env.EpochId != 0 && k.epochKeeper != nil && !k.epochKeeper.IsDecryptableEpoch(ctx, env.EpochId) {
-		return "", errorsmod.Wrapf(types.ErrEpochNotDecryptable, "epoch_id %d", env.EpochId)
+		return env, nil, errorsmod.Wrapf(types.ErrEpochNotDecryptable, "epoch_id %d", env.EpochId)
 	}
 
 	owner, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
-		return "", err
+		return env, nil, err
 	}
 
 	// the sender must resolve to sender_sigil through the x/sigil reverse
@@ -57,13 +77,13 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 	// are identity-centric (§5.1 "sigil ID, not raw address")
 	sigilID, err := k.sigilKeeper.SigilIDByAddress(ctx, msg.ChamberId, owner)
 	if err != nil || sigilID != msg.SenderSigil {
-		return "", errorsmod.Wrapf(types.ErrSigilMismatch,
+		return env, owner, errorsmod.Wrapf(types.ErrSigilMismatch,
 			"sender %s does not resolve to sigil %q", msg.Sender, msg.SenderSigil)
 	}
 
 	params, err := k.GetParams(ctx)
 	if err != nil {
-		return "", err
+		return env, owner, err
 	}
 
 	// SPEC §6.3 bond rules: bond = max(min_bond_param, bond_bps * face_value),
@@ -74,18 +94,47 @@ func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (strin
 	// path ships — the same uniformity that makes the ante commitment-bound.
 	// Over-declaration therefore costs a larger bond (correct self-penalty).
 	if err := msg.Bond.Validate(); err != nil {
-		return "", errorsmod.Wrapf(types.ErrInvalidBond, "%s", err)
+		return env, owner, errorsmod.Wrapf(types.ErrInvalidBond, "%s", err)
 	}
 	if msg.Bond.Denom != params.MinBond.Denom {
-		return "", errorsmod.Wrapf(types.ErrInvalidBond,
+		return env, owner, errorsmod.Wrapf(types.ErrInvalidBond,
 			"bond denom %s, want %s", msg.Bond.Denom, params.MinBond.Denom)
 	}
-	commitment := env.SpendCommitment
-	required := params.RequiredBond(faceValueScalar(commitment))
+	required := params.RequiredBond(faceValueScalar(env.SpendCommitment))
 	if msg.Bond.Amount.LT(required.Amount) {
-		return "", errorsmod.Wrapf(types.ErrBondInsufficient,
+		return env, owner, errorsmod.Wrapf(types.ErrBondInsufficient,
 			"bond %s below required %s", msg.Bond, required)
 	}
+	// the submitter must be able to fund the bond escrow. This mirrors the
+	// SendCoinsFromAccountToModule below as an up-front precondition (D-085/G2):
+	// without it, an under-funded submit passes the ante (charging the window)
+	// and fails the escrow in the msg server, stranding the charge. The bond
+	// denom is the native bond denom (checked above); the standard fee is
+	// deducted earlier in the ante and abstracted fees are a different denom, so
+	// the spendable balance read here still predicts the escrow.
+	if spendable := k.bankKeeper.SpendableCoin(ctx, owner, msg.Bond.Denom); spendable.Amount.LT(msg.Bond.Amount) {
+		return env, owner, errorsmod.Wrapf(types.ErrBondFundsInsufficient,
+			"spendable %s < bond %s", spendable, msg.Bond)
+	}
+	return env, owner, nil
+}
+
+// SubmitIntent implements SPEC §6.3 MsgSubmitIntent semantics: envelope
+// validation, bond validation against the §6.3 formula, bond escrow into
+// the module account, id assignment (§5.1 derivation via D-009), and
+// storage as SUBMITTED. The payload (ciphertext) is deliberately NOT
+// inspected for validity — malformedness is the Reveal's job even in stub
+// mode (§6.3 INVALID path; Phase 1 cannot inspect ciphertexts here).
+func (k Keeper) SubmitIntent(ctx sdk.Context, msg *types.MsgSubmitIntent) (string, error) {
+	// all payload-independent preconditions in one place (D-085/G2) — the
+	// SAME function the ante prevalidation decorator runs, so an ante-passing
+	// submit cannot fail here and strand its optimistic charge.
+	env, owner, err := k.ValidateSubmitIntentPreconditions(ctx, msg)
+	if err != nil {
+		return "", err
+	}
+	height := uint64(ctx.BlockHeight())
+	commitment := env.SpendCommitment
 
 	// escrow the bond in the module account (refund/slash at lifecycle end)
 	if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, owner, types.ModuleName, sdk.NewCoins(msg.Bond)); err != nil {

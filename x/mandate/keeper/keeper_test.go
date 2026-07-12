@@ -267,6 +267,54 @@ func TestIssueMandateReplace(t *testing.T) {
 	require.Equal(t, second, bySigil[0].Id)
 }
 
+// TestIssueMandateCrossSigilRebindRejected asserts the D-084 guard: REPLACE
+// (D2, one active mandate per key) is SAME-SIGIL only. Without it, ANY sigil
+// controller could rebind a grantee already bound to a different sigil —
+// deleting the victim sigil's mandate without its controller's consent,
+// carrying its outstanding_commitment cross-principal, and overwriting the
+// reverse index (bricking the key for its real principal). Watched RED
+// against the unguarded code: the rebind succeeded and the victim mandate
+// was gone.
+func TestIssueMandateCrossSigilRebindRejected(t *testing.T) {
+	f := setupKeeper(t)
+	victimController := randAddr()
+	attackerController := randAddr()
+	sigilVictim := f.registerSigil(t, victimController)
+	sigilAttacker := f.registerSigil(t, attackerController)
+	grantee := randAddr()
+
+	victimID, err := f.k.IssueMandate(f.ctx, victimController, validTerms(sigilVictim, grantee))
+	require.NoError(t, err)
+
+	// the attacker controls a real sigil and signs correctly — only the
+	// cross-sigil binding is illegitimate
+	_, err = f.k.IssueMandate(f.ctx, attackerController, validTerms(sigilAttacker, grantee))
+	require.ErrorIs(t, err, types.ErrGranteeConflict,
+		"a bound grantee must not be rebindable by another sigil's controller")
+
+	// the victim's mandate and reverse-index binding are intact
+	m, found, err := f.k.ActiveMandateByGrantee(f.ctx, 0, grantee)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, victimID, m.Id)
+	require.Equal(t, sigilVictim, m.SigilId)
+	indexed, err := f.sigil.SigilIDByAddress(f.ctx, 0, grantee)
+	require.NoError(t, err)
+	require.Equal(t, sigilVictim, indexed)
+
+	// the key stays burned to its sigil even after revocation (D-017
+	// posture): revoke-then-cross-issue is rejected the same way
+	require.NoError(t, f.k.RevokeMandate(f.ctx, victimController, victimID))
+	_, err = f.k.IssueMandate(f.ctx, attackerController, validTerms(sigilAttacker, grantee))
+	require.ErrorIs(t, err, types.ErrGranteeConflict,
+		"revocation must not open the key to cross-sigil capture")
+
+	// while the same-sigil re-enable path (revoke → reissue) still works
+	reissued, err := f.k.IssueMandate(f.ctx, victimController, validTerms(sigilVictim, grantee))
+	require.NoError(t, err)
+	require.NotEqual(t, victimID, reissued)
+}
+
 func TestRevokeMandate(t *testing.T) {
 	f := setupKeeper(t)
 	controller := randAddr()

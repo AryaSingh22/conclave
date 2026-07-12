@@ -3318,3 +3318,248 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   exact at ±1 block; golden Dec pins; the F-2 boundary pin; genesis
   round-trip; the ibc-denom pair through the index; the two-chain e2e.
   Red-without-the-guard runs recorded in the task record.
+
+## D-083 — Task 2.3: x402 gateway surface contract — the node-side surface is COMPLETE; in-repo deliverable = docs/edge/X402_SURFACE.md + app-level conformance + live sweep; the gateway itself is a separate repo
+
+- **Date:** 2026-07-11 (task 2.3; STOP #1 approved the plan and the D-084
+  fix as option (a))
+- **SPEC:** §9 (edge services), §6.2 (mandate ante + fee abstraction), §6.3
+  (MsgSubmitIntent), §6.6 (receipts/proofs); PHASE2_DESIGN §2.3 (FLAG C);
+  PHASE3_PLAN §5.2 R4 advisory (x402 Foundation targets spec v1.0 Q3 2026).
+- **Surface verdict (the honest answer, per the §2.3 acceptance).** Every
+  endpoint SPEC §9 / PHASE2_DESIGN §2.3 name EXISTS at `dccd607`: tx
+  submission (`cosmos.tx.v1beta1.Service` + the D-026 unordered extension =
+  the replay model), the veil/session/receipt/mandate/sigil/epoch query
+  services incl. `Twap` (D-082) and `ReceiptProof` (ICS-23), and the §6.2
+  fee abstraction (`fee_denoms` + TWAP conversion, D-082). Task 2.3
+  therefore adds NO node gRPC. The in-repo deliverable is the CONTRACT and
+  its proof:
+  - **`docs/edge/X402_SURFACE.md`** — the binding contract: endpoints and
+    shapes (§3/§5), the auth model (§1), the replay model (§3.2), the
+    fee/gas model (§4 — gas fronts in uusdc; bonds are uclv and NOT
+    fee-abstracted), settlement confirmation (§6), the settlement denom as
+    a PARAMETER (`uusdc` literal on dev; `ibc/<hash>` per D-082), and the
+    x402 **v1.0-RC version posture**: the node surface depends on no x402
+    protocol detail, so pre-1.0 breakage risk is owned entirely by the
+    gateway repo (the R4 advisory discharged — PHASE2_DESIGN §2.3 predated
+    that finding).
+  - **`app/x402_surface_conformance_test.go`** (in `make test`) — the
+    load-bearing auth proof from a gateway-shaped fixture (below).
+  - **`scripts/x402_surface_check.sh` + `conclave-demo x402-check`** —
+    every named endpoint exercised once against a LIVE localnet,
+    gateway-shaped (sigil/mandate setup, submit with a real uusdc fee
+    through fee abstraction, fallback clearing, Receipts→Receipt→
+    ReceiptProof, pre-OPEN cancel, and the live auth negatives incl. the
+    D-084 rebind rejection). Dev tooling, not in `make test`.
+- **The auth model (the plan-stop crux, confirmed by direct read — Rule 9).**
+  Submission authority is **"hold a key + hold a mandate"**; the node
+  exposes NO server-side signing and no submit-on-behalf-of RPC. The
+  chokepoint chain: SDK signature verification → the single-valued sigil
+  reverse index (`ErrSigilMismatch`, `x/veil` SubmitIntent; includes
+  mandate-bound delegate keys, D-017(d)) → the §6.2 mandate ante (TypeURL
+  allowlist deny-by-default with recursive unwrap; per-tx + window ceilings
+  bound to `spend_commitment + bond`, D-065; optimistic CheckTx charge =
+  the stolen-key parallel bound; expiry/revocation; no self-escalation) →
+  the D-075/D-076 consent gates (a gateway's condition consent is delegated
+  consent, bounded by the mandate; it cannot impose conditions on
+  counterparties). Deployment models documented: (A) gateway-as-principal
+  (the §6 exit-demo shape; x402 payers never touch the chain) and (B)
+  per-agent delegation; **one key ↔ one sigil** (single-valued index) ⇒ a
+  gateway runs one hot key per principal, and hot keys are never controller
+  keys (`ErrGranteeConflict`). Documented non-bounds (§1.3): fee spend is
+  NOT window-ceilinged (the `fee_sponsor` caveat);
+  payment-before-submission ordering and the x402-side nonce store are
+  gateway-repo obligations.
+- **Conformance suite (Rule 3/4).** `TestX402SurfaceConformance`: the bound
+  key submits for its sigil with the fee in uusdc (pool +fee, collector
+  +converted uclv, window charged commitment+bond, then released on
+  cancel); an allowlist-less mandate → `ErrMsgNotPermitted` (nothing
+  charged); over-ceiling → `ErrMandateExceeded` (nothing charged); an
+  unbound key → `ErrSigilMismatch` for every sigil; the bound key claiming
+  a foreign sigil → `ErrSigilMismatch`; a cross-sigil rebind →
+  `ErrGranteeConflict` with the victim binding intact and functional
+  (D-084). Pre-existing guards' red-proofs live in their owning tasks; the
+  NEW guard's red-first run is recorded in D-084.
+- **Separate repo (unchanged posture, FLAG C).** `conclave-x402-gateway` =
+  x402 HTTP facade (402 → X-PAYMENT → verify → X-PAYMENT-RESPONSE carrying
+  receipt id + ICS-23 proof), hot wallet (one mandate-bound key per
+  principal), replay-nonce store, unordered-tx submitter, settlement
+  watcher, gas-fronting reconciliation. Builds against X402_SURFACE.md at a
+  pinned commit; its code/tests are NOT in `make test`; its plan-stops
+  (hot-wallet model, nonce store, fee reconciliation) belong to that repo.
+- **G3 — found in-task, fixed in-task (dev tooling only, surfaced per
+  Rule 8): `scripts/demo_e2e.sh` was silently stale, TWICE over.**
+  (a) `conclave-demo`'s `buildIntent` predated D-065 and declared no
+  `spend_commitment`: the §1.3-step-3 over-ceiling reject could no longer
+  fire (an empty commitment values at bond-only) and every coin-give demo
+  intent would slash INVALID at the Reveal — stale since task 1.1. Fixed:
+  `buildIntent` declares commitment = its coin give legs. (b) The driver's
+  gRPC connection used grpc-go's DEFAULT codec, which decodes through
+  protobuf-go reflection and PANICS on gogoproto customtype fields
+  (`invalid Go type math.LegacyDec`) — first hit live by x402-check's
+  `Twap` read; `cycle-and-assert`'s sigil `Reputation` read has the same
+  shape. Fixed: the connection forces the SDK's gogo-aware
+  `ProtoCodec.GRPCCodec()`. Both breaks lived in an acceptance script that
+  nothing re-ran — the same lesson as the epoch-inert vector (D-069):
+  an acceptance artifact that is not exercised is not covering anything.
+  No consensus code; the demo driver is a gRPC client.
+- **Settlement-custody clarification (surfaced live, folded into the
+  contract — X402_SURFACE.md §1.2).** Building the live sweep surfaced a
+  correct-but-non-obvious model fact: a matched intent's coin **give** legs
+  settle from the **sigil's controller address** (`conclude.go`
+  resolve→`ControllerAddress`), NOT the submitting gateway key. So a
+  mandate-bound gateway fronts only **gas + bond** from its own key; the
+  **settlement funds come from the principal's account**. In Model A the
+  gateway is the controller (settles from its own float); in Model B the
+  delegating agent must hold the coin-give funds, and the gateway's custody
+  exposure is bounded to its gas+bond float even though it authors the
+  intent. Not a defect — this is the correct agent-owns-the-funds model; it
+  is now stated in the contract because it is exactly the "whose funds"
+  authority question the surface must answer.
+- **Gates (output shown in the task record):** `make lint test` EXIT=0 on
+  the full tree; determinism vector run #1 (docs+tests+tooling only, pre-
+  D-084): **byte-identical** to the D-082 baseline, all 5 seeds; run #2 in
+  isolation after D-084: **byte-identical** again (the sim generates no
+  cross-sigil reissue) — no re-baseline; live sweep
+  `scripts/x402_surface_check.sh`: **PASS** end to end (setup, the §5 query
+  sweep, uusdc gas fronting via §4 fee abstraction with the pool delta
+  asserted, pre-OPEN `MsgCancelIntent`, a 2-party swap CONCLUDED via the
+  in-consensus fallback, `Session`/`CurrentSession` read-back, `Receipt` +
+  ICS-23 `ReceiptProof` as the X-PAYMENT-RESPONSE evidence, and all four
+  live auth negatives — foreign-sigil, unbound-key, over-ceiling,
+  cross-sigil rebind).
+
+## D-084 — Task 2.3 (G1): IssueMandate REPLACE is SAME-SIGIL only — closing the cross-sigil grantee-rebind hole; UPDATES D-064's REPLACE semantics
+
+- **Date:** 2026-07-11 (task 2.3; the fix approved at STOP #1 as option (a))
+- **SPEC:** §6.1 (reverse index invariant), §6.2 (MsgIssueMandate); builds
+  on D-010 (single-valued index), D-017 (revoked-record retention), D-059/
+  D-064 (outstanding_commitment conservation + REPLACE carry).
+- **The hole (found tracing the 2.3 auth surface).** The REPLACE branch
+  (D2: one active mandate per key) never compared the existing mandate's
+  sigil to the new terms'. ANY sigil controller — sigil registration is
+  unprivileged — could issue a mandate to a grantee already bound to a
+  DIFFERENT sigil, which (a) **deleted the victim sigil's mandate** without
+  its controller's consent (in tension with D-017 retention), (b) **carried
+  the victim's `outstanding_commitment` cross-principal** into the
+  attacker's mandate — the D-059/D-064 conservation split made violable by
+  an unrelated third party, and (c) **overwrote the reverse index**,
+  bricking the key's submissions for its real principal
+  (`ErrSigilMismatch` on every subsequent submit). This is exactly the key
+  class edge gateways run (X402_SURFACE.md §1.1 "binding stability").
+  `GranteeResolvesToSigilInvariant` could not catch it: the deletion keeps
+  post-attack state invariant-clean.
+- **Unconsidered, not intended:** `AmendMandate` already enforces the same
+  invariant ("amendment cannot change the sigil"); REPLACE simply never
+  inherited it, and `TestIssueMandateReplace` covered only same-controller/
+  same-sigil reissue.
+- **Decision.** REPLACE requires `existing.SigilId == terms.SigilId`, else
+  `ErrGranteeConflict`. The D-064 same-sigil carry and the revoke→reissue
+  re-enable path are untouched. Because revoked records are retained
+  (D-017) and found by the REPLACE lookup, a used grantee key stays
+  **burned to its sigil even after revocation** — cross-sigil key migration
+  is deliberately impossible; edge operators use a fresh key per principal
+  (X402_SURFACE.md §1.2).
+- **Watched red-first (Rule 3):** `TestIssueMandateCrossSigilRebindRejected`
+  ran RED against the unguarded code (the rebind SUCCEEDED — "Target error
+  should be in err chain … in chain: <empty>", keeper_test.go:292), then
+  GREEN with the guard; it also pins the intact victim binding, the
+  post-revocation burn, and the surviving same-sigil re-enable.
+  `TestX402SurfaceConformance` asserts the rejection at the app level with
+  the gateway still functional; `x402-check` asserts it against a live
+  node.
+- **Determinism (Rule 7):** consensus-affecting (a msg handler gains a
+  rejection), so the vector ran in ISOLATION on this change: byte-identical
+  to the D-082 baseline (the sim's mandate ops never produce cross-sigil
+  reissue) — no re-baseline.
+
+## D-085 — Task 2.3 finding G2: a mandate-bound MsgSubmitIntent that fails in the MSG SERVER stranded its ante charge (an on-demand conservation break) — FOUND, severity-graded, and MITIGATED in-task by ante pre-validation; the STRUCTURAL design fork is task 2.8
+
+- **Date:** 2026-07-11 (found while building the conformance suite);
+  **mitigated 2026-07-12** (STOP: severity determination → MITIGATE-NOW
+  approved). Rules 3/4/6/8/9.
+- **The defect.** The §6.2 ante charges the window optimistically in CheckTx
+  AND DeliverTx (D-059). cosmos-sdk v0.50 `baseapp.runTx` commits ante writes
+  to the deliver state BEFORE `runMsgs` and discards the msg cache on failure
+  with no ante rollback (a refund-on-failure postHandler is structurally
+  impossible — its writes land in the same discarded cache; verified in
+  `baseapp.go`). Consequence: a mandate-bound `MsgSubmitIntent` that passed
+  the ante but failed a veil msg-server precondition (`ErrSigilMismatch`,
+  bond `< required`, `ErrInvalidEnvelope`, `ErrEpochNotDecryptable`,
+  `ErrInvalidChamber`, unfundable-bond escrow) permanently stranded
+  `spend_commitment + bond` in `outstanding_commitment`: no intent record, so
+  `DecommitIntent` never fires and rollover/amend/reissue CARRY the balance.
+  Each strand breaks the app-level mandate-commitment-conservation invariant
+  (grantee with outstanding_commitment, zero live intents) — the D-059/D-064
+  accounting backbone of §1.1-goal-3.
+- **Severity (graded at the STOP, cites verified — Rule 9).**
+  - The invariant IS registered with the LIVE crisis module
+    (`app/invariants.go:50` → `app/app.go:525`), not test-only.
+  - **NOT a permissionless instant halt:** `MsgVerifyInvariant` is
+    permissionless but its broken-invariant `panic(res)` is CAUGHT by
+    baseapp's default recovery middleware (`recovery.go` `newDefaultRecovery
+    Middleware`) → an `ErrPanic` tx failure, not a halt. The SDK's "chain
+    halts here" comment is stale for the DeliverTx path in v0.50.15.
+  - **Auto-halt is operator-conditional:** the crisis EndBlock check runs
+    only if `--inv-check-period > 0` (`crisis/abci.go:17`; default 0 via
+    `crisis/module.go:200`). If set (the prudent-validator config), a broken
+    invariant panics in EndBlock (not recovered) → that node halts.
+  - **Attacker-reachable ON DEMAND** (the deciding exposure): permissionless
+    setup (register sigil, issue a mandate to a fresh grantee), then one
+    crafted submit strands the charge — proven by the pin test (bond
+    `< required`) and reachable via bogus `sender_sigil` etc. So the GLOBAL
+    conservation invariant is corruptible by an attacker using only their own
+    mandate, repeatably. Plus a gateway self-DoS: a gateway key whose error
+    path ever produces a msg-server-failing submit progressively bricks its
+    own window with phantom charges (the exact "contract claims stable
+    authority, error path degrades it" class as G1).
+  - Disposition: attacker-reachable corruption of THE conservation invariant
+    + operator-conditional halt is disqualifying for a silent deferral, even
+    without a permissionless instant halt. **Mitigate now.**
+- **The mitigation (shipped; the CLEAN FIX, not a stopgap).**
+  `x/veil` keeper `ValidateSubmitIntentPreconditions(ctx, msg) → (env, owner,
+  err)` is the SINGLE SOURCE OF TRUTH for the payload-independent submit
+  preconditions — chamber, envelope, epoch-tag, sender-parse, sender→sigil,
+  bond valid/denom/≥required, and **bond-fundable** (new `ErrBondFunds
+  Insufficient`, mirroring the escrow via `bankKeeper.SpendableCoin`, added to
+  the `BankKeeper` interface). BOTH callers use it: the veil msg server
+  (`SubmitIntent` now calls it first — the direct path) AND a new
+  `SubmitIntentPrevalidationDecorator` (`x/mandate/ante`) placed BEFORE
+  `MandateDecorator` in the ante chain. The decorator walks nested msgs with
+  the SAME `nestedAnys`/`max_msg_nesting_depth` the mandate charge uses, so it
+  covers every submit the mandate would charge (incl. `MsgExec`-wrapped). Net
+  effect: **no ante-passing submit can fail the veil msg server**, so the
+  strand vector CLOSES — the hole is closed, not masked. (Gating the
+  invariant's halt was REJECTED: it would hide a real D-059/D-064-shape break;
+  you never disable the detector.)
+- **One-source-of-truth is structural (no divergence).** Because the ante and
+  the msg server both call `ValidateSubmitIntentPreconditions`, a new payload-
+  independent precondition added to the msg server is added to BOTH callers by
+  construction; the function comment states this obligation.
+- **Load-bearing proof (Rule 3, watched-red RECORDED).**
+  `TestX402FailedSubmitDoesNotStrand_G2Closed` drives each failure mode
+  through the full app (ante+msg) and asserts rejection + `outstanding_
+  commitment` ZERO + the conservation invariant GREEN, and that a VALID submit
+  still lands AND still charges. Watched-red: commenting out the decorator in
+  `app/ante.go` flips it RED at `x402_surface_conformance_test.go:421`
+  ("foreign sigil: … charges nothing in the ante" — the strand returns);
+  restored to green. `x/veil/keeper` `TestValidateSubmitIntentPreconditions`
+  covers every mode one-for-one incl. the unfundable-bond
+  `ErrBondFundsInsufficient` (only provable where the mock balance is
+  controllable).
+- **Determinism (Rule 7).** Consensus-affecting (a new ante decorator changes
+  what state a would-fail submit leaves — a strand → nothing). Scoped to
+  mandate-charged txs only (root-key submits skip prevalidation — a lane-
+  routing test surfaced this and it is the correct scope: only a charged
+  submit can strand), so the sim's behavior is unchanged by construction (the
+  vector is green ⇒ the sim generates no would-fail mandate-bound submit).
+  Vector run in ISOLATION on the mitigation: **byte-identical** to the D-082
+  baseline, all 5 seeds (seed 1 `245EF177…`, seed 7 `FA562B1D…`,
+  seed 12 `E491FB48…`, seed 2 `B48BDA6D…`, seed 42 `6596CCA1…`), two
+  independent processes — no re-baseline.
+- **Owner of the STRUCTURAL fork: task 2.8** (Phase-2 ledger). 2.8 is no
+  longer the SECURITY fix (shipped here); it owns the design QUESTION —
+  ante-prevalidation-as-permanent-design vs a v0.50 mode-split charging
+  (CheckTx-only ante charge; DeliverTx charge inside the msg server,
+  revisiting D-059's "zero mode branching") — plus the timeouts→params
+  promotion. A plan-stop, off the exit path.

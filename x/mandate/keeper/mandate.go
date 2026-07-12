@@ -283,6 +283,23 @@ func (k Keeper) IssueMandate(ctx sdk.Context, controller sdk.AccAddress, terms t
 	if existing, found, err := k.ActiveMandateByGrantee(ctx, terms.ChamberId, grantee); err != nil {
 		return "", err
 	} else if found {
+		// D-084: REPLACE is SAME-SIGIL only. Without this, any sigil
+		// controller could rebind an already-bound grantee key — deleting
+		// the victim sigil's mandate without its controller's consent,
+		// carrying its outstanding_commitment cross-principal (a third-party
+		// break of the D-059/D-064 conservation split), and overwriting the
+		// reverse index. AmendMandate already enforces exactly this
+		// invariant ("amendment cannot change the sigil"); REPLACE inherits
+		// it. Because revoked records are retained (D-017) and found here,
+		// a used grantee key stays burned to its sigil even after
+		// revocation — cross-sigil key migration is deliberately impossible
+		// (edge operators use a fresh key per principal,
+		// docs/edge/X402_SURFACE.md §1.2).
+		if existing.SigilId != terms.SigilId {
+			return "", errorsmod.Wrapf(types.ErrGranteeConflict,
+				"grantee %s is bound to sigil %s; cross-sigil reissue is not permitted (D-084)",
+				grantee, existing.SigilId)
+		}
 		carriedCommitment = existing.OutstandingCommitment
 		if err := k.deleteMandate(ctx, existing); err != nil {
 			return "", err

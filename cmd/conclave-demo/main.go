@@ -35,6 +35,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
 	clienttx "github.com/cosmos/cosmos-sdk/client/tx"
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/crypto"
 	"github.com/cosmos/cosmos-sdk/crypto/hd"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
@@ -69,7 +70,7 @@ const (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check> [flags]")
 		os.Exit(2)
 	}
 	sub := os.Args[1]
@@ -99,6 +100,8 @@ func main() {
 		err = c.cycleAndAssert()
 	case "fallback":
 		err = c.fallback()
+	case "x402-check":
+		err = c.x402Check()
 	case "veil-e2e":
 		err = c.veilE2E()
 	case "veil-f4-adversary":
@@ -131,11 +134,19 @@ type cli struct {
 }
 
 func newCLI(grpcAddr, home, chainID string) (*cli, error) {
-	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conclave := app.NewConclaveApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
+	// force the SDK's gogo-aware codec on the connection: grpc-go's default
+	// codec decodes through protobuf-go reflection and panics on gogoproto
+	// customtype fields ("invalid Go type math.LegacyDec ...") — first hit
+	// by x402-check's Twap read (task 2.3, D-083); sigil Reputation has the
+	// same shape
+	conn, err := grpc.NewClient(grpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec.NewProtoCodec(conclave.InterfaceRegistry()).GRPCCodec())),
+	)
 	if err != nil {
 		return nil, err
 	}
-	conclave := app.NewConclaveApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
 	kr, err := keyring.New("conclave", keyring.BackendTest, home, nil, conclave.AppCodec())
 	if err != nil {
 		return nil, err
@@ -436,7 +447,18 @@ func (c *cli) buildIntent(sender sdk.AccAddress, sigil string, give, want []veil
 	if err != nil {
 		panic(err)
 	}
-	envBz, err := (&veiltypes.IntentEnvelope{TtlHeight: ttl}).Marshal()
+	// declare spend_commitment = the coin give legs (the honest declaration,
+	// D-065). Without it the ante values the intent at bond-only — so the
+	// §1.3-step-3 over-ceiling reject never fires — and the Reveal slashes
+	// every coin-give intent INVALID (actual give > the empty commitment).
+	// This builder predates D-065 and was stale until task 2.3 (D-083).
+	commitment := sdk.NewCoins()
+	for _, leg := range give {
+		if coin := leg.GetCoin(); coin != nil {
+			commitment = commitment.Add(*coin)
+		}
+	}
+	envBz, err := (&veiltypes.IntentEnvelope{TtlHeight: ttl, SpendCommitment: commitment}).Marshal()
 	if err != nil {
 		panic(err)
 	}
@@ -816,12 +838,21 @@ func (c *cli) broadcastCheck(priv cryptotypes.PrivKey, msgs ...sdk.Msg) (uint32,
 }
 
 func (c *cli) signTx(priv cryptotypes.PrivKey, accNum, seq uint64, msgs ...sdk.Msg) ([]byte, error) {
+	return c.signTxFee(priv, accNum, seq, nil, msgs...)
+}
+
+// signTxFee is signTx with an explicit fee — the x402-check §4 case needs a
+// real uusdc fee on the wire for the FeeAbstractionDecorator to convert.
+func (c *cli) signTxFee(priv cryptotypes.PrivKey, accNum, seq uint64, fee sdk.Coins, msgs ...sdk.Msg) ([]byte, error) {
 	txConfig := c.conclave.TxConfig()
 	builder := txConfig.NewTxBuilder()
 	if err := builder.SetMsgs(msgs...); err != nil {
 		return nil, err
 	}
 	builder.SetGasLimit(2_000_000)
+	if !fee.IsZero() {
+		builder.SetFeeAmount(fee)
+	}
 
 	addr := addrOf(priv)
 	if err := builder.SetSignatures(signingtypes.SignatureV2{

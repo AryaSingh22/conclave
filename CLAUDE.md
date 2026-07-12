@@ -318,8 +318,39 @@ task below bootstraps from it.
       libwasmvm_muslc). DEVIATION surfaced (D-079): the localnet contract-release
       smoke is deferred to the §6 exit demo — needs a CVM-schema contract binary
       (Rust toolchain); reflect's typed Custom cannot spell it.
-- [ ] 2.3 x402 gateway — **SEPARATE REPO** (`conclave-x402-gateway`); in-repo deliverable
-      = the node-side gRPC surface contract.
+- [x] 2.3 x402 gateway — surface contract **(D-083/D-084/D-085).** Node-surface
+      verdict: **ALREADY COMPLETE** (no new gRPC — tx service + unordered ext,
+      veil/session/receipt/mandate/sigil/epoch queries incl. Twap +
+      ReceiptProof, §6.2 fee abstraction). In-repo deliverable =
+      `docs/edge/X402_SURFACE.md` (auth model: "hold a key + hold a mandate",
+      no server-side signing; deployment models A/B; one-key-one-sigil;
+      fee-not-ceilinged + Simulate-first gateway obligations; x402 v1.0-RC
+      posture per the R4 advisory — node surface x402-version-independent) +
+      `app/x402_surface_conformance_test.go` (gateway-shaped auth proof incl.
+      live uusdc fee abstraction; every negative asserted by code) +
+      `scripts/x402_surface_check.sh` / `conclave-demo x402-check` (every
+      named endpoint against a live localnet). **G1 FIXED (D-084):**
+      IssueMandate REPLACE is now SAME-SIGIL only (`ErrGranteeConflict`;
+      red-first proven) — any sigil controller could previously rebind a
+      bound grantee key, deleting the victim mandate + carrying its
+      outstanding_commitment cross-principal. **G2 FOUND + MITIGATED (D-085):**
+      a msg-server-failed submit stranded its ante charge and broke the
+      conservation invariant on demand (postHandler refund structurally
+      impossible in v0.50); severity-graded (not a permissionless halt — crisis
+      `MsgVerifyInvariant` panic is recovered — but attacker-reachable invariant
+      corruption + operator-conditional `--inv-check-period` halt + gateway
+      self-DoS). CLOSED in-task by ante pre-validation:
+      `ValidateSubmitIntentPreconditions` (one source of truth) called by both
+      the veil msg server AND a `SubmitIntentPrevalidationDecorator` before
+      `MandateDecorator`, so no ante-passing submit can fail the msg server;
+      watched-red proven. Task 2.8 keeps only the STRUCTURAL fork. **G3 fixed (dev tooling, two stacked breaks):** demo
+      `buildIntent` now declares `spend_commitment` (stale since D-065) and
+      the driver's gRPC conn forces the gogo-aware codec (the default codec
+      panics on LegacyDec customtype — hit live by Twap/Reputation reads);
+      demo_e2e.sh was silently broken on both counts. Gateway itself = separate repo
+      `conclave-x402-gateway`, NOT in `make test`. Vector: run #1
+      (docs/tests/tooling) byte-identical; run #2 (D-084 in isolation)
+      byte-identical — no re-baseline.
 - [ ] 2.4 7683 resolver — **SEPARATE REPO** (`conclave-7683-resolver`); in-repo deliverable
       = the node-side gRPC + receipt-proof surface contract.
 - [x] 2.5 Real USDC via IBC + session-TWAP fee — **D-081 (STOP #1) + D-082 (build).**
@@ -360,6 +391,16 @@ task below bootstraps from it.
       refinement, incl. the does-it-relax-D-074 plan-stop question), and the
       timeouts→params promotion (`ZkDeliveryTimeoutBlocks` et al., plan-stop). Off the
       exit path; sequenced after 2.6; proto change ⇒ determinism vector re-baseline.
+- [ ] 2.8 Submit-charge STRUCTURAL fork (NEW in 2.3, G2/D-085) — the G2 SECURITY
+      hole (a msg-server-failing submit stranding its ante charge → conservation
+      break) is already CLOSED in 2.3 by ante pre-validation
+      (`SubmitIntentPrevalidationDecorator` + shared `ValidateSubmitIntent
+      Preconditions`, watched-red proven). 2.8 owns only the DESIGN QUESTION:
+      keep ante-prevalidation as the permanent design, or adopt a v0.50 mode-split
+      charging (CheckTx-only ante charge; DeliverTx charge inside the veil msg
+      server, revisiting D-059's "zero mode branching") — plus the escrow/veil
+      timeouts→params promotion. Opens with that plan-stop; off the exit path;
+      any charging-path change ⇒ determinism vector re-run in isolation.
 
 **Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
 data from a Conclave agent; receipt IBC-verified on a second chain (spans

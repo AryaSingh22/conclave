@@ -7,10 +7,15 @@ import (
 )
 
 // BankKeeper is the x/bank interface used for bond escrow (SPEC §6.3): the
-// module account holds bonds; it never mints or burns.
+// module account holds bonds; it never mints or burns. SpendableCoin lets the
+// submit-time precondition check (D-085/G2) verify the submitter can fund the
+// bond BEFORE the §6.2 window charge, so an under-funded submit is rejected in
+// the ante rather than stranding its optimistic charge at the msg-server
+// escrow.
 type BankKeeper interface {
 	SendCoinsFromAccountToModule(ctx context.Context, senderAddr sdk.AccAddress, recipientModule string, amt sdk.Coins) error
 	SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
+	SpendableCoin(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
 }
 
 // DistrKeeper is the x/distribution interface for the SPEC §6.3 INVALID
