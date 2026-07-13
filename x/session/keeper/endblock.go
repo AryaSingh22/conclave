@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -162,6 +163,15 @@ func (k Keeper) advanceAuction(ctx sdk.Context, session types.Session, params ty
 // pair) still closes the session — its intents roll or expire. A fallback
 // Conclude failure does NOT re-fallback; the session closes and the intents roll
 // (liveness: the chain never stalls on a settlement failure).
+//
+// A fallback that DOES clear persists its matches as a Solution record and
+// records it as the session's winning solution (D-086): the §6.6 receipt's
+// terms_hash commits to the settled Match bytes, and without a stored
+// Solution that pre-image would be unfetchable for fallback settlements — the
+// Session → winning_solution_id → Solutions chain (the fill-back evidence
+// path, docs/edge/7683_SURFACE.md §6) must be UNIFORM across both clearing
+// paths. The stored matches are the exact values the receipts hashed, so the
+// queried pre-image recomputes to the committed terms_hash.
 func (k Keeper) runFallback(ctx sdk.Context, session types.Session, params types.Params) error {
 	matches, err := k.buildFallbackMatches(ctx, session, params)
 	if err != nil {
@@ -175,9 +185,26 @@ func (k Keeper) runFallback(ctx sdk.Context, session types.Session, params types
 				sdk.NewAttribute(types.AttributeKeyReason, "fallback_conclude_failed"),
 			))
 		} else {
+			// The id derives from the session alone — deterministic consensus
+			// state (§11.6), reproducible on every node; domain-separated from
+			// tx-hash-derived solver ids (keeper.go domainSolution). Only one
+			// fallback ever runs per session (FALLBACK is entered once and the
+			// session closes below), so the id is unique.
+			sol := types.Solution{
+				Id:        deriveID(domainSolution, phase0Chamber, u64be(session.Id)),
+				SessionId: session.Id,
+				Solver:    "", // in-consensus matcher: no solver, no payout
+				Matches:   matches,
+				Score:     math.LegacyZeroDec(),
+			}
+			if err := k.setSolution(ctx, sol); err != nil {
+				return err
+			}
+			session.WinningSolutionId = sol.Id
 			ctx.EventManager().EmitEvent(sdk.NewEvent(
 				types.EventTypeSessionConcluded,
 				sdk.NewAttribute(types.AttributeKeySessionID, strconv.FormatUint(session.Id, 10)),
+				sdk.NewAttribute(types.AttributeKeySolutionID, sol.Id),
 				sdk.NewAttribute(types.AttributeKeyReason, "fallback"),
 			))
 		}

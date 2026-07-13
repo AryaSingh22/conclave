@@ -70,7 +70,7 @@ const (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check|7683-check> [flags]")
 		os.Exit(2)
 	}
 	sub := os.Args[1]
@@ -102,6 +102,8 @@ func main() {
 		err = c.fallback()
 	case "x402-check":
 		err = c.x402Check()
+	case "7683-check":
+		err = c.erc7683Check()
 	case "veil-e2e":
 		err = c.veilE2E()
 	case "veil-f4-adversary":

@@ -21,11 +21,17 @@ import (
 // CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates.
 const phase0Chamber uint32 = 0
 
-// domainEscrow / domainReceipt are the id-derivation domain bytes for escrow-
-// stub and §6.6 receipt ids (session-internal namespace; sha256 like D-009).
+// domainEscrow / domainReceipt / domainSolution are the id-derivation domain
+// bytes for escrow-stub, §6.6 receipt, and fallback-solution ids
+// (session-internal namespace; sha256 like D-009).
 const (
 	domainEscrow  = 0x10
 	domainReceipt = 0x11
+	// domainSolution derives the id of the SYNTHETIC Solution record the
+	// fallback path persists (D-086). Solver-proposed solution ids are
+	// tx-hash-derived (§6.4), so the domain-separated derivation cannot
+	// collide with them short of a sha256 collision.
+	domainSolution = 0x12
 )
 
 // Keeper provides access to the x/session store (SPEC §6.4).

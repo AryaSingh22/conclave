@@ -3563,3 +3563,175 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   (CheckTx-only ante charge; DeliverTx charge inside the msg server,
   revisiting D-059's "zero mode branching") — plus the timeouts→params
   promotion. A plan-stop, off the exit path.
+
+## D-086 — Task 2.4: 7683 resolver surface contract — translation authority is the resolver's own (no on-chain order binding, by design); fallback clearings now PERSIST their winning Solution (the terms_hash pre-image was unfetchable for the no-solver default — found by the new conformance test, fixed as a stop-approved mid-build deviation)
+
+- **Date:** 2026-07-13 (task 2.4; STOP #1 approved the plan + decisions ①
+  filename `7683_SURFACE.md` per FLAG C, ② D-087 disposition (b), ③ repo
+  split; a mid-build DEVIATION STOP approved the fallback-Solution fix)
+- **SPEC:** §9 (edge services), §6.3 (MsgSubmitIntent), §6.4 (sessions/
+  fallback), §6.6 (receipts/proofs); PHASE2_DESIGN §2.4 (FLAG C);
+  PHASE3_PLAN §5.2 R4 (ERC-7683 production-dominant — Across 88%, OIF 30+
+  teams; OIF = the resolver repo's reference frame).
+- **Surface verdict (the honest answer).** Everything 2.3 verified carries
+  over unchanged (tx service + D-026 unordered ext; veil/session/receipt/
+  mandate/sigil/epoch queries; §6.2 fee abstraction; `ReceiptProof`
+  ICS-23, D-053). 2.4's ADDITIONAL requirement — the `terms_hash`
+  PRE-IMAGE chain `Session → winning_solution_id → Solutions → Match` —
+  was TRUE for solver-cleared sessions and **FALSE for fallback-cleared
+  sessions** (the no-solver default: every localnet settlement and 2.3's
+  live swap). With that one gap closed (below), the node surface is
+  COMPLETE for the resolver; **no new gRPC**.
+- **The DEVIATION (Rules 2.4/8) and its fix.** The approved plan said "no
+  node changes; vector byte-identical expected." The conformance test then
+  walked the FALLBACK path and the plan's own §2 claim broke:
+  `runFallback` applied `buildFallbackMatches` output via
+  `concludeInner(…, nil)` WITHOUT persisting it, and only `concludeWinner`
+  ever set `session.winning_solution_id` — so a fallback settlement's
+  receipts committed (terms_hash) to Match bytes NOTHING could fetch.
+  Surfaced at discovery, STOPPED, option (A) approved: `runFallback`'s
+  success branch now stores a synthetic
+  `Solution{id: deriveID(0x12‖chamber‖u64be(session_id)), solver: "",
+  score: 0, matches}` and sets `winning_solution_id` before CLOSED
+  (x/session endblock.go; `domainSolution=0x12`, keeper.go).
+  - **Uniformity is the acceptance property** (review requirement): the
+    stored matches are the SAME values the receipts hashed, so the QUERIED
+    pre-image recomputes to the receipt's terms_hash byte-for-byte — the
+    conformance test asserts exactly this on FALLBACK settlements.
+  - **Id discipline:** session-derived ⇒ consensus-deterministic and
+    reproducible cross-node (§11.6: no clock, no divergent counter);
+    domain-separated from tx-hash-derived solver ids (collision = sha256
+    collision); one fallback per session (FALLBACK is entered once and the
+    session closes in the same call) ⇒ unique. A conclude_failed session
+    holds both its solver solutions AND the fallback record;
+    `winning_solution_id` names what actually settled.
+  - **Rejected:** event-carried pre-image (indexer-dependent, not
+    state-provable); reconstruct-by-reimplementation (couples the evidence
+    chain to matcher internals task 2.6 is scheduled to change);
+    solver-cleared-only rail (fails the common case).
+- **Translation authority (the plan-stop crux, by direct read).** A 7683
+  order becomes a SealedIntent under the RESOLVER'S OWN key+mandate —
+  X402_SURFACE §1.1's chokepoint chain, unchanged. NOTHING binds an
+  intent to an origin-chain order: a compromised resolver can mint
+  order-less intents, bounded by its mandate (allowlist, per-tx + window
+  ceilings, expiry, revocation) and its controller-account funds; it
+  cannot forge other sigils' intents. The conformance suite PINS the
+  non-binding honestly (an order-less fill settles; if that assert ever
+  reds, §1.2 of the contract must be rewritten). **An `origin_order_id`
+  field was considered and REJECTED as decoration (Rule 4):** it would be
+  resolver-attached and the chain cannot verify EVM order authenticity,
+  so the bridge must verify the settled legs against the order regardless
+  — the field would add nothing an attacker respects. Future proposers of
+  that field: this line is the answer.
+- **`spend_commitment` under-declaration (D-065, resolver-shaped).** A
+  resolver CAN under-declare (the ante never reads give legs — uniform)
+  and an under-declared fill CANNOT SETTLE: Reveal cross-check → INVALID
+  before matching, 50% bond slash, **window charge retained**.
+  `TestERC7683UnderDeclaredFillNeverSettles` proves the full arc through
+  real blocks (ante passes → INVALID → no receipt → outstanding_commitment
+  keeps commitment+bond). Boundary carried honestly: coin legs only (F-2,
+  pinned elsewhere by `TestSpendIntentF2BoundaryPin`).
+- **Fill-back evidence semantics (contract §6).** `ReceiptProof` proves
+  the exact Receipt bytes under `0x08|id` against Conclave's app hash at
+  `ProofHeight` (D-053). Empirically pinned in-test: a tip query proves at
+  the last HEADER-ANCHORED version (`ProofHeight = LastCommitID.Version −
+  1`); the verifying root is the app hash AT ProofHeight = the `AppHash`
+  of header ProofHeight+1 (what a light client supplies); a receipt
+  written at H is provable once header H+1 exists. What the proof does
+  NOT prove is stated with a MANDATED bridge check each: root authenticity
+  (per-origin Conclave light client), terms authenticity (recompute
+  terms_hash from the queried Match), **order↔fill correspondence (the
+  leg check — the binding lives bridge-side)**, first-claim uniqueness
+  (receipt-id dedup). The conformance suite demonstrates each gap
+  PERMANENTLY via skip-variant acceptance (the forged/replayed claim is
+  ACCEPTED with the check skipped — in-tree reds for the "does not prove"
+  claims).
+- **Deliverables.** `docs/edge/7683_SURFACE.md` (FLAG C artifact);
+  `app/erc7683_surface_conformance_test.go` (in `make test`; **watched RED
+  against pre-fix HEAD** for the fallback pre-image gap — the red was
+  banked before the D-086 node change existed);
+  `scripts/7683_surface_check.sh` + `conclave-demo 7683-check` (live
+  sweep, dev tooling); X402_SURFACE.md D-087 disclosures (Rule 8
+  propagation); the separate repo `conclave-7683-resolver` scoped in the
+  contract (order ingestion/translation/bridge = its plan-stops,
+  PHASE2_DESIGN §2.4).
+- **Gates (Rules 3/7/8 — output shown in the task record).**
+  - `make lint test` EXIT=0 on the full tree at close.
+  - Determinism vector run in **ISOLATION** on the fallback-Solution change
+    (the only consensus change of the task): **byte-identical** to the
+    D-082 baseline, all 5 seeds (seed 1 `245EF177…`, seed 2 `B48BDA6D…`,
+    seed 7 `FA562B1D…`, seed 12 `E491FB48…`, seed 42 `6596CCA1…`), two
+    independent processes — **no re-baseline**. Honest coverage note
+    (D-069 class): the sim generates no mutually-fillable pair, so the
+    vector never EXERCISES the new fallback-Solution write; the covering
+    gate is the conformance test, which was watched RED against pre-fix
+    HEAD.
+  - **Watched-red, D-065 cross-check (Rule 3):** with `exceeds = false`
+    forced after `giveExceedsCommitment` in `x/veil/keeper/lifecycle.go`,
+    `TestERC7683UnderDeclaredFillNeverSettles` goes RED — the
+    under-declared fill reaches **CONCLUDED (4)** instead of INVALID (7)
+    ("did not reach INTENT_STATE_INVALID within 10 blocks"): it settles
+    past its declaration, the exact escape the guard kills. Bypass
+    removed; `git diff` on lifecycle.go empty (byte-identical restore);
+    suite green.
+  - **Skip-variant reds are PERMANENT in-tree:** the wrong-settlement
+    claim is ACCEPTED with the leg check skipped, and the cross-order
+    replay is ACCEPTED with dedup skipped — each "does not prove" claim
+    stays demonstrated on every `make test` run, not just in a one-time
+    watch.
+  - **Live sweep `scripts/7683_surface_check.sh`: PASS end to end** —
+    fill CONCLUDED via the fallback on a real node; the D-086
+    `winning_solution_id` non-empty LIVE; the evidence bundle verified
+    against the header-anchored `AppHash` fetched from
+    `GetBlockByHeight(ProofHeight+1)` (the actual light-client flow);
+    §6.3 checks 1–4; live negatives (under-declared → INVALID at the
+    Reveal with the ante passing; over-ceiling `ErrMandateExceeded` in
+    CheckTx; foreign-sigil `ErrSigilMismatch` in CheckTx via the D-085
+    prevalidation; unbound-key `ErrSigilMismatch` in DeliverTx — the
+    prevalidation is correctly scoped to mandate-bound signers). The
+    sweep's first run also re-derived §6.2 empirically: gathering
+    evidence in the settlement block returns a NONEXISTENCE proof
+    (receipt at H, tip proof at H−1) — the driver now advances one block
+    first, and the contract documents the rule.
+
+## D-087 — Task 2.4 finding G1(2.4): `Receipt.condition_outcome` is decorative — always `NONE`, never updated on escrow resolution; disposition (b) defer-with-teeth (contract discloses + mandates the bridge-side leg-condition check); the fix is NEW task 2.9
+
+- **Date:** 2026-07-13 (task 2.4; disposition approved at STOP #1)
+- **SPEC:** §6.6 (Receipt.condition_outcome), §6.5 (conditions); D-073
+  (escrow handoff), D-053 (the proof surface that makes the field
+  externally consumable).
+- **Finding (Rule 4: existence ≠ enforcement).** The receipt proto
+  documents `RELEASED/REFUNDED/DISPUTED` as escrow outcomes and `NONE` as
+  "the settlement carried no delivery condition" — but the ONLY write site
+  in the tree (`x/session/keeper/receipt.go` writeMatchReceipts) stamps
+  `CONDITION_OUTCOME_NONE` unconditionally, INCLUDING for matches whose
+  legs carry HASHLOCK/OPTIMISTIC/ZK conditions (real settlements since
+  2.1), and nothing ever updates a receipt when its escrow resolves
+  (repo-wide grep: zero non-generated writers of any other value). A
+  conditioned settlement's ICS-23-provable receipt therefore asserts, to
+  external verifiers §6.6 explicitly invites, that it carried no
+  condition — and receipt-existence gets read as delivery-completion when
+  the funds may still REFUND from escrow.
+- **Severity + the G2 distinction (why defer is right here and fix-now was
+  right there).** No on-chain funds-at-risk and NO current consumer (the
+  origin bridge this contract defines is what WOULD have consumed it) —
+  an external-verifier integrity defect. D-085's G2 was an
+  attacker-reachable consensus-invariant corruption (a live vector →
+  disqualifying → fixed in-task). Disposition (b) does not ship the
+  falsehood; it NEUTRALIZES it: the contract (7683_SURFACE §6.4)
+  discloses the true semantics AND MANDATES the leg-condition check
+  (§6.3 check 3 — accept only unconditioned coin legs, verified from the
+  terms pre-image the bridge already checks), which makes the v1
+  coin-fill rail safe BY CONSTRUCTION with zero node changes. Disclosure
+  is deliberately redundant (three places in 7683_SURFACE: the §6.1
+  schema warning, §6.3 check 3, §6.4; plus X402_SURFACE §5 receipt row +
+  §6 conditioned-purchases caveat — the x402 exit-demo ZK buy hits the
+  same semantics).
+- **The fix is task 2.9 (new Phase-2 ledger row, owner + acceptance
+  recorded there):** additive `CONDITION_OUTCOME_PENDING` enum value +
+  faithful stamp at CONCLUDE (NONE only when truly unconditioned) +
+  escrow-resolution write-back to the receipt record + the
+  RELEASED/REFUNDED/DISPUTED transitions; proto + cross-module
+  consensus-path work ⇒ its own session, determinism vector re-baseline
+  expected, Rule-3 watched-red on the new write-back. Option (a) fix-now
+  was REJECTED for 2.4 scope discipline (Rule 7 isolation).

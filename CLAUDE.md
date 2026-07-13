@@ -351,8 +351,39 @@ task below bootstraps from it.
       `conclave-x402-gateway`, NOT in `make test`. Vector: run #1
       (docs/tests/tooling) byte-identical; run #2 (D-084 in isolation)
       byte-identical — no re-baseline.
-- [ ] 2.4 7683 resolver — **SEPARATE REPO** (`conclave-7683-resolver`); in-repo deliverable
-      = the node-side gRPC + receipt-proof surface contract.
+- [x] 2.4 7683 resolver — surface contract **(D-086/D-087).** Node-surface
+      verdict: COMPLETE after ONE genuine gap the new conformance test found
+      by walking the FALLBACK path (the no-solver default): fallback
+      clearings applied their matches without persisting them, so the
+      receipt's terms_hash PRE-IMAGE was unfetchable (`winning_solution_id`
+      "" — only concludeWinner set it). Fixed as a stop-approved mid-build
+      deviation: `runFallback` now stores a synthetic Solution (id =
+      deriveID(0x12‖chamber‖u64be(session_id)), solver "", score 0) + sets
+      `winning_solution_id` — the pre-image chain Session →
+      winning_solution_id → Solutions → Match is UNIFORM across both
+      clearing paths (uniformity proven: the conformance test recomputes
+      terms_hash from the QUERIED fallback Solution). In-repo deliverable =
+      `docs/edge/7683_SURFACE.md` (translation authority: the resolver's
+      OWN mandate, NO on-chain order binding — an origin_order_id field
+      rejected as Rule-4 decoration; spend_commitment under-declaration =
+      CAN-declare/CANNOT-settle; §6 fill-back evidence contract: what the
+      ICS-23 proof proves, ProofHeight = the last header-anchored version,
+      and the four MANDATED bridge checks — root/terms/LEG/dedup — each
+      demonstrated load-bearing by in-tree skip-variant acceptance) +
+      `app/erc7683_surface_conformance_test.go` (watched RED against
+      pre-fix HEAD) + `scripts/7683_surface_check.sh` / `conclave-demo
+      7683-check` (live sweep PASS incl. ICS-23 against the real
+      header-anchored AppHash). **G1(2.4) FOUND (D-087):**
+      `Receipt.condition_outcome` is decorative — always NONE, never
+      updated on escrow resolution; receipt ≠ delivery completion for
+      conditioned legs. Disposition (b): three-place disclosure + the
+      mandated unconditioned-leg check makes the v1 coin-fill rail safe by
+      construction; the fix is task 2.9. X402_SURFACE.md got the same
+      disclosure (its ZK exit-demo buy hits it). Resolver itself = separate
+      repo `conclave-7683-resolver`, NOT in `make test`. Vector: run in
+      ISOLATION on the fallback-Solution change — **byte-identical**, no
+      re-baseline (the sim generates no fillable pair; the conformance test
+      is the covering gate).
 - [x] 2.5 Real USDC via IBC + session-TWAP fee — **D-081 (STOP #1) + D-082 (build).**
       TWO-STOP run: STOP #1 = the IBC-line decision in isolation (stay ibc-go
       v8.8.0 — the pin already wired; v10-on-v0.50 is a DEADER sub-line;
@@ -401,6 +432,19 @@ task below bootstraps from it.
       server, revisiting D-059's "zero mode branching") — plus the escrow/veil
       timeouts→params promotion. Opens with that plan-stop; off the exit path;
       any charging-path change ⇒ determinism vector re-run in isolation.
+- [ ] 2.9 Receipt condition-outcome integrity (NEW in 2.4, G1/D-087) — the §6.6
+      receipt's `condition_outcome` is stamped NONE unconditionally and never
+      updated when the escrow resolves, so an ICS-23-provable receipt asserts
+      "no condition" for conditioned settlements and receipt-existence gets
+      misread as delivery-completion (funds may still REFUND). 2.4's edge
+      contracts disclose + neutralize (the bridge-side unconditioned-leg
+      rule); 2.9 makes the field TRUE: additive `CONDITION_OUTCOME_PENDING`,
+      faithful stamp at CONCLUDE, escrow-resolution write-back
+      (RELEASED/REFUNDED/DISPUTED). Proto + cross-module consensus work: own
+      session, plan-stop first, determinism vector re-baseline expected,
+      Rule-3 watched-red on the write-back. Acceptance: a conditioned
+      settlement's receipt reflects its escrow terminal state; unconditioned
+      receipts unchanged. Off the exit path.
 
 **Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
 data from a Conclave agent; receipt IBC-verified on a second chain (spans
