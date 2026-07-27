@@ -2,13 +2,13 @@ package keeper
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	storetypes "cosmossdk.io/store/types"
 
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -30,8 +30,20 @@ func setupKeeper(t testing.TB) (sdk.Context, Keeper) {
 	return testCtx.Ctx.WithBlockHeight(10), k
 }
 
+// fixtureAddrSeq backs randAddr's deterministic fixture addresses.
+var fixtureAddrSeq uint32
+
+// randAddr returns a distinct fixture address. Despite the name (kept so the
+// call sites read unchanged) it draws NO randomness — D-088. A fixture that
+// generates a fresh key per call turns a test into a low-duty-cycle sampler of
+// its own preconditions, which is how the 0xFF range-end defect hid as a
+// 1-in-256 flake instead of a standing failure. These keeper tests never
+// verify signatures, so a derived address suffices.
 func randAddr() sdk.AccAddress {
-	return sdk.AccAddress(secp256k1.GenPrivKey().PubKey().Address())
+	fixtureAddrSeq++
+	b := make([]byte, 20)
+	binary.BigEndian.PutUint32(b[16:], fixtureAddrSeq)
+	return sdk.AccAddress(b)
 }
 
 func validDIDHash() []byte {

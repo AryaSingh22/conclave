@@ -2,6 +2,7 @@ package keeper
 
 import (
 	errorsmod "cosmossdk.io/errors"
+	storetypes "cosmossdk.io/store/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -179,6 +180,13 @@ func (k Keeper) HasActiveCredentialSchema(ctx sdk.Context, chamberID uint32, sig
 }
 
 // IterateCredentials walks all credentials of a sigil.
+//
+// The range end MUST be storetypes.PrefixEndBytes (D-088). This site was
+// LIVE-BROKEN with prefix‖0xFF: the byte following the prefix here is
+// cred_id[0] (uniformly distributed), so 1 credential in 256 was invisible.
+// That made it a CONSENSUS-path defect, not just a query one — it backs
+// HasActiveCredentialSchema, hence the SPEC §6.4 rule-5 counterparty-class
+// predicate, so a genuinely credentialed party could be wrongly rejected.
 func (k Keeper) IterateCredentials(ctx sdk.Context, chamberID uint32, sigilID string, cb func(types.CredentialAnchor) bool) error {
 	sigilIDBz, err := types.SigilIDBytes(sigilID)
 	if err != nil {
@@ -186,7 +194,7 @@ func (k Keeper) IterateCredentials(ctx sdk.Context, chamberID uint32, sigilID st
 	}
 	prefix := types.CredentialIterPrefix(chamberID, sigilIDBz)
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(prefix, append(prefix, 0xFF))
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
 	if err != nil {
 		return err
 	}
@@ -206,7 +214,7 @@ func (k Keeper) IterateCredentials(ctx sdk.Context, chamberID uint32, sigilID st
 // IterateAllCredentials walks every credential in the store (invariants).
 func (k Keeper) IterateAllCredentials(ctx sdk.Context, cb func(types.CredentialAnchor) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(types.CredentialKeyPrefix, append(types.CredentialKeyPrefix, 0xFF))
+	it, err := store.Iterator(types.CredentialKeyPrefix, storetypes.PrefixEndBytes(types.CredentialKeyPrefix))
 	if err != nil {
 		return err
 	}

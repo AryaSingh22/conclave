@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	errorsmod "cosmossdk.io/errors"
+	storetypes "cosmossdk.io/store/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -144,9 +145,16 @@ func (k Keeper) MandateByID(ctx sdk.Context, id string) (types.Mandate, error) {
 
 // IterateMandates walks all mandate records (all chambers), stopping when cb
 // returns true.
+//
+// The range end is storetypes.PrefixEndBytes, NOT prefix‖0xFF (D-088): the
+// latter is SHORTER than any key whose next byte is 0xFF, so such keys sort
+// after it and are silently skipped. Harmless here only while chamber_id is
+// 0x00000000 (the 4 chamber bytes follow the prefix), which makes it a latent
+// Phase-3 (Chambers) landmine rather than a live defect — fixed uniformly so
+// no site depends on that accident.
 func (k Keeper) IterateMandates(ctx sdk.Context, cb func(types.Mandate) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(types.MandateKeyPrefix, append(types.MandateKeyPrefix, 0xFF))
+	it, err := store.Iterator(types.MandateKeyPrefix, storetypes.PrefixEndBytes(types.MandateKeyPrefix))
 	if err != nil {
 		return err
 	}
@@ -166,7 +174,7 @@ func (k Keeper) IterateMandates(ctx sdk.Context, cb func(types.Mandate) bool) er
 // IterateGranteeIndex walks all 0x02 active-mandate index entries.
 func (k Keeper) IterateGranteeIndex(ctx sdk.Context, cb func(chamberID uint32, grantee sdk.AccAddress, mandateIDBz []byte) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(types.GranteeIndexKeyPrefix, append(types.GranteeIndexKeyPrefix, 0xFF))
+	it, err := store.Iterator(types.GranteeIndexKeyPrefix, storetypes.PrefixEndBytes(types.GranteeIndexKeyPrefix))
 	if err != nil {
 		return err
 	}
@@ -184,6 +192,11 @@ func (k Keeper) IterateGranteeIndex(ctx sdk.Context, cb func(chamberID uint32, g
 }
 
 // MandatesBySigil returns all mandates of a sigil via the 0x03 index.
+//
+// The range end MUST be storetypes.PrefixEndBytes (D-088). This site was
+// LIVE-BROKEN with prefix‖0xFF: the byte following the prefix here is
+// mandate_id[0] (uniformly distributed), so every mandate whose id began 0xFF
+// — 1 in 256 — was silently omitted from the query.
 func (k Keeper) MandatesBySigil(ctx sdk.Context, chamberID uint32, sigilID string) ([]types.Mandate, error) {
 	sigilIDBz, err := decodeSigilID(sigilID)
 	if err != nil {
@@ -191,7 +204,7 @@ func (k Keeper) MandatesBySigil(ctx sdk.Context, chamberID uint32, sigilID strin
 	}
 	store := k.storeService.OpenKVStore(ctx)
 	prefix := types.SigilIndexIterPrefix(chamberID, sigilIDBz)
-	it, err := store.Iterator(prefix, append(prefix, 0xFF))
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
 	if err != nil {
 		return nil, err
 	}

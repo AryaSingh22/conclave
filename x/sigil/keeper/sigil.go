@@ -3,6 +3,7 @@ package keeper
 import (
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -227,7 +228,7 @@ func (k Keeper) rotationAuthorized(sigil types.Sigil, signers []sdk.AccAddress) 
 // IterateSigils walks all sigils (all chambers), stopping when cb returns true.
 func (k Keeper) IterateSigils(ctx sdk.Context, cb func(types.Sigil) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(types.SigilKeyPrefix, append(types.SigilKeyPrefix, 0xFF))
+	it, err := store.Iterator(types.SigilKeyPrefix, storetypes.PrefixEndBytes(types.SigilKeyPrefix))
 	if err != nil {
 		return err
 	}
@@ -247,7 +248,7 @@ func (k Keeper) IterateSigils(ctx sdk.Context, cb func(types.Sigil) bool) error 
 // IterateAddressIndex walks all reverse index entries (addr → sigil_id).
 func (k Keeper) IterateAddressIndex(ctx sdk.Context, cb func(addr sdk.AccAddress, sigilID string, chamberID uint32) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(types.AddrIndexKeyPrefix, append(types.AddrIndexKeyPrefix, 0xFF))
+	it, err := store.Iterator(types.AddrIndexKeyPrefix, storetypes.PrefixEndBytes(types.AddrIndexKeyPrefix))
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +12,6 @@ import (
 	"cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -98,8 +98,24 @@ func setupKeeper(t testing.TB) *fixture {
 	return &fixture{ctx: ctx, k: k, sigil: sk, bank: bank}
 }
 
+// fixtureAddrSeq backs randAddr's deterministic fixture addresses.
+var fixtureAddrSeq uint32
+
+// randAddr returns a distinct fixture address. Despite the name (kept so the
+// call sites read unchanged) it draws NO randomness — D-088.
+//
+// It previously generated a fresh secp256k1 key per call, which made every
+// test a low-duty-cycle SAMPLER of its own preconditions: the 0xFF range-end
+// defect surfaced as a 1-in-256 "flake" in TestIssueMandateReplace rather than
+// a standing failure, and a re-run "fixed" it. Determinism landed BEHIND the
+// range-end fix on purpose — making fixtures deterministic FIRST would have
+// pinned the sampler to a passing draw and shipped the bug permanently green.
+// These keeper tests never verify signatures, so a derived address suffices.
 func randAddr() sdk.AccAddress {
-	return sdk.AccAddress(secp256k1.GenPrivKey().PubKey().Address())
+	fixtureAddrSeq++
+	b := make([]byte, 20)
+	binary.BigEndian.PutUint32(b[16:], fixtureAddrSeq)
+	return sdk.AccAddress(b)
 }
 
 func (f *fixture) registerSigil(t testing.TB, controller sdk.AccAddress) string {

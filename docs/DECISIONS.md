@@ -3735,3 +3735,126 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   consensus-path work ⇒ its own session, determinism vector re-baseline
   expected, Rule-3 watched-red on the new write-back. Option (a) fix-now
   was REJECTED for 2.4 scope discipline (Rule 7 isolation).
+
+## D-088 — Task 2.11: store-iterator range-end truncation (`prefix‖0xFF`) in x/mandate and x/sigil — 1-in-256 records invisible; surfaced by 2.6's "flake" item and split out as its own task BEFORE the matcher work
+
+- **Date:** 2026-07-28 (task 2.11; split out of 2.6 at a STOP and landed BEFORE
+  the matcher enrichments — Rule 1's own 1.0/1.0b precedent: when a gate
+  surfaces a real pre-existing bug, the bug becomes its OWN task, not a rider)
+- **SPEC:** §5.3 (store key layout), §6.1 (sigil/credential/reputation),
+  §6.2 (mandate), §6.4 rule 5 (counterparty-class predicate), §11.6
+- **Discovery — and why the prescribed fix would have HIDDEN the bug.**
+  PHASE2_DESIGN §2.6 (Rev 2) carried a flake-hardening item: `TestIssueMandate
+  Replace` "flaked once" on a `randAddr()`-seeded fixture, and the recorded
+  disposition was *"fix = deterministic fixture seeding."* The flake was
+  REPRODUCED BEFORE being fixed: `-count=2000` → **8 failures (0.40%)**, always
+  `MandatesBySigil` returning 0 mandates where 1 exists. **0.40% ≈ 1/256** — the
+  signature of a one-byte range boundary, not a fixture problem. Making the
+  fixtures deterministic first would have pinned the sampler to a passing draw
+  and shipped the defect permanently green. **The flakiness WAS a correctness
+  oracle running at a low duty cycle** — that is the generalizable lesson, and
+  it is why the ordering below is load-bearing.
+- **The defect.** Eight iterators built their range end as
+  `store.Iterator(prefix, append(prefix, 0xFF))`. A range end must be an
+  EXCLUSIVE upper bound over every key sharing `prefix`; `prefix‖0xFF` is
+  itself only a 1-byte extension, so any longer key beginning `prefix‖0xFF`
+  sorts AFTER it and is silently excluded. Every record whose first
+  post-prefix byte is `0xFF` — uniformly 1 in 256 — was invisible to the walk.
+  No error, no log: a short read that looks exactly like "no such record."
+- **The fix (Rule 5 — adopt, do not author).** The range end is now
+  `storetypes.PrefixEndBytes` from `cosmossdk.io/store@v1.1.1/types/utils.go`,
+  the SDK's own already-adopted helper (it increments the last non-`0xFF` byte
+  and truncates). `x/session` already had a correct local `PrefixEnd`
+  (`x/session/types/keys.go:226`); `x/mandate` and `x/sigil` never got it. No
+  new authored surface. `x/session`'s local copy is deliberately left untouched
+  in this task so 2.6's matcher runs stay single-cause (consolidation noted as
+  a cosmetic follow-up, not a defect).
+- **The eight sites, classified honestly — 2 LIVE, 6 LATENT.** Which sites
+  actually dropped records depends on what byte FOLLOWS the prefix:
+
+  | Site | Post-prefix byte | Status |
+  |---|---|---|
+  | `MandatesBySigil` (`x/mandate/keeper/mandate.go`) | `mandate_id[0]` (high-entropy) | **LIVE-BROKEN** |
+  | `IterateCredentials` (`x/sigil/keeper/credential.go`) | `cred_id[0]` (high-entropy) | **LIVE-BROKEN** |
+  | `IterateMandates`, `IterateGranteeIndex`, `IterateAllCredentials`, `IterateReputations`, `IterateSigils`, `IterateAddressIndex` | `chamber_id` high byte = `0x00` | **LATENT** |
+
+  The six latent sites were correct **only by the accident** that `chamber_id`
+  is `0x00000000` until Phase 3. **Phase-3 Chambers re-arms every one of them.**
+  All eight are fixed uniformly so no site depends on that accident, and
+  `TestIterateMandatesFindsHighByteChamber` pins the latent case by asserting
+  a `0xFF`-high-byte chamber is walked.
+- **CORRECTION of this task's own first severity report (Rule 8 — the
+  correction stays VISIBLE).** The discovery message claimed three
+  consequences that are **WRONG** and are retracted here:
+  1. ~~"a grindable UNREVOCABLE mandate"~~ — `RevokeMandate` → `MandateByID` →
+     `IterateMandates` uses the BARE-prefix walk, whose next byte is the zero
+     chamber id. Nothing was dropped; no mandate was ever unrevocable.
+  2. ~~"genesis export silently drops ~1/256 of mandates/sigils/credentials/
+     reputations"~~ — every genesis-export iterator is a bare-prefix walk.
+     Not firing.
+  3. ~~"the D-059/D-064 conservation invariant is computed over an incomplete
+     set; spurious fire → D-085-shaped operator-conditional halt"~~ — same
+     reason. Not firing.
+  The error was **reasoning from the shared code pattern without reading each
+  key layout**, then extrapolating severity from the one reproduced site. The
+  layouts were subsequently read directly (Rule 9) and the extrapolation did
+  not survive. Recorded because the process failure is the reusable lesson: a
+  systemic-looking pattern still requires a per-site read before its blast
+  radius is asserted.
+- **Severity as it ACTUALLY stands.**
+  - `MandatesBySigil` → the gRPC `Mandates(sigil_id)` query omitted 1/256 of a
+    sigil's mandates. **Query-surface only** (sole caller: `grpc_query.go`).
+  - `IterateCredentials` → **CONSENSUS path.** It backs
+    `HasActiveCredentialSchema`, which backs `predEnv.HasCredential`, which
+    backs the SPEC §6.4 **rule-5 counterparty-class predicate**
+    `has_credential(schema)`. A credential the walk cannot see is a credential
+    the matcher denies: a genuinely credentialed party is wrongly rejected and
+    an otherwise-valid match fails. Every node computes the SAME wrong answer
+    (the walk is deterministic), so there is **no fork and no halt** — this is
+    a silent correctness/liveness loss, NOT a safety break and NOT value
+    corruption.
+  - **Grindability is self-harm, not an attack.** `cred_id =
+    deriveID(0x02, chamber, issuer‖subject‖schema‖claim_hash, seq)`. An issuer
+    picks `claim_hash` and can retry (~256 attempts, each a tx) to land a
+    `0xFF`-prefixed id — but the only reachable effect is making its OWN
+    credential invisible. A third party cannot grind a VICTIM's credential id:
+    the victim's issuer controls `claim_hash` and the global `seq` is not
+    attacker-controlled. No victim-targeting path exists.
+- **Watched-red evidence (Rule 3 — the red was SEEN, not assumed).** Four new
+  tests in `x/mandate/keeper/prefixend_test.go` and
+  `x/sigil/keeper/prefixend_test.go`. With the four source files stashed
+  (`git stash push`), ALL FOUR fail against pre-fix HEAD:
+  - `TestMandatesBySigilFindsHighByteMandateID` — "mandate with id 0xFF… is
+    missing from the 0x03 index walk"
+  - `TestIterateMandatesFindsHighByteChamber` — expected 1, actual 0
+  - `TestHasActiveCredentialSchemaFindsHighByteCredID` — the rule-5 predicate
+    wrongly denies a credentialed party
+  - `TestIterateCredentialsFindsHighByteCredID` — expected 2, actual 1
+  Fix restored → all green. Each test carries a low-byte CONTROL so it proves
+  the walk truncates SELECTIVELY rather than being broken outright. The
+  adversarial key is CONSTRUCTED deterministically (an id literal beginning
+  `ff`), never ground for — grinding would have made the regression test itself
+  probabilistic, the very defect this task exists to remove.
+- **Ordering is part of the decision (do not reorder on a future re-read).**
+  (1) fix the eight sites → (2) forced-`0xFF` watched-red regression → (3)
+  ONLY THEN `randAddr()` determinism. Step 3 before step 1 silences the oracle.
+  `randAddr()` now derives addresses from a package counter (`fixtureAddrSeq`,
+  `encoding/binary`) and draws no randomness; the name is kept so call sites
+  read unchanged, with the reason in a doc comment at both definitions. These
+  keeper tests never verify signatures, so a derived address suffices.
+  Post-fix: `TestIssueMandateReplace -count=2000` → **0 failures** (was 8).
+- **Determinism vector: BYTE-IDENTICAL, no re-baseline.** Run in ISOLATION
+  (Rule 7) with this fix as the only cause; all 5 seeds match the D-082
+  baseline exactly, two independent processes:
+  `seed=1 245EF177…67CC93 · seed=2 B48BDA6D…954194 · seed=7 FA562B1D…B95B76 ·
+  seed=12 E491FB48…0EA3E9 · seed=42 6596CCA1…259325`.
+  **Honest reading of that green (the D-069/D-086 coverage-shadow shape):**
+  byte-identical does NOT mean the fix is behaviour-neutral — it means these
+  five seeds never populated a `0xFF`-prefixed id (1/256 per record, and the
+  sim's credential/mandate population is small). **The vector does not reach
+  this path; the four watched-red tests are the covering gate, not the vector.**
+- **Consequences.** No proto, no state-machine, no migration: the fix widens a
+  read range that was wrongly narrow, so previously-written records become
+  visible again — there is no stored state to migrate and no upgrade handler.
+  Any operator who queried `Mandates(sigil_id)` before this fix may have seen a
+  short list; re-querying now returns the complete set.

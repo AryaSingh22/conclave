@@ -445,6 +445,38 @@ task below bootstraps from it.
       Rule-3 watched-red on the write-back. Acceptance: a conditioned
       settlement's receipt reflects its escrow terminal state; unconditioned
       receipts unchanged. Off the exit path.
+- [x] 2.11 Store-iterator range-end correctness (x/mandate, x/sigil) — **D-088.**
+      SPLIT OUT of 2.6 at a STOP and landed BEFORE the matcher enrichments
+      (Rule 1's 1.0/1.0b precedent). 2.6's "flake-hardening" item was NOT a
+      flaky fixture: `TestIssueMandateReplace` was reproduced at **8/2000
+      (0.40% ≈ 1/256)** BEFORE being fixed, and the rate identified a one-byte
+      range boundary — `store.Iterator(prefix, append(prefix, 0xFF))` excludes
+      every key whose first post-prefix byte is `0xFF`. **The prescribed
+      "deterministic fixtures" fix would have MASKED it** (the flakiness was a
+      correctness oracle at low duty cycle), so ordering is load-bearing: fix
+      the 8 sites → forced-`0xFF` watched-red → THEN `randAddr()` determinism.
+      Range end is now the SDK's `storetypes.PrefixEndBytes` (Rule 5: adopted,
+      not authored; `x/session` already had a correct local `PrefixEnd`).
+      **2 of 8 sites were LIVE-broken** — `MandatesBySigil` (query surface) and
+      `IterateCredentials` (**consensus**: backs `HasActiveCredentialSchema` →
+      the §6.4 rule-5 `has_credential()` predicate, so a credentialed party was
+      wrongly rejected 1/256; deterministic across nodes ⇒ no fork/halt). The
+      other **6 were LATENT**, correct only because `chamber_id` is
+      `0x00000000` — **Phase-3 Chambers re-arms them**; all fixed uniformly and
+      the latent case pinned by test. D-088 also records a VISIBLE CORRECTION
+      of this task's own first severity report (the claimed unrevocable
+      mandate / genesis-export loss / invariant-set corruption were WRONG —
+      those paths are bare-prefix walks; retracted with the reasoning error
+      named). Grinding is self-harm only (no victim-targeting path). 4
+      watched-red tests (RED seen, then green); `TestIssueMandateReplace
+      -count=2000` → 0 failures; `make lint test` green; determinism vector run
+      in ISOLATION → **byte-identical, no re-baseline** (honest caveat in
+      D-088: the 5 seeds never populate a `0xFF` id, so the vector does not
+      reach this path — the watched-red tests are the covering gate).
+
+*(Task numbers 2.10 and 2.12 are reserved by 2.6's approved plan-stop scoping —
+cycle-aware in-consensus fallback and multi-asset in-kind skim respectively —
+and their ledger rows are written when 2.6 closes.)*
 
 **Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
 data from a Conclave agent; receipt IBC-verified on a second chain (spans

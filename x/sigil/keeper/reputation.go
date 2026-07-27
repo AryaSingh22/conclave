@@ -3,6 +3,7 @@ package keeper
 import (
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -196,7 +197,7 @@ func log10Floor(v math.LegacyDec) math.LegacyDec {
 // IterateReputations walks all reputation records (invariants).
 func (k Keeper) IterateReputations(ctx sdk.Context, cb func(types.Reputation) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	it, err := store.Iterator(types.ReputationKeyPrefix, append(types.ReputationKeyPrefix, 0xFF))
+	it, err := store.Iterator(types.ReputationKeyPrefix, storetypes.PrefixEndBytes(types.ReputationKeyPrefix))
 	if err != nil {
 		return err
 	}
