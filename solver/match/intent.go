@@ -120,3 +120,33 @@ func LegToSettle(from, to string, leg veiltypes.IntentLeg) sessiontypes.SettleLe
 	}
 	return out
 }
+
+// LegToSettleAmount is the PARTIAL-FILL form of LegToSettle (task 2.6): the
+// settlement leg carries `amount` of the leg's asset instead of the whole
+// offered quantity, so a giver that signed `allow_partial` can hand over part of
+// its offer and keep the remainder. A DataGrant has no divisible quantity — its
+// conservation amount is the bookkeeping 1 (D-048) — so a data leg is only ever
+// emitted whole; ok is false if a different amount is asked of one, or if the leg
+// names no asset.
+func LegToSettleAmount(from, to string, leg veiltypes.IntentLeg, amount math.Int) (sessiontypes.SettleLeg, bool) {
+	out := sessiontypes.SettleLeg{FromSigil: from, ToSigil: to}
+	switch {
+	case leg.GetCoin() != nil:
+		c := *leg.GetCoin()
+		c.Amount = amount
+		out.Asset = &sessiontypes.SettleLeg_Coin{Coin: &c}
+	case leg.GetSvc() != nil:
+		v := *leg.GetSvc()
+		v.Units = amount
+		out.Asset = &sessiontypes.SettleLeg_Svc{Svc: &v}
+	case leg.GetData() != nil:
+		if !amount.Equal(math.OneInt()) {
+			return sessiontypes.SettleLeg{}, false
+		}
+		d := *leg.GetData()
+		out.Asset = &sessiontypes.SettleLeg_Data{Data: &d}
+	default:
+		return sessiontypes.SettleLeg{}, false
+	}
+	return out, true
+}

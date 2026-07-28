@@ -89,11 +89,12 @@ func TestPriceBindingSelfCheckAgreesWithChain(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// the cycle finder constructs the candidate Match (with the exact
-			// LegacyDec prices the solver would submit). Both cases have a coin
-			// numeraire, so exactly one candidate is produced.
-			candidates := cycles.Find(tc.intents)
-			require.Len(t, candidates, 1, "cycle finder must produce the candidate to judge")
-			m := candidates[0]
+			// LegacyDec prices the solver would submit). Both cases have exactly
+			// ONE coin give-asset, so each cycle group holds a single anchoring.
+			groups := cycles.Find(tc.intents)
+			require.Len(t, groups, 1, "cycle finder must produce the candidate to judge")
+			require.Len(t, groups[0], 1, "one coin give-asset ⇒ one numeraire anchoring")
+			m := groups[0][0]
 
 			solverVerdict := gate.PriceBindingOK(m)
 			chainV := chainVerdict(t, m)
@@ -127,6 +128,94 @@ func TestNaiveCannotClearCycle(t *testing.T) {
 	cyc := representableCycle()
 	require.Empty(t, naive.Find(cyc), "pairwise matcher cannot clear a 3-party cycle")
 	require.Len(t, cycles.Find(cyc), 1, "the cycle finder clears it")
+}
+
+// --- task 2.6 item 7: partial-fill cycles + alternate numeraire anchoring ---
+
+// altAnchorCycle is the item-7 fixture for ALTERNATE NUMERAIRE ANCHORING. Two
+// coin give-assets, chosen so the lexicographically-first anchor (the pre-2.6
+// default) cannot price the cycle exactly while the other can:
+//
+//	alice 1 uaaa → 3 svc/x ; bob 3 svc/x → 3 uzzz ; carol 3 uzzz → 1 uaaa
+//
+// Anchored at "uaaa": p[svc/x] = 1/3 — not representable, the chain gate rejects.
+// Anchored at "uzzz": p[uaaa] = 3, p[svc/x] = 1 — exact, every party nets zero.
+func altAnchorCycle() []match.OpenIntent {
+	return []match.OpenIntent{
+		oi("alice", "sigil-alice", coinLeg("uaaa", 1), svcLeg("x", 3)),
+		oi("bob", "sigil-bob", svcLeg("x", 3), coinLeg("uzzz", 3)),
+		oi("carol", "sigil-carol", coinLeg("uzzz", 3), coinLeg("uaaa", 1)),
+	}
+}
+
+// TestCyclesAlternateNumeraireAnchoring is the item-7 acceptance: the finder now
+// offers BOTH anchorings of the cycle, in sorted anchor order, and the pipeline
+// clears it through the second — a cycle that was silently dropped before 2.6.
+// The verdict on each anchoring is still the CHAIN's (D-055), asserted here
+// against keeper.CheckPriceBinding itself, not a solver-local rule.
+func TestCyclesAlternateNumeraireAnchoring(t *testing.T) {
+	groups := cycles.Find(altAnchorCycle())
+	require.Len(t, groups, 1, "one cycle")
+	require.Len(t, groups[0], 2, "two coin give-assets ⇒ two anchorings")
+
+	// the anchorings are ordered by anchor key: "uaaa" first (the pre-2.6
+	// default), then "uzzz".
+	require.Equal(t, "uaaa", groups[0][0].ClearingPrices[0].Quote)
+	require.Equal(t, "uzzz", groups[0][1].ClearingPrices[0].Quote)
+
+	require.False(t, chainVerdict(t, groups[0][0]),
+		"the default anchoring is not exactly representable — the chain rejects it")
+	require.True(t, chainVerdict(t, groups[0][1]),
+		"the alternate anchoring clears exactly")
+
+	got := solver.Solve(altAnchorCycle())
+	require.Len(t, got, 1, "the pipeline clears the cycle via the alternate anchor")
+	require.Len(t, got[0].IntentIds, 3)
+	require.NoError(t, gate.Accept(got[0]), "the cleared match passes the chain gate")
+	require.Equal(t, "uzzz", got[0].ClearingPrices[0].Quote, "cleared at the alternate anchor")
+}
+
+// partialFillCycle is the item-7 fixture for PARTIAL-FILL cycles: bob offers 20
+// svc/x but alice only wants 10, and bob signed allow_partial — so bob delivers
+// 10 and KEEPS 10. The full-give terms could not clear this pair at all under
+// the pre-2.6 exact-fill provider rule (20 ≠ 10).
+func partialFillCycle(bobAllowsPartial bool) []match.OpenIntent {
+	alice := oi("alice", "sigil-alice", coinLeg("uusdc", 100), svcLeg("x", 10))
+	bob := oi("bob", "sigil-bob", svcLeg("x", 20), coinLeg("uusdc", 100))
+	bob.AllowPartial = bobAllowsPartial
+	return []match.OpenIntent{alice, bob}
+}
+
+// TestCyclesPartialFill: with allow_partial signed, the over-offering provider
+// fills its consumer's floor and the settlement leg carries the FILLED quantity
+// (10), never the whole offer (20) — the remainder is simply not moved.
+func TestCyclesPartialFill(t *testing.T) {
+	groups := cycles.Find(partialFillCycle(true))
+	require.Len(t, groups, 1, "the partial fill closes the 2-cycle")
+	m := groups[0][0]
+	require.True(t, chainVerdict(t, m), "the partial clearing nets zero at its prices")
+
+	var svcLegAmt math.Int
+	for _, leg := range m.Legs {
+		if v := leg.GetSvc(); v != nil {
+			svcLegAmt = v.Units
+		}
+	}
+	require.False(t, svcLegAmt.IsNil(), "the svc leg must be present")
+	require.Equal(t, math.NewInt(10).String(), svcLegAmt.String(),
+		"the leg carries the FILLED amount, not the 20 offered")
+
+	require.Len(t, solver.Solve(partialFillCycle(true)), 1, "the pipeline clears it")
+}
+
+// TestCyclesPartialFillRequiresAllowPartial is item 7's load-bearing guard: an
+// intent that did NOT sign allow_partial is fill-or-kill, so the finder must not
+// build a cycle that shrinks its give. Remove the allow_partial condition in
+// node.canFill and this goes red (the fill-or-kill offer gets split).
+func TestCyclesPartialFillRequiresAllowPartial(t *testing.T) {
+	require.Empty(t, cycles.Find(partialFillCycle(false)),
+		"a fill-or-kill intent must never be partially filled")
+	require.Empty(t, solver.Solve(partialFillCycle(false)))
 }
 
 // TestNaiveClearsPairwiseSwap confirms the pairwise matcher does clear a

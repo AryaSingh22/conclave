@@ -7,10 +7,11 @@
 // It is PURE (proto types + math only; no x/session/keeper): the matching idea
 // is reimplemented off-chain, separate from the in-consensus fallback. The one
 // rule that must not drift — whether the constructed clearing prices are exactly
-// representable in LegacyDec (D-047) — is NOT decided here: cycles proposes a
-// candidate Match with numeraire-anchored prices, and the shared chain validator
-// (solver/gate → keeper.CheckPriceBinding) is the sole arbiter of acceptance, so
-// the skip/accept decision is identical to the chain's by construction (D-055).
+// representable in LegacyDec (D-047) — is NOT decided here: cycles proposes
+// candidate Matches with numeraire-anchored prices, and the shared chain
+// validator (solver/gate → keeper.CheckPriceBinding) is the sole arbiter of
+// acceptance, so the skip/accept decision is identical to the chain's by
+// construction (D-055).
 package cycles
 
 import (
@@ -34,12 +35,33 @@ type node struct {
 	wantAmt math.Int
 }
 
-// Find returns one candidate Match per disjoint trade cycle it discovers,
-// greedily over intents in id order (deterministic). Each candidate's legs and
-// numeraire-anchored prices are constructed exactly; representability and full
-// §6.4 validity are decided downstream by the shared chain gate. Intents are
-// used at most once across the returned matches.
-func Find(intents []match.OpenIntent) []sessiontypes.Match {
+// canFill reports whether this node's give leg can deliver `amt` of its give
+// asset to a consumer: EXACTLY (Phase-0 fill-or-kill), or with a remainder the
+// giver keeps — a PARTIAL fill, which §6.4 rule 3 accepts only when the intent
+// signed `allow_partial` (task 2.6). A DataGrant has no divisible quantity (its
+// conservation amount is the bookkeeping 1, D-048), so a data give leg is
+// exact-fill only whatever the flag says.
+func (n node) canFill(amt math.Int) bool {
+	if !amt.IsPositive() {
+		return false
+	}
+	if n.giveAmt.Equal(amt) {
+		return true
+	}
+	return n.oi.AllowPartial && n.give.GetData() == nil && n.giveAmt.GT(amt)
+}
+
+// Find returns one candidate GROUP per disjoint trade cycle it discovers,
+// greedily over intents in id order (deterministic). A group holds the SAME
+// cycle priced under each of its coin give-assets in turn — the ALTERNATE
+// NUMERAIRE ANCHORINGS (task 2.6) — in sorted anchor order, the first being the
+// pre-2.6 default. Anchoring changes which clearing prices are exactly
+// representable, so a cycle its default anchor cannot price may still clear
+// under another; cycles does NOT decide which (D-055: representability is the
+// chain gate's call and is never reimplemented here). The caller admits the
+// FIRST alternative its arbiter accepts and skips the rest of that group.
+// Intents are used at most once across the returned groups.
+func Find(intents []match.OpenIntent) [][]sessiontypes.Match {
 	nodes := make([]node, 0, len(intents))
 	for _, oi := range intents {
 		give, want, ok := oi.SingleGiveWant()
@@ -60,7 +82,7 @@ func Find(intents []match.OpenIntent) []sessiontypes.Match {
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].oi.ID < nodes[j].oi.ID })
 
 	used := make(map[string]bool, len(nodes))
-	var matches []sessiontypes.Match
+	var groups [][]sessiontypes.Match
 	for s := range nodes {
 		if used[nodes[s].oi.ID] {
 			continue
@@ -69,25 +91,23 @@ func Find(intents []match.OpenIntent) []sessiontypes.Match {
 		if len(cyc) < 2 {
 			continue
 		}
-		m, ok := buildCycleMatch(nodes, cyc)
-		if !ok {
+		alts := buildCycleAlternatives(nodes, cyc)
+		if len(alts) == 0 {
 			continue
 		}
-		matches = append(matches, m)
+		groups = append(groups, alts)
 		for _, ni := range cyc {
 			used[nodes[ni].oi.ID] = true
 		}
 	}
-	return matches
+	return groups
 }
 
 // findCycleFrom does a bounded DFS over the provider graph starting at node s
 // and returns the node indices of the first simple cycle through s (in
 // give-flow order), or nil. The provider of intent A is any unused intent B
-// whose give exactly fills A's want (B.giveKey == A.wantKey, B.giveAmt ==
-// A.wantAmt) — Phase-0 fill-or-kill, mirroring the fallback's full-give terms.
-// CONCLAVE-TODO(phase-2): partial-fill cycles (B.giveAmt >= A.wantAmt) and
-// alternate numeraire anchoring when one anchoring is non-representable.
+// whose give asset is A's want asset and whose give leg can FILL A's wanted
+// quantity — exactly, or partially when B signed allow_partial (node.canFill).
 func findCycleFrom(nodes []node, s int, used map[string]bool) []int {
 	// provider candidates of node i, in id order for determinism.
 	providers := func(i int) []int {
@@ -96,7 +116,7 @@ func findCycleFrom(nodes []node, s int, used map[string]bool) []int {
 			if j == i || used[nodes[j].oi.ID] {
 				continue
 			}
-			if nodes[j].giveKey == nodes[i].wantKey && nodes[j].giveAmt.Equal(nodes[i].wantAmt) {
+			if nodes[j].giveKey == nodes[i].wantKey && nodes[j].canFill(nodes[i].wantAmt) {
 				out = append(out, j)
 			}
 		}
@@ -127,51 +147,81 @@ func findCycleFrom(nodes []node, s int, used map[string]bool) []int {
 	return dfs(s)
 }
 
+// buildCycleAlternatives prices one cycle under every coin give-asset it
+// contains, in sorted anchor order (deterministic), dropping any anchoring the
+// construction cannot complete. A cycle with no coin give-asset yields nothing —
+// it cannot be priced in a coin numeraire at all (mirrors the fallback's
+// pickNumeraire failing).
+func buildCycleAlternatives(nodes []node, cyc []int) []sessiontypes.Match {
+	anchors := make([]string, 0, len(cyc))
+	seen := make(map[string]bool, len(cyc))
+	for _, ni := range cyc {
+		gk := nodes[ni].giveKey
+		if match.IsCoinDenom(gk) && !seen[gk] {
+			seen[gk] = true
+			anchors = append(anchors, gk)
+		}
+	}
+	sort.Strings(anchors)
+
+	alts := make([]sessiontypes.Match, 0, len(anchors))
+	for _, numeraire := range anchors {
+		if m, ok := buildCycleMatch(nodes, cyc, numeraire); ok {
+			alts = append(alts, m)
+		}
+	}
+	return alts
+}
+
 // buildCycleMatch constructs the settlement Match for a provider-chain cycle
 // cyc = [a_0, a_1, ...] where a_{k+1} provides for a_k (a_{k+1} gives to a_k)
-// and a_0 provides for the last. Each intent gives exactly once. Prices are
-// anchored at a coin numeraire (price 1) and propagated around the cycle as
-// exact LegacyDecs; ok is false if the cycle has no coin give-asset to price in.
-func buildCycleMatch(nodes []node, cyc []int) (sessiontypes.Match, bool) {
+// and a_0 provides for the last, priced against `numeraire` (price 1).
+//
+// Each party DELIVERS exactly what its consumer wants: an exact fill hands over
+// the whole give leg, a partial fill keeps the remainder (node.canFill already
+// established the intent permits it). Prices are propagated around the cycle as
+// exact LegacyDecs from the anchor; ok is false if the propagation cannot be
+// completed. Representability is not judged here (D-055).
+func buildCycleMatch(nodes []node, cyc []int, numeraire string) (sessiontypes.Match, bool) {
 	m := len(cyc)
 
-	// legs: provider a_{k+1} gives to consumer a_k (indices mod m).
+	// delivered[j] is what party a_j actually hands over: exactly the amount its
+	// consumer a_{j-1} wants. On an exact fill this equals a_j's whole give.
+	delivered := make([]math.Int, m)
+	for j := 0; j < m; j++ {
+		delivered[j] = nodes[cyc[(j-1+m)%m]].wantAmt
+	}
+
+	// legs: provider a_{k+1} gives to consumer a_k, in the delivered quantity.
 	legs := make([]sessiontypes.SettleLeg, 0, m)
 	intentIDs := make([]string, 0, m)
 	for k := 0; k < m; k++ {
 		consumer := nodes[cyc[k]]
 		provider := nodes[cyc[(k+1)%m]]
-		legs = append(legs, match.LegToSettle(provider.oi.Sigil, consumer.oi.Sigil, provider.give))
-		intentIDs = append(intentIDs, nodes[cyc[k]].oi.ID)
-	}
-
-	// pick the numeraire: the lexicographically smallest coin give-asset in the
-	// cycle (deterministic). Without a coin asset the cycle cannot price in a
-	// coin numeraire — skip (mirrors the fallback's pickNumeraire failing).
-	numeraire := ""
-	for k := 0; k < m; k++ {
-		gk := nodes[cyc[k]].giveKey
-		if match.IsCoinDenom(gk) && (numeraire == "" || gk < numeraire) {
-			numeraire = gk
+		leg, ok := match.LegToSettleAmount(provider.oi.Sigil, consumer.oi.Sigil, provider.give, consumer.wantAmt)
+		if !ok {
+			return sessiontypes.Match{}, false
 		}
-	}
-	if numeraire == "" {
-		return sessiontypes.Match{}, false
+		legs = append(legs, leg)
+		intentIDs = append(intentIDs, consumer.oi.ID)
 	}
 
 	// propagate give-asset prices around the cycle from the numeraire anchor.
-	// For each consumer a_k: price[G_k]*giveAmt_k == price[G_{k+1}]*wantAmt_k
-	// (its want is filled by a_{k+1}'s give of the same asset/amount), so
-	// price[G_{k+1}] = price[G_k] * giveAmt_k / wantAmt_k — exact LegacyDec
-	// (any non-terminating quotient is caught by the chain gate downstream).
+	// Party a_k hands over delivered_k of G_k and receives wantAmt_k of G_{k+1};
+	// equal value at the clearing prices ⇒ price[G_{k+1}] = price[G_k] ×
+	// delivered_k / wantAmt_k — exact LegacyDec (any non-terminating quotient is
+	// caught by the chain gate downstream). With exact fills delivered_k is the
+	// whole give, so this reduces to the pre-2.6 formula.
 	priceOf := map[string]math.LegacyDec{numeraire: math.LegacyOneDec()}
-	// find a starting index whose give-asset is the numeraire.
 	start := -1
 	for k := 0; k < m; k++ {
 		if nodes[cyc[k]].giveKey == numeraire {
 			start = k
 			break
 		}
+	}
+	if start < 0 {
+		return sessiontypes.Match{}, false
 	}
 	for step := 0; step < m; step++ {
 		k := (start + step) % m
@@ -184,7 +234,7 @@ func buildCycleMatch(nodes []node, cyc []int) (sessiontypes.Match, bool) {
 		if !ok || cur.wantAmt.IsZero() {
 			return sessiontypes.Match{}, false
 		}
-		priceOf[nextKey] = base.MulInt(cur.giveAmt).Quo(math.LegacyNewDecFromInt(cur.wantAmt))
+		priceOf[nextKey] = base.MulInt(delivered[k]).Quo(math.LegacyNewDecFromInt(cur.wantAmt))
 	}
 
 	// emit one PricePoint per distinct give-asset, in base-key order

@@ -3858,3 +3858,257 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   visible again — there is no stored state to migrate and no upgrade handler.
   Any operator who queried `Mandates(sigil_id)` before this fix may have seen a
   short list; re-querying now returns the complete set.
+
+## D-089 — Task 2.6: matcher-richness hardening — §5.1 limit RATE honored (closes D-049), partial-fill + alternate-anchor cycles, 2-party partial-fill fallback; all three strictly ADDITIVE, vector byte-identical three times over
+
+- **Date:** 2026-07-28 (Phase-2 task 2.6; the plan-stop was approved before the
+  session; 2.11/D-088 had already been split out and landed first)
+- **SPEC:** §5.1 (`IntentLeg.limit`), §6.4 rules 3/4 + the in-consensus fallback,
+  §11.6 (determinism); PHASE2_DESIGN §2.6.
+- **CLOSES D-049** (the §5.1 `limit` rate deliberately unhonored in Phase 0) and
+  the three `CONCLAVE-TODO(phase-2)` markers at `solution.go:349`,
+  `cycles.go:89`, `fallback.go:35`. **Constrained by** D-048 (the three
+  per-asset-class invariants), D-047/D-055 (exact price representability, single
+  source of truth), D-065 (uniform ante valuation), D-074/D-075/D-076 (bilateral
+  + signed consent), D-086 (fallback-Solution pre-image uniformity), D-082 (the
+  determinism baseline).
+
+### The organising principle: every enrichment is STRICTLY ADDITIVE
+
+Each of the three items can only ever ADD a rejection or ADD a candidate that
+the pre-2.6 code would have dropped. None of them can change the outcome of a
+match that cleared before. That is not an observation about the test data — it
+is a property of how each item is wired, and it is why the determinism vector
+came back byte-identical to the D-082 baseline **three separate times**, once
+per item, each run in ISOLATION (Rule 7):
+
+| item | wiring that makes it additive |
+|---|---|
+| 8 — limit rate | the clause returns before touching anything unless a leg carries a non-empty `limit`; the quantity guards above it are unchanged lines |
+| 7 — cycles | the alternate anchorings are tried AFTER the pre-2.6 default anchor, and the partial-fill provider rule only ADMITS pairs the exact-fill rule rejected |
+| 6a — fallback | the FULL-GIVE candidate is built and validated FIRST; the floor-fill candidate is reached only when the full-give one fails |
+
+### Item 8 — §5.1 limit-rate honoring (`x/session/keeper/solution.go`)
+
+- **The gap.** `IntentLeg.limit` was SIGNED by the agent (it rides inside the
+  `IntentPayload` ciphertext) and read by NOBODY — the Rule-4 disease in its
+  purest form: an agent could believe it had bounded its exchange rate while the
+  matcher bounded only its quantities. A repo-wide grep re-confirmed at build
+  time what the plan-stop found: **zero writers** of the field anywhere (the only
+  `Limit:` hits are `query.PageRequest.Limit`), including fixtures, the demo
+  driver, the conformance suites and the sim's intent generator.
+- **The rule.** `checkLimitRate`, a SEPARATE clause called last from
+  `checkLimits` (the quantity checks above it are byte-identical to pre-2.6):
+  - a GIVE leg of asset X bounds `given_X / recv_Y ≤ limit` (max-give);
+  - a WANT leg of asset Y bounds `recv_Y / given_X ≥ limit` (min-want);
+  where Y (resp. X) is the intent's single counter-side asset.
+- **Computed FROM FLOWS ALONE — and why that IS §6.4's "at the stated clearing
+  prices".** No external price source is consulted (the D-044/F-3 ante
+  price-source swap stays task 3.4 per D-081/D-082), and the solver-stated
+  clearing prices are not consulted either. They do not need to be: because
+  `CheckPriceBinding` forces every party's price-valued net to EXACTLY zero
+  (`p_X·given_X == p_Y·recv_Y`), a two-asset party's flow ratio and its
+  stated-price ratio are the SAME NUMBER. Reading the flows therefore honors the
+  spec's wording without letting a solver's choice of prices define the bound a
+  party signed — a strictly stronger position than pricing the check.
+- **Exact-or-reject, by cross-multiplication.** The comparison is
+  `given ⋛ limit×recv`, never `LegacyDec.Quo`, which rounds at 18 places and
+  could admit a rate the party never signed. A zero denominator needs no special
+  case: on a give leg the bound becomes 0, so giving something for nothing
+  breaches; on a want leg it becomes ≥ 0, trivially met (pinned by
+  `TestRateWithinBound_ZeroDenominator`).
+- **Overflow fails CLOSED, and this one is NEW.** `LegacyDec.MulInt` PANICS
+  ("Int overflow") once a product leaves ±2^256·10^18, and the fallback matcher
+  runs `checkLimits` inside EndBlock, where §11.6 forbids a panic on user input.
+  The existing price×flow products are bounded by construction (the fallback
+  builds prices that cancel against its own amounts); **nothing bounds the
+  magnitude of an agent-signed limit**, so `rateWithinBound` carries a
+  `recover()` that fails closed — the same Decision-A posture
+  `counterpartySatisfied` uses, and deterministic because the operands are pure
+  signed-payload and match data.
+- **RECORDED LIMITATION — the shape whose rate is not computable from flows
+  alone (surfaced, not routed around).** A give leg's rate is undefined when the
+  intent wants more than ONE distinct asset (and symmetrically for a want leg):
+  there is no single counter-asset to divide by, and valuing the basket would
+  need exactly the price lens this check refuses. Such a match is **REJECTED**
+  (`ErrLimitRateUnsupported`, session `1428`) rather than settled against an
+  unhonored limit. The task's hard constraint was "do not reach for the D-044
+  price source" — the resolution needs no price source at all: an unevaluable
+  rate is a rejection, so the signed field is honored in every shape, either by
+  enforcement or by refusal. Malformed and negative limits fail the same way.
+  This mirrors D-049's own discipline (a deliberate, greppable, recorded matcher
+  limitation) and D-074's (`ErrConditionUnsupportedMatch`); it is liftable when a
+  per-leg counter-asset exists — D-075-FW-2's per-leg field (task 2.7) is the
+  natural home.
+- **Conservation analysis (which D-048 invariant could break).** None can: the
+  clause is a pure read of already-computed `NetFlows` and returns only an error.
+  It cannot add, remove, or re-amount a leg, so coin value-conservation, svc
+  authorized-mint and data authorized-creation are all untouched. Its only
+  effect is to make a previously-valid solution INVALID.
+- **Solver-side drift: none, by scope.** `solver/gate` deliberately covers rule 2
+  and the binding half of rules 3/4 only — rule 3's limit satisfaction was never
+  in the gate (nor is counterparty class), so adding the rate half creates no
+  new divergence between chain and solver. A solver that ignores a signed limit
+  builds a solution the chain rejects and pays the 5% invalid-solution slash,
+  exactly as it does today for the quantity half.
+
+### Item 7 — partial-fill cycles + alternate numeraire anchoring (`solver/cycles`)
+
+Off-chain only. Every proposal is still re-validated on-chain by
+`validateSolution` / `CheckConservation` / `CheckPriceBinding`, so the blast
+radius is bounded to *which* matches get proposed.
+
+- **Alternate anchoring.** `Find` now returns `[][]Match` — one GROUP per cycle,
+  holding the same cycle priced under each of its coin give-assets, in sorted
+  anchor order, the FIRST being the pre-2.6 default. Anchoring changes which
+  clearing prices are exactly representable, so a cycle the default anchor cannot
+  price may still clear under another. **`cycles` does not decide which** — that
+  would have re-implemented the D-055 rule; `Solve` admits the first alternative
+  the CHAIN gate accepts and skips the rest, so the arbiter is unchanged and the
+  package keeps its documented purity (no `x/session/keeper` import).
+- **Partial fills.** A provider fills a consumer exactly, or with a remainder it
+  keeps when its own intent signed `allow_partial` (`node.canFill`); the
+  settlement leg carries the FILLED amount via the new
+  `match.LegToSettleAmount`. A DataGrant is exact-fill only — its conservation
+  amount is the indivisible bookkeeping 1 (D-048). Price propagation generalises
+  to `price[G_{k+1}] = price[G_k] × delivered_k / wantAmt_k`, which reduces to
+  the pre-2.6 formula on exact fills.
+- **Conservation analysis.** Each asset still appears on exactly one directed
+  leg per cycle, so the graph nets zero per asset by construction; the remainder
+  is simply never moved. The generalised price formula is exactly the
+  equal-value condition `CheckPriceBinding` enforces, so a mis-derived price
+  cannot settle — it is rejected, not absorbed.
+- **Honest scope note.** `gate.Accept` does NOT cover rule 3, so `canFill`'s
+  `allow_partial` condition is the SOLVER's protection against proposing a
+  slashable solution — the party's fill-or-kill GUARANTEE is enforced on-chain by
+  rule 3, proven load-bearing under item 6a below.
+
+### Item 6a — 2-party partial-fill fallback (`x/session/keeper/fallback.go`)
+
+- **Two candidates, fixed order.** `tryFallbackPair` now builds a deterministic
+  candidate list and returns the first that passes the full `validateSolution`:
+  1. **FULL-GIVE** — the pre-2.6 degraded terms, tried FIRST, so every pair that
+     cleared before 2.6 clears at byte-identical terms;
+  2. **FLOOR-FILL** — a party that signed `allow_partial` hands over only what
+     its counterparty's want-floor needs and KEEPS THE REMAINDER.
+  The second candidate earns its keep because the two terms differ in PRICE and
+  in RATE: a pair whose full-give ratio is not exactly representable (D-047 — the
+  matcher never rounds), or whose full-give rate breaches a signed §5.1 limit
+  (item 8), can still clear exactly at the floor terms. The acceptance fixture is
+  exactly that pair (7 uaaa against 3 uusdc prices uusdc at 7/3 and is dropped;
+  the floor fill of 6 against 3 prices it at 2 and clears).
+- **In-consensus cycle-aware fallback is NOT in this item** — it is task 2.10
+  (see below). 6a is 2-party only, as the approved scope cut requires.
+- **Conservation analysis — D-048 invariant (i), and it is the load-bearing
+  one.** A partially-filled coin leg moves exactly the filled amount from giver
+  to receiver through the module account, so the denom nets zero and supply is
+  unchanged; the remainder is not a leg at all and never leaves the giver's
+  wallet. Mis-attributing it is structurally unsettleable: emitting the full
+  offer while pricing the partial makes the party's price-valued residual
+  non-zero, so `CheckPriceBinding` rejects the graph (watched red S2 below), and
+  emitting mismatched leg amounts breaks `CheckConservation`. **Double-counting**
+  is prevented on the other side: `applyMatches` marks a partially-filled intent
+  CONCLUDED like any other, so its remainder is never re-offered into a later
+  session (watched red S3 below).
+- **D-086 pre-image uniformity, extended.** A partial fill produces a Match whose
+  leg amount is NOT the intent's offered quantity — a genuinely new pre-image
+  shape the 2.4 conformance test (full fills only) does not cover.
+  `TestFallbackPartialFill_PreImageUniformity` asserts the persisted fallback
+  Solution carries the FILLED amount and that
+  `sha256(Marshal(queried Match)) == receipt.terms_hash` for BOTH parties, so the
+  `Session → winning_solution_id → Solutions → Match` evidence chain stays
+  uniform across full and partial fills.
+- **Consent/bilateral gates unaffected.** A conditioned leg is a DataGrant
+  (D-074), and a DataGrant is exact-fill only in both new matchers, so no partial
+  fill can arise on a conditioned leg — the D-074 bilateral shape and the
+  D-075/D-076 signed-consent chokepoints are reached exactly as before (escrow +
+  consent suites green).
+
+### Watched-red evidence (Rule 3 — every red was SEEN)
+
+- **Item 8**, `return checkLimitRate(...)` → `return nil`: 4 tests RED —
+  `GiveRateBreachRejected`, `WantRateBreachRejected`,
+  `ProposeSolutionRejectsAndSlashes`, and — the important one —
+  `FallbackDeclinesRateViolatingPair`, which reports the intent reaching state
+  **4 (CONCLUDED)**: without the clause the IN-CONSENSUS matcher settles the
+  party against a rate it never signed. Restored → green.
+- **Item 7**, `allow_partial` removed from `node.canFill`:
+  `TestCyclesPartialFillRequiresAllowPartial` RED — the finder splits a
+  fill-or-kill offer. Restored → green.
+- **Item 6a, S1** (floor-fill candidate removed from `fallbackTerms`): 3 tests
+  RED — the enrichment is what those tests measure, not a pre-existing path.
+- **Item 6a, S2** (`intentLegToSettle` ignores the partial amount, i.e. the
+  remainder is mis-attributed): 3 tests RED — a settlement that debits more than
+  it credits cannot clear its own prices.
+- **Item 6a, S3** (`ConcludeIntent` skipped, i.e. the filled intent stays
+  re-offerable): `RemainderConservation` RED at its no-double-count assertion.
+- **Item 6a, fill-or-kill — a TWO-STAGE red that corrects a plausible
+  assumption.** Removing only the solver-side `allow_partial` candidate gates
+  left `FillOrKillNeverPartiallyFilled` **GREEN over 25 runs**: the guarantee
+  does not rest there. Removing §6.4 rule 3's fill-or-kill clause AS WELL turned
+  it **RED 25/25**. So the authoritative guarantee is rule 3, and it is REACHED
+  on the new partial-fill path; the candidate gates are an efficiency guard that
+  avoids proposing a match that must fail. (The 25-run form is deliberate: the
+  pair's `a`/`b` roles follow content-derived intent-id order, so a single run
+  would have exercised only one side — a one-shot red here would have been an
+  accident of ordering.)
+
+### Determinism vector (Rule 7) — three isolated runs, no re-baseline
+
+Run in ISOLATION after EACH item, two independent processes per run, exit 0, all
+five seeds **byte-identical to the D-082 baseline** every time:
+`seed=1 245EF177…67CC93 · seed=2 B48BDA6D…954194 · seed=7 FA562B1D…B95B76 ·
+seed=12 E491FB48…0EA3E9 · seed=42 6596CCA1…259325`.
+
+**Honest reading of that green (the D-069/D-086/D-088 coverage-shadow shape).**
+Byte-identical does not mean the three items are behaviour-neutral in general —
+it means the sim never reaches their new branches, and that is exactly what the
+additive wiring predicts:
+- nothing in-tree writes `IntentLeg.limit`, so item 8's clause is never entered;
+- nothing in-tree sets `allow_partial`, so no partial fill is ever built;
+- the sim's coordinated cycle has exactly ONE coin give-asset, so it has one
+  anchoring, and every pair whose default anchoring already cleared still clears
+  through it first.
+**The vector does not cover these paths; the unit and end-to-end tests named
+above are the covering gate.** Recorded here rather than presented as
+confirmation the enrichments are inert in production.
+
+**PROMOTED (review-driven): this is the FOURTH instance, so it is no longer an
+observation — it is a STRUCTURAL PROPERTY of the gate.** D-069 (the sim is
+epoch-inert, so the real Reveal path is never exercised), D-086 (the sim
+generates no mutually-fillable pair, so the fallback-Solution write is never
+reached), D-088 (the five seeds never populate a `0xFF` id), and now D-089
+(nothing sets `limit` or `allow_partial`, and the sim's cycle has one coin
+give-asset). The common cause is the sim's INTENT GENERATOR, not the seed
+vector: it emits thin, one-sided, single-asset flow, so the matcher's rich paths
+are structurally unreachable however many seeds are added. Two consequences,
+both binding going forward:
+- **The vector is a whole-system REGRESSION backstop, not a coverage instrument
+  for matcher richness.** A byte-identical result on a matcher change is
+  evidence of ADDITIVITY, never of correctness; the covering gate must be named
+  separately every time (as it is above).
+- **Task 2.10 inherits this as a stated design input** (written into its ledger
+  row, not left to be rediscovered): an in-consensus cycle-finder whose
+  determinism the vector cannot exercise must be gated PRIMARILY by hand-built
+  adversarial fixtures — cycle shapes, tie orderings, enumeration-bound
+  boundaries, node-identical traversal — each watched red, with the vector as a
+  backstop only. Widening the sim's generator until the vector reaches these
+  paths is the alternative; it is a legitimate task in its own right and is NOT
+  assumed here.
+
+### Forward items (Rule 6 — numbered, not floating)
+
+- **Task 2.10 — in-consensus cycle-aware fallback** (the second half of the old
+  `fallback.go:35` TODO). 6a delivers 2-party partial fills; an N-party cycle in
+  consensus is a materially larger determinism surface (cycle enumeration must be
+  bounded and node-identical) and was split out at the approved plan-stop.
+- **Task 2.12 — multi-asset in-kind skim + in-kind solver payout**
+  (`skim.go:37`). Split out because it is a FEE-MODEL question (D-050/D-051), not
+  a matcher enrichment: it asks whether svc-mint and data-creation surplus should
+  be skimmable at all, which D-048's asset-class split answers in the negative
+  today.
+- **TODO 9 — multi-intent-per-sigil** (`solution.go:143`) folded into **2.7 /
+  FW-2**: it needs a `SettleLeg` intent-tag proto field so rule 3 can attribute a
+  leg to one of a sigil's several intents, and it collides with D-074's
+  two-distinct-sigil bilateral constraint — precisely the FW-2 plan-stop
+  question, not an ad-hoc 2.6 carve-out (PHASE2_DESIGN §2.6 says so explicitly).

@@ -34,7 +34,10 @@ const feePoolSigil = "@feepool"
 // Phase-0 narrowing (D-051): only numeraire (coin) receive-excess is skimmed;
 // give-side savings and non-numeraire receive-excess are SCORED but not skimmed.
 // A data/{hash} numeraire has no ledger quantity, so it is never skimmable.
-// CONCLAVE-TODO(phase-2): multi-asset in-kind skim + in-kind solver payout.
+// CONCLAVE-TODO(phase-2): multi-asset in-kind skim + in-kind solver payout —
+// RE-POINTED by D-089 from task 2.6 to **task 2.12**: it is a fee-model question
+// (D-050/D-051), not a matcher enrichment, and opens with its own plan-stop on
+// whether an authorized mint / a quantity-less data grant is skimmable at all.
 func (k Keeper) computeMatchSkim(m types.Match, intents []matchIntent, flows NetFlows, numeraire string, skimBps uint32) []types.SettleLeg {
 	if numeraire == "" || strings.HasPrefix(numeraire, "data/") {
 		return nil

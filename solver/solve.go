@@ -39,8 +39,18 @@ func Solve(intents []match.OpenIntent) []sessiontypes.Match {
 		return true
 	}
 
-	for _, m := range cycles.Find(intents) {
-		admit(m)
+	// cycles returns one GROUP per cycle: the same cycle priced under each of its
+	// coin give-assets (the task-2.6 alternate numeraire anchorings), first being
+	// the pre-2.6 default. Anchoring decides which prices are exactly
+	// representable, so try them in order and take the first the chain gate
+	// accepts — the gate stays the sole arbiter (D-055), and one cycle can never
+	// contribute two clearings because `admit` marks its intents used.
+	for _, group := range cycles.Find(intents) {
+		for _, m := range group {
+			if admit(m) {
+				break
+			}
+		}
 	}
 
 	leftover := make([]match.OpenIntent, 0, len(intents))

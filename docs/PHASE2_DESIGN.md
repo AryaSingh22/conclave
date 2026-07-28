@@ -453,14 +453,15 @@ Current per-task consequences (D-077 spike snapshot, 2026-06-26):
 | 3 | `MsgConclude` exposed to CVM | `x/session/types/tx.pb.go:322` | FOLD → 2.2 | in flight |
 | 4 | fixed `fee_conversion_rate` → session TWAP | `x/mandate/keeper/window.go:138` | FOLD → 2.5 | open |
 | 5 | sigverify fork → native ADR-070 (v0.53) | `app/unordered/sigverify.go:16` | **RE-POINTED by D-077** → 2.5's v0.53 checkpoint or later | open (not 2.2) |
-| 6 | partial-fill + cycle-aware fallback | `x/session/keeper/fallback.go:35` | FOLD → 2.6 | open |
-| 7 | partial-fill cycles + alt numeraire | `solver/cycles/cycles.go:89` | FOLD → 2.6 | open |
-| 8 | honor §5.1 limit rate | `x/session/keeper/solution.go:349` (drift: was 330) | FOLD → 2.6 | open |
-| 9 | multi-intent-per-sigil | `x/session/keeper/solution.go:143` (drift: was 141) | FOLD → 2.6 | open |
-| 10 | multi-asset in-kind skim + payout | `x/session/keeper/skim.go:37` | FOLD → 2.6; 2.5 re-confirms skim/fee coherence | open |
+| 6 | partial-fill + cycle-aware fallback | ~~`x/session/keeper/fallback.go:35`~~ | SPLIT by 2.6's plan-stop | 🟡 **6a CLOSED** (D-089, 2-party partial fill); **6b → NEW task 2.10** (in-consensus cycle-aware) |
+| 7 | partial-fill cycles + alt numeraire | ~~`solver/cycles/cycles.go:89`~~ | FOLD → 2.6 | ✅ **CLOSED** (D-089; anchor GROUPS judged by the chain gate, D-055 arbiter unchanged) |
+| 8 | honor §5.1 limit rate | ~~`x/session/keeper/solution.go:349`~~ | FOLD → 2.6 | ✅ **CLOSED** (D-089, closes D-049; flows-only rate, no D-044 price source) |
+| 9 | multi-intent-per-sigil | `x/session/keeper/solution.go:143` | **RE-POINTED by D-089** → 2.7/FW-2 | open (needs a SettleLeg intent tag; collides with D-074) |
+| 10 | multi-asset in-kind skim + payout | `x/session/keeper/skim.go:37` | **RE-POINTED by D-089** → NEW task 2.12 | open (a fee-model question, D-050/D-051 — not a matcher enrichment) |
 
 New since Rev 1 (opened by the build, owned above): **FW-1, FW-2 → 2.7**;
-**flake-hardening → 2.6**; **richer typed-schema circuit → Phase-3 candidate**;
+**flake-hardening → shipped as task 2.11 (D-088 — a real 1-in-256 iterator bug,
+not a flaky fixture)**; **richer typed-schema circuit → Phase-3 candidate**;
 **mainnet gates** (VK MPC ceremony, circuit-soundness audit, gnark-in-consensus
 audit unit) → the 1.8-style external-audit scope, NOT Phase-2 tasks.
 

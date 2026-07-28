@@ -141,9 +141,13 @@ func (k Keeper) ProposeSolution(ctx sdk.Context, solver sdk.AccAddress, sessionI
 //     distinct sender_sigil per match (Decision D: per-intent limit attribution
 //     — legs name sigils and rule 3 is per-intent, so a sigil must map to one
 //     intent in the match; CONCLAVE-TODO(phase-2): allow multi-intent-per-sigil
-//     via intent-tagged legs so one agent can clear two intents in a batch).
+//     via intent-tagged legs so one agent can clear two intents in a batch —
+//     RE-POINTED by D-089 from task 2.6 to **2.7/FW-2**: it needs a SettleLeg
+//     intent-tag proto field and collides with D-074's two-distinct-sigil
+//     bilateral constraint, which is FW-2's own plan-stop question).
 //  2. conservation (CheckConservation) + legs reference only participants.
-//  3. limit satisfaction at the stated quantities (partial only if allow_partial).
+//  3. limit satisfaction: quantities (partial only if allow_partial) AND, since
+//     task 2.6, the §5.1 `limit` RATE each party signed (checkLimitRate).
 //  4. uniform price: one price per asset pair within a match.
 //  5. counterparty class: each party's predicate holds against every other
 //     party's Sigil state (resolves the 0.4 CONCLAVE-TODO).
@@ -344,10 +348,12 @@ func checkUniformPrice(prices []types.PricePoint) error {
 }
 
 // checkLimits enforces SPEC §6.4 rule 3 for one intent against its net flows.
-// Phase 0 reads the give/want quantity from each leg's asset amount; the
-// optional `limit` decimal (a rate) is reserved for Phase 2.
-// CONCLAVE-TODO(phase-2): honor the §5.1 limit rate at the stated clearing
-// prices for richer partial-fill semantics.
+// The QUANTITY half reads the give/want amount from each leg's asset amount
+// (D-049) — given ≤ offered, recv ≥ wanted, and no unauthorized asset moves.
+// The RATE half (the §5.1 `limit` decimal D-049 left unhonored) is task 2.6's
+// checkLimitRate, called as a SEPARATE final clause so the quantity guard above
+// it is unchanged: the rate clause can only ever ADD a rejection, never accept a
+// graph these checks reject.
 func checkLimits(mi matchIntent, flow map[string]math.Int) error {
 	allowPartial := intentAllowsPartial(mi.rec)
 
@@ -396,7 +402,219 @@ func checkLimits(mi matchIntent, flow map[string]math.Int) error {
 			return errorsmod.Wrapf(types.ErrLimitViolation, "sigil %s receives unauthorized asset %s", mi.sigil, key)
 		}
 	}
+
+	// rule 3, RATE half (§5.1 `limit`, task 2.6) — a separate clause, deliberately
+	// last: every quantity guard above has already run unchanged.
+	return checkLimitRate(mi, flow)
+}
+
+// checkLimitRate enforces the RATE half of SPEC §6.4 rule 3 — the §5.1
+// `IntentLeg.limit` decimal ("max-give / min-want as a decimal string") that
+// D-049 deliberately left UNHONORED in Phase 0. Task 2.6 closes that boundary:
+// until now the field was SIGNED by the agent and read by nobody, the worst of
+// both worlds — an agent could believe it had bounded its rate while the matcher
+// bounded only its quantities.
+//
+// The rate is the party's OWN exchange rate, computed FROM THE SETTLED FLOWS
+// ALONE — no external price source (the D-044/F-3 ante price-source swap stays
+// task 3.4) and not from the solver-stated clearing prices either:
+//
+//   - a GIVE leg of asset X bounds  given_X / recv_Y ≤ limit   (max-give);
+//   - a WANT leg of asset Y bounds  recv_Y / given_X ≥ limit   (min-want);
+//
+// where Y (resp. X) is the intent's single counter-side asset. This IS §6.4's
+// "at the stated clearing prices" for the shapes the matcher builds: because
+// CheckPriceBinding forces each party's price-valued net to EXACTLY zero
+// (p_X·given_X == p_Y·recv_Y), a two-asset party's flow ratio and stated-price
+// ratio are the same number — so reading the flows honors the spec's rule
+// without letting a solver's choice of prices define the bound a party signed.
+//
+// The comparison is EXACT by cross-multiplication (given ⋛ limit×recv), never
+// LegacyDec division, which rounds at 18 places and could admit a rate the party
+// never signed. A zero denominator needs no special case: on a give leg the
+// bound becomes 0, so giving something for nothing breaches; on a want leg it
+// becomes ≥ 0, trivially met.
+//
+// RECORDED LIMITATION (the D-049/D-074 discipline — deliberate, greppable, and
+// REJECTING rather than silently ignoring): a give leg's rate is undefined when
+// the intent wants more than one distinct asset (and symmetrically for a want
+// leg), because there is no single counter-asset to divide by and valuing the
+// basket would need exactly the price lens this check refuses. Those matches are
+// REJECTED with ErrLimitRateUnsupported, never settled against an unhonored
+// limit — as are a malformed/negative limit and operands too large to compare
+// exactly. Liftable when a per-leg counter-asset exists (D-075-FW-2's per-leg
+// condition field is the natural home for that refinement).
+//
+// An intent that signs NO limit keeps the pre-2.6 quantity-only regime exactly:
+// the clause returns before touching anything.
+func checkLimitRate(mi matchIntent, flow map[string]math.Int) error {
+	if !intentSignsLimit(mi.payload) {
+		return nil
+	}
+	giveKeys, err := distinctIntentLegKeys(mi.payload.Give)
+	if err != nil {
+		return err
+	}
+	wantKeys, err := distinctIntentLegKeys(mi.payload.Want)
+	if err != nil {
+		return err
+	}
+
+	for i := range mi.payload.Give {
+		leg := mi.payload.Give[i]
+		if leg.Limit == "" {
+			continue
+		}
+		key, _, err := intentLegKeyAmount(leg)
+		if err != nil {
+			return err
+		}
+		limit, err := parseSignedLimit(mi.sigil, key, leg.Limit)
+		if err != nil {
+			return err
+		}
+		if len(wantKeys) != 1 {
+			return errorsmod.Wrapf(types.ErrLimitRateUnsupported,
+				"sigil %s: max-give limit on %s but the intent wants %d distinct assets (no single counter-asset)",
+				mi.sigil, key, len(wantKeys))
+		}
+		counter := wantKeys[0]
+		given, recv := negPart(flowOf(flow, key)), posPart(flowOf(flow, counter))
+		within, ok := rateWithinBound(given, limit, recv, true)
+		if !ok {
+			return errorsmod.Wrapf(types.ErrLimitRateUnsupported,
+				"sigil %s: max-give rate %s %s per %s %s is not exactly comparable to limit %s",
+				mi.sigil, given, key, recv, counter, limit)
+		}
+		if !within {
+			return errorsmod.Wrapf(types.ErrLimitViolation,
+				"sigil %s gives %s %s for %s %s — above its signed max-give limit %s",
+				mi.sigil, given, key, recv, counter, limit)
+		}
+	}
+
+	for i := range mi.payload.Want {
+		leg := mi.payload.Want[i]
+		if leg.Limit == "" {
+			continue
+		}
+		key, _, err := intentLegKeyAmount(leg)
+		if err != nil {
+			return err
+		}
+		limit, err := parseSignedLimit(mi.sigil, key, leg.Limit)
+		if err != nil {
+			return err
+		}
+		if len(giveKeys) != 1 {
+			return errorsmod.Wrapf(types.ErrLimitRateUnsupported,
+				"sigil %s: min-want limit on %s but the intent gives %d distinct assets (no single counter-asset)",
+				mi.sigil, key, len(giveKeys))
+		}
+		counter := giveKeys[0]
+		recv, given := posPart(flowOf(flow, key)), negPart(flowOf(flow, counter))
+		within, ok := rateWithinBound(recv, limit, given, false)
+		if !ok {
+			return errorsmod.Wrapf(types.ErrLimitRateUnsupported,
+				"sigil %s: min-want rate %s %s per %s %s is not exactly comparable to limit %s",
+				mi.sigil, recv, key, given, counter, limit)
+		}
+		if !within {
+			return errorsmod.Wrapf(types.ErrLimitViolation,
+				"sigil %s receives %s %s for %s %s — below its signed min-want limit %s",
+				mi.sigil, recv, key, given, counter, limit)
+		}
+	}
 	return nil
+}
+
+// intentSignsLimit reports whether any give/want leg carries a §5.1 limit. An
+// intent that signs none takes the pre-2.6 quantity-only path unchanged (empty =
+// unconstrained — the D-065 "an empty declaration is still a valid declaration"
+// posture applied to a rate).
+func intentSignsLimit(p veiltypes.IntentPayload) bool {
+	for i := range p.Give {
+		if p.Give[i].Limit != "" {
+			return true
+		}
+	}
+	for i := range p.Want {
+		if p.Want[i].Limit != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// distinctIntentLegKeys returns the distinct conservation asset keys of one side
+// of an intent, in FIRST-APPEARANCE order — a slice built by scanning the signed
+// leg list, never a map iteration (§11.6).
+func distinctIntentLegKeys(legs []veiltypes.IntentLeg) ([]string, error) {
+	keys := make([]string, 0, len(legs))
+	seen := make(map[string]bool, len(legs))
+	for i := range legs {
+		key, _, err := intentLegKeyAmount(legs[i])
+		if err != nil {
+			return nil, err
+		}
+		if !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
+}
+
+// parseSignedLimit parses a §5.1 limit decimal. A limit that is not an exact
+// LegacyDec, or is negative, cannot bound anything — it fails CLOSED (the match
+// is rejected) rather than being ignored, so a garbage rate is never read as
+// "no rate".
+func parseSignedLimit(sigil, key, limit string) (math.LegacyDec, error) {
+	d, err := math.LegacyNewDecFromStr(limit)
+	if err != nil {
+		return math.LegacyDec{}, errorsmod.Wrapf(types.ErrLimitRateUnsupported,
+			"sigil %s leg %s: limit %q is not a decimal (%s)", sigil, key, limit, err)
+	}
+	if d.IsNegative() {
+		return math.LegacyDec{}, errorsmod.Wrapf(types.ErrLimitRateUnsupported,
+			"sigil %s leg %s: negative limit %s", sigil, key, d)
+	}
+	return d, nil
+}
+
+// rateWithinBound compares an achieved rate num/den against `limit` by EXACT
+// cross-multiplication: the give side requires num ≤ limit×den, the want side
+// num ≥ limit×den. There is no division, so nothing rounds.
+//
+// ok=false means the comparison itself could not be made. `LegacyDec.MulInt`
+// PANICS ("Int overflow") once a product leaves the ±2^256·10^18 range, and the
+// fallback matcher runs this inside EndBlock where §11.6 forbids a panic on user
+// input. Unlike the existing price×flow products — which cancel by construction
+// in the fallback's own pricing — nothing bounds the magnitude of an
+// agent-signed limit, so the guard is required here. It fails CLOSED, the same
+// Decision-A posture counterpartySatisfied uses, and stays deterministic: the
+// operands are pure signed-payload and match data, so every node reaches the
+// identical verdict.
+//
+// The recover is SCOPED TO THE ARITHMETIC and must stay that way: this function
+// takes no ctx, touches no store, and calls nothing but LegacyDec/Int operators,
+// so the only panic reachable in its frame is the range assertion below. Keep
+// the body to the comparison — moving any keeper call, store read, or callback
+// inside would turn a narrow fail-closed guard into one that silently swallows
+// unrelated bugs. (It is deliberately narrower than counterpartySatisfied's,
+// which has to wrap a whole predicate evaluation.)
+func rateWithinBound(num math.Int, limit math.LegacyDec, den math.Int, giveSide bool) (within, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			within, ok = false, false
+		}
+	}()
+	bound := limit.MulInt(den)
+	achieved := math.LegacyNewDecFromInt(num)
+	if giveSide {
+		return !achieved.GT(bound), true
+	}
+	return !achieved.LT(bound), true
 }
 
 // validateConditionedMatch enforces the condition policy (SPEC §6.5, D-073/

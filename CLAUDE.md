@@ -410,12 +410,41 @@ task below bootstraps from it.
       baseline (recorded in D-082), two-pass identical. Watched-red proofs:
       seam / cold-gate / pruning each red-without-guard. Fee-TWAP
       manipulation surface → 3.1 audit input (PHASE3_PLAN §3.1 updated).
-- [ ] 2.6 Matcher-richness hardening pass — owns latent TODOs: partial-fill/cycle-aware
-      fallback, partial-fill cycles + alt numeraire anchoring, §5.1 limit-rate honoring,
-      multi-intent-per-sigil, multi-asset in-kind skim. One determinism-focused session
-      behind the existing `validateSolution` bar + determinism vector. Rev 2 adds the
-      D-076 flake-hardening item (deterministic `randAddr()` fixture seeding,
-      `x/mandate/keeper/keeper_test.go:101`).
+- [x] 2.6 Matcher-richness hardening pass — **D-089.** Three enrichments, each landed
+      alone with the determinism vector run in ISOLATION between them. **(8) §5.1
+      limit-RATE honoring — CLOSES D-049:** `IntentLeg.limit` was signed and read by
+      nobody (Rule 4 in its purest form); `checkLimitRate` is a SEPARATE final clause in
+      `checkLimits` (the quantity guards above it unchanged) bounding each party's OWN
+      achieved rate — give leg `given/recv ≤ limit`, want leg `recv/given ≥ limit` —
+      computed **FROM FLOWS ALONE**, no D-044 price source (that stays 3.4) and not from
+      solver-stated prices either: `CheckPriceBinding`'s exact-zero residual makes a
+      two-asset party's flow ratio and price ratio the SAME number, so flows-only IS
+      §6.4's "at the stated clearing prices". Exact by cross-multiplication (no
+      LegacyDec division, nothing rounds); `MulInt` overflow fails CLOSED via recover
+      (NEW risk — nothing bounds an agent-signed limit, and `checkLimits` runs in
+      EndBlock). RECORDED LIMITATION: a leg whose counter-side has >1 distinct asset has
+      no flows-only rate → **REJECTED** (`ErrLimitRateUnsupported` 1428), never settled
+      against an unhonored limit; liftable via 2.7/FW-2's per-leg field. **(7) cycles
+      partial-fill + ALTERNATE NUMERAIRE ANCHORING:** `cycles.Find` returns one GROUP per
+      cycle — the same cycle priced under each coin give-asset, default anchor FIRST —
+      and `Solve` admits the first the CHAIN gate accepts, so D-055's arbiter is unchanged
+      and the package keeps its no-keeper purity; a provider may fill partially only if it
+      signed `allow_partial` (DataGrant exact-fill only, D-048). **(6a) 2-party
+      partial-fill fallback:** `tryFallbackPair` tries FULL-GIVE first (so nothing that
+      cleared pre-2.6 changes) then FLOOR-FILL, which clears pairs whose full-give price is
+      non-representable (D-047) or whose full-give rate breaches a signed limit. D-086
+      pre-image uniformity extended to the new partial shape (2.4's conformance proves full
+      fills only). **All three are strictly ADDITIVE by wiring** → the vector came back
+      **byte-identical to D-082 three times**, with the honest caveat recorded (nothing
+      in-tree sets `limit` or `allow_partial`, so the vector does not reach these paths —
+      the unit/e2e tests are the covering gate). Watched reds seen for every guard,
+      including a two-stage fill-or-kill result that CORRECTED a plausible assumption: the
+      solver-side candidate gates are NOT the guarantee (green 25/25 without them); §6.4
+      rule 3 is, and it is reached on the new path (red 25/25 without it). Split out at the
+      approved plan-stop: **2.10** (in-consensus cycle-aware fallback), **2.12**
+      (multi-asset in-kind skim); TODO 9 (multi-intent-per-sigil) folded into 2.7/FW-2.
+      The Rev-2 "flake-hardening" item shipped separately as **2.11/D-088** — it was a real
+      1-in-256 iterator bug, not a flaky fixture.
 - [ ] 2.7 Escrow consent completeness (NEW in Rev 2, D-078) — owns the D-075/D-076 FW
       seams: FW-1 (HASHLOCK/OPTIMISTIC class/window-level buyer-side consent; ZK's
       exact-param gate shipped in 2.1b), FW-2 (per-leg `IntentLeg.condition` proto
@@ -474,9 +503,35 @@ task below bootstraps from it.
       D-088: the 5 seeds never populate a `0xFF` id, so the vector does not
       reach this path — the watched-red tests are the covering gate).
 
-*(Task numbers 2.10 and 2.12 are reserved by 2.6's approved plan-stop scoping —
-cycle-aware in-consensus fallback and multi-asset in-kind skim respectively —
-and their ledger rows are written when 2.6 closes.)*
+- [ ] 2.10 In-consensus cycle-aware fallback (NEW in 2.6, D-089) — the second half of the
+      old `fallback.go:35` TODO. 2.6/6a shipped 2-party partial fills; an N-party CYCLE in
+      the in-consensus matcher is a materially larger determinism surface (cycle
+      enumeration must be bounded and byte-identical on every node, and it runs in
+      EndBlock where a panic halts the chain), so it was split out at 2.6's plan-stop
+      rather than stacked under it. Every candidate stays behind the same
+      `validateSolution` bar. **DESIGN INPUT, state it in 2.10's plan up front (don't
+      rediscover it): the determinism vector CANNOT be 2.10's primary gate.** The sim
+      generates thin, one-sided, single-asset flow, so the matcher's rich paths are
+      unreachable by it — now a STRUCTURAL property of the gate, not an observation,
+      evidenced four times (D-069 epoch-inert reveal, D-086 no fillable pair, D-088 no
+      `0xFF` id, D-089 no `limit`/`allow_partial`/multi-coin cycle). A cycle-finder whose
+      determinism the vector cannot exercise must be gated by HAND-BUILT ADVERSARIAL
+      FIXTURES (cycle shapes, tie orderings, enumeration-bound boundaries, node-identical
+      traversal) as the primary evidence, with the vector as a regression backstop only.
+      Acceptance: a 3-party cycle no solver proposed clears via the fallback; enumeration
+      bounded by an explicit param; the adversarial fixture suite above, each guard
+      watched red; determinism vector in isolation with any drift ADR'd to a single named
+      cause; the D-074 bilateral constraint on conditioned legs preserved (a conditioned
+      leg must not become reachable through a cycle). Off the exit path.
+- [ ] 2.12 Multi-asset in-kind skim + in-kind solver payout (NEW in 2.6, D-089) — the
+      `skim.go:37` TODO. Split out of 2.6 because it is a FEE-MODEL question
+      (D-050/D-051), not a matcher enrichment: D-051 skims numeraire coin receive-excess
+      ONLY, because `svc/{schema}` is an authorized mint and `data/{hash}` has no ledger
+      quantity (D-048) — so "skim them too" first has to answer whether those classes are
+      skimmable at all. Opens with that plan-stop. Acceptance: whatever it lands stays
+      principal-safe under `checkSkimBinding` (D-050) and re-proves the D-048 invariant
+      per class; the solver payout stays solvent-by-construction; vector in isolation.
+      Off the exit path.
 
 **Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
 data from a Conclave agent; receipt IBC-verified on a second chain (spans

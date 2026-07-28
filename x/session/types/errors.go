@@ -32,4 +32,5 @@ var (
 	ErrSkimViolation             = errorsmod.Register(ModuleName, 1425, "surplus skim violates the residual==-skim binding (would touch principal or mis-route)")
 	ErrConditionUnsupportedMatch = errorsmod.Register(ModuleName, 1426, "conditioned (HASHLOCK/OPTIMISTIC) leg requires an unambiguous bilateral match: one DataGrant leg seller→buyer plus coin payment legs buyer→seller, exactly two sigils")
 	ErrConditionNotConsented     = errorsmod.Register(ModuleName, 1427, "settlement leg carries a delivery condition the seller did not sign (SettleLeg.condition must equal the seller intent's signed IntentPayload.condition — a solver cannot impose a condition)")
+	ErrLimitRateUnsupported      = errorsmod.Register(ModuleName, 1428, "a leg's signed §5.1 limit RATE cannot be evaluated for this match shape (no single counter-asset, a malformed/negative limit, or operands beyond exact comparison) — the match is rejected rather than settled against an unhonored limit")
 )
