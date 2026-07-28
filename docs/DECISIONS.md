@@ -4112,3 +4112,292 @@ both binding going forward:
   leg to one of a sigil's several intents, and it collides with D-074's
   two-distinct-sigil bilateral constraint — precisely the FW-2 plan-stop
   question, not an ad-hoc 2.6 carve-out (PHASE2_DESIGN §2.6 says so explicitly).
+
+## D-090 — Phase-2 state-reconciliation audit: docs-only corrections; PHASE2_DESIGN Rev 3; AUDIT F-7/F-8 dispositioned (the findings-list-goes-write-only lesson); the authored-surface inventory re-derivation promoted to a scheduled gate; mirror .git foot-gun FIXED
+
+- **Date:** 2026-07-28 (reconciliation audit at `aa21274`, immediately after
+  task 2.6. NOT a build task: no feature code, no proto, no consensus logic.
+  The deliverables are a reconciliation report and docs-only corrections; the
+  standing instruction was that a CODE defect found here becomes its own
+  numbered task rather than a fix in this session — **none was found.**)
+- **SPEC:** §10 (the phase ledgers being reconciled), §13 (the greppable-marker
+  convention); AUDIT F-1..F-8; AUDIT_SCOPE_1.8 O1–O4/T1–T4/L1–L3/A-*;
+  PHASE2_DESIGN Rev 2 (D-078); PHASE3_PLAN §5.1 (D-080); METHODOLOGY Rules 4,
+  6, 8, 9 (which governed the session) and 3, 7 (which it amends).
+- **Why now.** Phase 2 had landed 2.0–2.6 plus 2.11 while forward items were
+  spread across CLAUDE.md, PHASE2_DESIGN, PHASE3_PLAN, DECISIONS and
+  AUDIT_SCOPE_1.8. Drift between what the docs claimed and what the tree held
+  was the risk, and everything below was verified AGAINST THE TREE — not
+  against any prior summary, commit message, or conversational account.
+
+### Verdict: no code defect; five of eight checks found docs DRIFT
+
+**PASS — citations.** All **59** distinct `Test*`/`Benchmark*` identifiers cited
+across X402_SURFACE, 7683_SURFACE, AUDIT_SCOPE_1.8 and D-080..D-089 resolve in
+the tree, as do all cited file paths and the AUDIT_SCOPE §2.2 function-level
+citations. The 1.8 "44/44" discipline still holds, at 59/59.
+
+**PASS — gate health.** `make lint` exit 0; `make test` exit 0 (21 packages ok,
+0 FAIL, 0 SKIP); `make sim-determinism` exit 0, all five seeds **byte-identical
+to the D-082 baseline** across two independent processes. Tree fingerprinted
+before AND after each gate run (`git diff | sha256sum` =
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`, the
+empty-input hash, both times) — the Rule-9 addition this ADR then writes into
+METHODOLOGY, applied to itself.
+
+**PASS — three high-value claims re-verified by direct read (Rule 9).**
+(a) `IntentLeg.limit` has **zero non-test writers** repo-wide; its only readers
+are `checkLimitRate`/`intentSignsLimit`. D-089's phrasing "zero writers
+anywhere … including the conformance suites" is now imprecise — 2.6's own
+`limit_rate_test.go:28` writes it — but the substantive premise is verified
+INDEPENDENTLY and more strongly: `x/veil/simulation/operations.go` builds
+exactly ONE leg per side, never sets `limit` or `allow_partial`, and its
+3-party cycle is usdc→data→svc→usdc (one coin give-asset). The Rule-7
+structural-property claim is code-true, not merely observed.
+(b) **x/receipt never reads escrow records** — zero escrow references in
+non-test x/receipt code; the only hits construct an escrow keeper to satisfy
+`sessionkeeper.NewKeeper`'s signature in a test harness. D-073's correction of
+Rev 1 stands.
+(c) **`Receipt.condition_outcome` has exactly ONE non-generated writer** —
+`x/session/keeper/receipt.go:51`, stamping `CONDITION_OUTCOME_NONE`
+unconditionally; no `PENDING` value exists yet. D-087's premise holds, and 2.9
+remains correctly scoped.
+Also verified: **D-086 pre-image uniformity extends to the partial shape** —
+`TestFallbackPartialFill_PreImageUniformity` asserts the stored Match carries
+the FILLED 6 (not the offered 7) and recomputes `terms_hash` for both parties'
+receipts — with the honest residual that the **app-level** conformance chain
+(query → marshal → ICS-23) still covers full fills only; recorded in
+7683_SURFACE §7 rather than left implicit. And the **D-082 baseline is still the
+sole fixed point**: those five hashes appear only in DECISIONS.md and are cited
+identically by D-084/085/086/088/089; no competing baseline exists anywhere.
+
+### DRIFT-1 — PHASE2_DESIGN was five tasks stale → **Rev 3**
+
+The approved phase authority — the document CLAUDE.md requires every Phase-2
+session to bootstrap from (Rule 1) — still called **2.3, 2.4 and 2.6 "not
+started"** when all three had shipped, had **no rows at all** for 2.8–2.12,
+described the in-flight 2.2 working tree as current, and carried §5 rows
+saying the CVM marker was "in flight" (2.2 closed it) and the `window.go:138`
+TODO was "open" (2.5 closed it). 2.6's commit had touched only §5.
+**This is the most consequential finding of the audit and the reason the
+corrections were sequenced with Rev 3 first:** a stale scoreboard does not
+merely misinform, it would lead a *discipline-faithful* session to re-plan
+committed work — the bootstrap document lying to the discipline that depends on
+it. Rev 3 rewrites §0/§1/§2.3/§2.4/§2.5/§2.6/§5/§6 and the FLAGS summary to
+as-built, adds the missing task rows, discharges FLAG C, and records the exit
+demo as UNBLOCKED.
+
+### DRIFT-2 — ownership defects (two shapes, both now rules)
+
+- **Double ownership:** `timeouts→params` was assigned to **both** 2.7
+  (PHASE2_DESIGN §0/§2.7, CLAUDE.md) and 2.8 (D-085's closing paragraph).
+  **RESOLVED to 2.8** — it is already the params/charging-shape task, and 2.7
+  is already carrying a proto change.
+- **One-way pointers:** D-089 re-pointed **TODO 9** (multi-intent-per-sigil)
+  and the **`ErrLimitRateUnsupported` multi-counter-asset lift** into 2.7/FW-2,
+  and said so in the *deferring* task — but 2.7's own acceptance criteria
+  listed neither. An item pointed at a task but not written into it is owned by
+  nobody, and is invisible at exactly the moment that task is planned. Both are
+  now IN 2.7's criteria, which additionally require the FW-2 plan-stop to
+  return an explicit verdict on each (implemented, or re-deferred to a named
+  task) so neither can lapse silently again. → METHODOLOGY Rule 6 sub-rules 5/6.
+
+### DRIFT-3 — AUDIT F-7 and F-8 were unowned; the findings list had gone write-only
+
+A repo-wide grep found **zero mentions of F-7 or F-8 outside `docs/AUDIT.md`**.
+- **F-7** (§5.1 limit rate ignored, D-049) was **closed in fact by task 2.6**,
+  which closed it under the name "D-049" and never mentioned F-7:
+  closed-in-fact, open-on-paper. Recorded now. Note its original rationale
+  ("safe under Phase-0 fill-or-kill") was **half wrong** — 2.6's watched red
+  showed the in-consensus fallback settling a party at an unsigned rate once
+  the clause was removed.
+- **F-8** (stale phase-0 markers, filed "cosmetic") was **genuinely open for
+  two phases** and was **independently rediscovered** by this audit's marker
+  sweep, which did not know F-8 existed. That rediscovery is the proof it was
+  invisible.
+
+> **The lesson, recorded because it is the transferable part: A FINDINGS LIST
+> NEEDS THE SAME OWNER-PER-ROW DISCIPLINE AS A LEDGER, OR IT GOES WRITE-ONLY.**
+> This is METHODOLOGY Rule 6's own counterexample — D-044's "dedicated post-0.8
+> task", a phrase rather than a task number, which floated two phases and came
+> back as **F-3** — reproduced *on the very list that recorded F-3*. A findings
+> list is especially prone to it because producing the list feels like
+> completing something. `docs/AUDIT.md` now carries a disposition row per
+> finding that must never be blank, and Rule 6 says so explicitly.
+
+### DRIFT-4 — the marker sweep (closes F-8)
+
+22 markers audited against Rule 6 ("every hit maps to a ledger task"); **15
+remain, every one owned**, zero phase-0, zero phase-1:
+- **3 re-tagged phase-3 → task 3.4** — the F-3/D-044 price-source debt
+  (`price_source.go` ×2, `lifecycle.go:664`), plus `faceValueScalar`; all had
+  named task **0.8**, complete since Phase 0.
+- **2 given owners** — session-tx FinalizeBlock coverage → **3.5**; per-lane
+  fee priority → **3.3** (its answer moves with the block-sdk disposition).
+- **4 retired as completed work** — 0.8's session-keeper swap, the EndBlock
+  hand-off, and the counterparty-class predicate wiring (which DID land; the
+  one wrong word was "CEL" — the evaluator is a Go predicate environment, no
+  CEL library is imported anywhere); and `crypto/reveal/stub.go`'s phase-1
+  marker, where the most interesting finding sits: **1.3/1.6 did replace the
+  stub, and `StubScheme` now persists DELIBERATELY as the epoch-0 bootstrap
+  window (L1, D-069) — a recorded design decision that had been wearing a
+  TODO's clothing for two phases.** That is how greppable-marker discipline
+  decays into noise, and it is why F-8 was not cosmetic.
+- **6 phase-3 Chambers markers now name task 3.11** instead of relying on
+  inference, and the two index-sharding markers carry D-088's re-arming warning
+  (activating `chamber_id > 0` re-arms the truncated-iterator class).
+- **Method note (Rule 8):** the first sweep pass QUOTED the retired marker
+  token verbatim in its explanatory prose, so a marker grep still hit five
+  retired sites — the sweep briefly defeated the discipline it was restoring.
+  Caught by re-running the census, fixed by writing "the former phase-N marker"
+  instead. Recorded rather than quietly corrected.
+- Four **code comments contradicting shipped behavior** also fixed: three in
+  `app/app.go` and one in `crypto/threshold/threshold.go` still said the
+  StubScheme was the live Reveal scheme "until Task 1.6" and that the reveal
+  share cache was "populated but not yet consumed" — untrue since 1.6 (D-069).
+  Not markers, so Rule 6 did not catch them; Rule 9's "summaries encode the
+  author's model, and bugs live where model and code diverge" did.
+
+### DRIFT-5 — METHODOLOGY was missing six promised additions
+
+All six were promised in review and absent from the document. Added with their
+worked examples, each from a rule failing in practice:
+- **Rule 3 corollary — a flaky test may be a correctness ORACLE at low duty
+  cycle.** Reproduce and COUNT before stabilizing; a rate near a power-of-two
+  boundary points at a byte bug. Instance: task 2.11, where the prescribed
+  "make the fixture deterministic" fix would have shipped a live 1-in-256
+  store-iterator bug permanently green.
+- **Rule 3 refinement — PREDICT which guard reds, then check the prediction.**
+  A red landing elsewhere means your model of what-guards-what was wrong.
+  Instance: 2.6, where `allow_partial` candidate gates were assumed to be the
+  fill-or-kill guarantee and §6.4 rule 3 actually was.
+- **Rule 3 dosing — dose the watched-red against whatever randomizes its
+  path.** Instance: 2.6's 25 runs, because content-derived id ordering made a
+  one-shot red an accident.
+- **Rule 4 sharpening — a security claim verified against ONE code path is
+  UNVERIFIED; enumerate the paths.** Three instances: 2.3's ante-vs-msg-server
+  divergence, 2.4's solver-vs-fallback pre-image gap, 2.3's
+  AmendMandate-vs-IssueMandate-REPLACE gap.
+- **Rule 7 structural property — the gate's COVERAGE SHADOW.** Four instances
+  (D-069/086/088/089) make it a property, not an observation: byte-identical
+  means "unperturbed on what the generator exercises", never "inert in
+  production", and the covering gate must be named separately every time.
+- **Rule 9 addition — fingerprint the tree before and after a gate run**, so
+  "the gate ran on the shipping tree" is checkable rather than asserted.
+
+Plus Rule 6's two new sub-rules (findings lists; one-way pointers), a
+boundary checklist, and the stale counts fixed (79 ADRs → 90; D-079 → D-090).
+
+### DECISION — the authored-surface inventory re-derivation becomes a SCHEDULED GATE
+
+The audit confirmed the reviewer's concern: **O3 has now gone stale TWICE.**
+First D-066's "the four authored pieces are the ENTIRE authored surface" missed
+what task 1.7 authored (O3 exists to record that correction); then
+AUDIT_SCOPE_1.8, pinned at `5f5feb8`, could not cover what 2.1–2.6 authored —
+and PHASE3_PLAN §3.1's "extended with" list, which is what actually scopes the
+engagement, named only the D-076 ZK units, T1–T3, the Pedersen probe and the
+fee-TWAP surface. Omitted: `crypto/zkdelivery`'s compiled-in VK registry and
+record-reconstructed public witness, the **D-075/D-076 consent chokepoints**
+(arguably the highest-value authored security surface Phase 2 produced, and
+both found as Rule-4 holes in review rather than by test), the escrow
+`nextState` gate, D-084's rebind guard, D-085's ante decorator protecting the
+conservation invariant, `app/cvm`'s no-forge model, D-088's iterator range
+ends, and **D-089's `checkLimitRate` — a NEW EndBlock panic surface behind a
+`recover()`, on unbounded agent-signed input, added after the scope was
+written.**
+
+Twice is a pattern, and a pattern in a process is fixed by scheduling, not by
+resolving to be careful. **PHASE3_PLAN §3.1.1 now enumerates that surface, and
+§3.1.2 records a STANDING OBLIGATION: the authored-surface inventory is
+RE-DERIVED FROM THE TREE — never re-read — at every phase boundary AND before
+the audit engagement is contracted, diffed against the last recorded inventory,
+with every addition directly read.** A grep-based procedure is written out
+(crypto imports, authorization chokepoints, key-material types, consensus-path
+`recover()` sites, ante-chain composition) so it is executable rather than
+aspirational; task 3.0 runs it first and 3.1 step 2 runs it again immediately
+before contracting. This is METHODOLOGY Rule 9's inventory-diff promoted from
+advice to a gate. Without it §3.1.1 goes stale during Phase 3 exactly as §2.2
+went stale during Phase 2.
+
+### DECISION — the mirror .git foot-gun is FIXED, not documented
+
+`scripts/dev-mirror-sync.sh` rsyncs with `--exclude .git`, which means it never
+WRITES a `.git` into the Windows mirror — but also never UPDATES or REMOVES one
+already there. The mirror carried a `.git` frozen at **`b2f633b`, five commits
+behind**, while its working files tracked HEAD: `git log` there reported a
+stale HEAD and `git status` reported **40+ phantom "modified" files**. The
+hazard is not the misreport but the recovery reflex — `git checkout .` or
+`git stash` run there from habit would "discard" the phantom changes and
+silently revert the mirror to the frozen commit's content. **A doc protects the
+reader; the person who gets bitten is someone typing `git status` from habit —
+which happened during this very audit.** Content visibility is the mirror's
+only job, so a half-stale `.git` is pure downside. The script now **deletes any
+`.git` in the mirror unconditionally on every sync**, drops a root sentinel
+(`MIRROR-READ-ONLY-DO-NOT-PUSH.txt`) so the hazard is visible in a plain
+directory listing, states in the README that this is deliberately not a
+repository, and reports the canonical HEAD the mirror reflects.
+**Also removed: a dead `git rm` + `git commit` block** at the top of the script
+(targeting `scripts/dev-localnet-debug.sh`, deleted at `46170d2` in Phase 0). It
+was a no-op behind an `[ -f ]` guard, but a sync script that can create a commit
+on the canonical repo as a side effect is a Rule-1/Rule-8 hazard regardless.
+
+### DECISION — the §6 exit demo is next, with a HARD condition
+
+All four exit legs are green for the first time (2.1 ZK escrow, 2.2 CVM, 2.3
+x402 ingress, 2.5 IBC USDC + receipt), and **every one of 2.7–2.12 declares
+itself off the exit path**, so the demo is the only remaining phase-closing
+item and the trigger for PHASE3_PLAN task 3.0. It is also the sole owner of two
+obligations deferred into it: the D-079 localnet contract-release smoke (needs
+a purpose-built CVM-schema contract binary — a Rust-toolchain dependency, so
+the session is larger than its leg count suggests) and the D-082 live relayer
+USDC demo.
+
+**The condition, recorded as a condition and not a note:** the demo's x402 leg
+is the conditioned ZK buy, so its receipt reads `condition_outcome = NONE` for
+a conditioned settlement (D-087). That is acceptable for an **internal
+acceptance run** — both edge contracts disclose the true semantics in three
+places, so no consumer is misled — but **if the demo output is ever repurposed
+as EXTERNAL-FACING evidence, task 2.9 becomes a prerequisite.** Sequencing
+rationale: pulling 2.9 first would put a proto change and a determinism
+re-baseline on the critical path of the thing that validates Phase 2, and given
+2.3's and 2.4's track record the demo is likely to surface integration gaps
+worth finding before spending a session on receipt semantics.
+
+### Other forward items given owners (nothing floats)
+
+- **Sim intent-generator widening** (D-089 called it "a legitimate task in its
+  own right" and gave it no number) → **3.5**, as a named sub-item: widen the
+  generator, or ratify hand-built adversarial fixtures as the permanent primary
+  gate for matcher richness — and record which.
+- **L3**, **T4**, and the seven **A-*** security arguments had no PHASE3_PLAN
+  §5.1 rows; each is owned in substance by 3.1/3.3 but was unnamed, risking an
+  engagement scoped to O1–O4 alone. Rows added.
+- **Reputation whole-USDC 1e6 scaling quirk** (D-082: "noted not fixed …
+  2.6/3.4 surface if it matters"; 2.6 did not) → **3.4**, same
+  valuation-provenance question as the D-044 swap.
+- **Task 2.6's undischarged edge-doc obligation.** `7683_SURFACE.md` carried a
+  *"Warning owned by task 2.6"* and 2.6 changed the fallback matcher without
+  touching either edge contract — even though it added two consumer-visible
+  rejections and made fallback partial fills reachable. Discharged here: both
+  contracts gained a matcher-changes section (`limit` now enforced,
+  `ErrLimitRateUnsupported` and the multi-output-order trap it sets for a 7683
+  resolver, `allow_partial` now load-bearing on the in-consensus path), the
+  partial-shape uniformity proof and its keeper-vs-app-level coverage boundary
+  are stated, and both lineages advanced to `aa21274`.
+
+### Consequences
+
+- **Docs, one script, and code COMMENTS only.** No proto, no consensus logic,
+  no test logic. The determinism vector is expected byte-identical and was
+  re-run after the edits to prove it (hashes in the task record).
+- Ledger numbering verified: 2.0–2.12 each defined exactly once, no collisions,
+  no gaps; 2.11 moved into numeric order in CLAUDE.md with its
+  built-before-2.6 resequencing explained in place, and commit hashes added to
+  every Phase-2 row (the Phase-1 convention, which Phase 2 had dropped).
+- Two execution-order facts recorded that had never been written down: **2.5
+  landed before 2.3 and 2.4** (design-consistent — PHASE2_DESIGN §1 makes them
+  parallel siblings — but CLAUDE.md says "in order", so the deviation is stated
+  per Rule 8), and **`b2f633b` (the D-080 planning session) carries no Phase-2
+  task number**, now noted so the commit maps to something.
+- **No code defect was found**, so no new numbered task was created by this
+  audit. Every correction above is a docs, tooling, or comment change.

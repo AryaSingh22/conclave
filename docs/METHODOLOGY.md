@@ -101,6 +101,45 @@ manufactures false confidence exactly where the project needs true signal.
 5. For state machines: an exhaustive transition-table test where every ILLEGAL
    transition is an asserted rejection — illegal-by-omission is not tested,
    illegal-by-assertion is.
+6. **PREDICT which guard reds before you remove it, then check the
+   prediction.** Write down "removing X should turn test T red" *first*. A red
+   that lands somewhere other than predicted is not a pass — it means your model
+   of what-guards-what was wrong, and the model is what you will reason with
+   next time.
+7. **DOSE the watched-red against whatever randomizes its path.** If ordering,
+   ids, addresses, or map traversal can vary the code path, a single red run is
+   an accident. Repeat until the red is the rule, not a draw.
+
+**Corollary — a flaky test may be a correctness ORACLE at low duty cycle.**
+Before you stabilize a flake, *reproduce and count it*. The failure RATE is
+evidence: rates that land near a power-of-two boundary (1/256, 1/128) point at a
+byte/boundary bug, not at a fixture. **"Make the fixture deterministic" applied
+first would silence the oracle and ship the defect permanently green** — the
+most dangerous outcome available, because the suite then reports success
+forever. Investigate first, stabilize second; the ordering is part of the rule.
+
+**Instance (the corollary — Conclave Task 2.11, D-088).** A design doc carried a
+flake-hardening item with a prescribed fix: *"`TestIssueMandateReplace` flaked
+once on a `randAddr()`-seeded fixture; fix = deterministic fixture seeding."*
+The session reproduced it BEFORE touching it: `-count=2000` → **8 failures
+(0.40% ≈ 1/256)**. That rate is the signature of a one-byte range boundary, and
+it was: `store.Iterator(prefix, append(prefix, 0xFF))` silently excludes every
+key whose first post-prefix byte is `0xFF`, across **8 sites, 2 LIVE-broken** —
+one of them on a consensus path (the counterparty-class credential predicate).
+The prescribed fix would have pinned the sampler to a passing draw and hidden
+all of it. Correct order, load-bearing: fix the sites → forced-`0xFF` watched
+red → *only then* fixture determinism.
+
+**Instance (predict-the-red — Conclave Task 2.6, D-089).** The session assumed
+the solver-side `allow_partial` candidate gates were what guaranteed a
+fill-or-kill intent is never partially filled. Removing them left the test
+**GREEN 25/25** — the prediction was wrong. Removing §6.4 rule 3's clause as
+well turned it **RED 25/25**. The guarantee was rule 3 all along, and rule 3 is
+reached on the new partial-fill path; the candidate gates are an efficiency
+guard. Had the red not been predicted-then-checked, the session would have
+shipped believing a non-guarantee was the guarantee. **And the 25 is the dosing
+rule:** the pair's roles follow content-derived intent-id ordering, so a
+one-shot red would have exercised one side by accident.
 
 **Instances (Conclave).** The escrow module's single `nextState` gate backs an
 exhaustive transition-table test — every illegal transition is a load-bearing
@@ -138,6 +177,12 @@ between them is where real vulnerabilities lived.
    is not covering anything.
 4. Apply the same question to defaults: a safe-looking default that is only
    safe in one mode (dev, stub) is an unsafe default.
+5. **A security claim verified against ONE code path is UNVERIFIED.** Enumerate
+   every path that reaches the claim, then check each. The question is never
+   "is this guarded?" but "how many ways in are there, and is each one
+   guarded?" Paths multiply where you are not looking: an ante decorator and a
+   msg server; a solver-proposed settlement and a fallback settlement; a CREATE
+   branch and a REPLACE branch; a full fill and a partial fill.
 
 **Instances (Conclave).** Three, escalating: (1) delivery conditions were
 solver-attached — the seller SIGNED a condition but validation never checked
@@ -152,6 +197,21 @@ exists but does not enforce; carried as an explicit debt with an owner rather
 than left as false comfort (D-069 → the Phase-3 plan). The rule's slogan
 version: **a signed-but-unread consent field is no consent; a vector that
 doesn't reach the path doesn't test it.**
+
+**Instances (the path-enumeration sharpening — three, each a gap found only by
+asking "which OTHER path?"):** (1) **2.3/D-085** — the submit preconditions were
+enforced in the veil msg server, and that was true; the ante was a *second* path
+that charged before reaching it, so a submit could pass the ante and fail the
+msg server, stranding the charge and corrupting the conservation invariant on
+demand. The fix is structural precisely because it collapses the two paths into
+one shared function. (2) **2.4/D-086** — the `terms_hash` pre-image chain was
+verified on solver-cleared settlements and was genuinely fine there; the
+**fallback** path (the no-solver default — i.e. every localnet settlement) never
+persisted its Solution, so the pre-image was unfetchable. One path checked, the
+common one missed. (3) **2.3/D-084** — `AmendMandate` correctly refused to
+change a grantee's sigil; `IssueMandate`'s **REPLACE** branch was the other way
+in and never inherited the check. In all three the guarded path was real and the
+claim was true *of it* — the defect lived entirely in the unenumerated sibling.
 
 ---
 
@@ -214,11 +274,24 @@ audit findings.
 2. Anything you consciously did NOT do: give it a task number in the phase
    ledger, with acceptance criteria, in the same session that deferred it.
 3. Periodically grep for the project's TODO marker; every hit must map to a
-   ledger task. A TODO without an owner is a defect in the ledger.
+   ledger task. A TODO without an owner is a defect in the ledger. **A marker
+   whose named task has COMPLETED is the worst case** — it reads as pending
+   while being unowned, and it is invisible to "is anything unowned?" checks.
+   Retire it or re-point it; never leave it naming a closed task.
 4. When a later task changes an earlier decision, the new ADR names and
    UPDATES the old one — the log stays navigable.
+5. **A FINDINGS LIST NEEDS THE SAME OWNER-PER-ROW DISCIPLINE AS A LEDGER, OR IT
+   GOES WRITE-ONLY.** Audit findings, review comments, and post-mortem actions
+   are forward items too. Give every row a disposition column that is never
+   blank — a task number, or an explicit "closed by X" — and re-verify it at
+   every boundary. A findings list is *especially* prone to this failure because
+   producing it feels like completing something.
+6. **A one-way pointer is not ownership.** Writing "re-pointed to task N" in the
+   *deferring* task is half the work; if task N's own acceptance criteria do not
+   list the item, it is owned by nobody — and it will be invisible at exactly
+   the moment task N is planned. Write the item INTO the receiving task.
 
-**Instances (Conclave).** The pattern's successes: 79 ADRs in
+**Instances (Conclave).** The pattern's successes: 90 ADRs in
 `docs/DECISIONS.md`; the escrow consent seams were deferred with discipline —
 FW-1/FW-2 became numbered task 2.7 the moment they were deferred (D-078), and
 the five matcher TODOs became task 2.6 rather than staying comments. The
@@ -227,6 +300,21 @@ deferred early (D-044) to "a dedicated post-0.8 task" — a phrase, not a task
 number. It floated unowned across two phases and came back as external audit
 finding F-3. The failure mode is precisely "deferred correctly, tracked
 nowhere."
+
+**The counterexample RECURRING — which is why sub-rules 5 and 6 exist
+(D-090).** A reconciliation audit found the same failure reproduced *on the
+findings list that recorded F-3*. The Phase-0 audit filed eight findings;
+F-1…F-6 were picked up by later plans, but **F-7 and F-8 were given no owner
+anywhere** — a repo-wide grep found zero mentions of either outside the audit
+document. F-7 had in fact been closed by task 2.6, which closed it under a
+different name (D-049) and never recorded it against F-7: closed-in-fact,
+open-on-paper. F-8 stayed genuinely open for two phases and was
+**independently rediscovered** by a marker sweep that did not know F-8 existed —
+and that rediscovery is the proof it was invisible. Separately, two items were
+"re-pointed to task 2.7" by the deferring task while 2.7's own criteria listed
+neither (sub-rule 6), and `timeouts→params` was recorded as owned by **two**
+tasks at once. **A list you write and never re-verify is a list you have
+filed, not a list you are tracking.**
 
 ---
 
@@ -256,6 +344,34 @@ its history being explainable.
 4. When the gate fires unexpectedly: treat it as a real defect until proven
    otherwise. The gate's false-positive rate must be driven to zero (fix the
    harness as its own task) or the team learns to ignore it.
+5. **Know the gate's COVERAGE SHADOW, and name the covering gate separately.**
+   A global gate is generated by *something* — a workload generator, a seed
+   vector, a fixture set — and whatever that generator does not emit is
+   **structurally unreachable**, not merely untested. More seeds do not help;
+   only a different generator does. So a passing global gate licenses exactly
+   one conclusion: **"unperturbed on what the generator exercises."** It never
+   licenses "inert in production." Every time the gate comes back clean on a
+   change, write down *which* test actually covers the change — and if the
+   answer is "none", you have no coverage, only a green light.
+
+**Instance (the coverage shadow — Conclave, four times, which is why it is a
+property and not an observation).** The determinism vector's intent generator
+emits thin, one-sided, single-asset flow: one leg per side, `limit` and
+`allow_partial` never set, one coin give-asset in its only cycle. Consequently
+the vector came back **byte-identical** while (a) **D-069** the real Reveal path
+was never exercised at all (the sim is epoch-inert, so the cryptographic Veil
+the vector exists to guard was untouched by it), (b) **D-086** the new
+fallback-Solution write was never reached (the sim generates no mutually
+fillable pair), (c) **D-088** no `0xFF`-prefixed id was ever populated in five
+seeds, so a live 1-in-256 consensus bug passed the gate, and (d) **D-089**
+none of the three new matcher branches were entered. Four byte-identical greens,
+four times covering nothing. The rule that came out of it, now binding: **the
+vector is a whole-system REGRESSION backstop, not a coverage instrument** —
+byte-identical on a matcher change is evidence of ADDITIVITY, never of
+correctness — and where the generator cannot reach, **hand-built adversarial
+fixtures are the primary gate**, with the vector demoted to backstop. Widening
+the generator is the alternative, and it is a task in its own right, not an
+assumption.
 
 **Instances (Conclave).** The Phase-0 audit found the chain deterministic but
 the HARNESS flaky (un-seeded self-seeding, a SKIP-on-empty-valset escape
@@ -326,6 +442,20 @@ reviewers AWAY from the newest (riskiest) surface.
    tests/locations RESOLVE (a citation that doesn't compile is a finding).
 3. Treat "the library handles that" as a claim to verify: find the library
    call and confirm it is the call you think it is, at the pinned version.
+4. **FINGERPRINT the tree before and after every gate run** — record the HEAD
+   commit and a hash of the working diff (`git diff | sha256sum`, plus the
+   staged diff and the porcelain status). Attach both to the task record with
+   the gate output. This makes **"the gate ran on the shipping tree"
+   CHECKABLE rather than asserted**: identical fingerprints prove no
+   uncommitted experiment, no left-behind sabotage from a watched-red run, and
+   no post-gate edit slipped in between green and commit. It costs one command
+   and it converts the single most load-bearing claim in the whole checklist
+   from trust into evidence.
+5. **Re-derive the security-surface inventory at every boundary — and schedule
+   it, do not merely intend it.** A hand-maintained inventory decays silently
+   between boundaries; the greps in step 1 are the source of truth, the
+   document is a cache. Run the re-derivation at each phase boundary AND
+   immediately before any external review is contracted.
 
 **Instances (Conclave).** The audit scope's O3 exists because the original
 "the four authored pieces are the ENTIRE authored surface" claim (D-066) went
@@ -335,6 +465,19 @@ that the four-piece list would have steered an auditor away from; the scope
 corrects the inventory explicitly and says so. The 1.8 scope package
 verified all 44 cited test references resolved in-tree at the pinned commit
 before delivery — citations are checked, not assumed.
+
+**The instance that turned step 5 from advice into a gate:** that same
+inventory went stale **a second time**. Pinned at the Phase-1 commit, it could
+not cover what tasks 2.1–2.6 authored — the ZK delivery circuit and its
+instance-binding verifier, the two consent chokepoints, the escrow transition
+gate, a grantee-rebind guard, an ante-chain decorator protecting the
+conservation invariant, the CVM no-forge model, and a new EndBlock `recover()`
+boundary. None of it was hidden; nobody re-derived. Twice is a pattern, and a
+pattern in a *process* is fixed by scheduling, not by resolving to be careful:
+the re-derivation is now a named step in the phase-boundary task and a
+precondition of contracting the audit (D-090). **A stale inventory is worse
+than no inventory — it steers the reviewer away from the newest, least-reviewed,
+riskiest code with the authority of a document.**
 
 ---
 
@@ -390,18 +533,39 @@ calibrations), which is the gate doing its job.
 - [ ] Deviating from the approved plan? → surface it NOW (Rule 8).
 
 **At task close:**
+- [ ] Tree fingerprinted BEFORE the gate run (HEAD + `git diff | sha256sum`)
+      (Rule 9).
 - [ ] Full check suite green — output shown, not asserted (Rules 7, 8).
 - [ ] Invariant gate run; any re-baseline recorded as an ADR (Rule 7).
+- [ ] Tree fingerprinted AFTER the gate run and compared — identical, or the
+      difference explained (Rule 9).
+- [ ] The gate came back clean? → name the test that ACTUALLY covers this
+      change. "None" means no coverage, not a pass (Rule 7).
 - [ ] Every decision from the running list → an ADR in this task (Rule 6).
-- [ ] Every deferred item → a numbered ledger task with acceptance criteria
-      (Rule 6).
+- [ ] Every deferred item → a numbered ledger task with acceptance criteria,
+      **written into the RECEIVING task, not only into this one** (Rule 6).
 - [ ] Security-bearing lines touched? → direct-read pass + inventory diff
       (Rule 9).
 - [ ] STOP for review before commit; commit only after go-ahead (Rules 1, 2).
 
+**At every boundary (phase close, audit scope, major integration):**
+- [ ] Security-surface inventory RE-DERIVED from the tree by grep and diffed
+      against the recorded one; every addition directly read (Rule 9).
+- [ ] Every findings list and forward-item table re-verified row by row; no
+      blank dispositions, no owner-less rows, no item owned twice (Rule 6).
+- [ ] Every marker's named task still open; markers naming closed tasks
+      retired or re-pointed (Rule 6).
+- [ ] Every cited test name and file:line in the authority documents still
+      resolves in the tree (Rule 9).
+
 ---
 
 *Distilled 2026-07-10 from the Conclave build record (Phases 0–2, D-001
-through D-079). The instances cite that history; the rules do not depend on
-it. If a rule fails you, the failure is itself an instance — record it and
-amend the rule.*
+through D-079); amended 2026-07-28 by the D-090 reconciliation audit, which
+added the Rule-3 flake-oracle corollary and predict/dose procedure, Rule 4's
+path-enumeration sharpening, Rule 6's findings-list and one-way-pointer
+sub-rules, Rule 7's coverage-shadow property, and Rule 9's tree-fingerprint and
+scheduled-inventory steps (D-001 through D-090). The instances cite that
+history; the rules do not depend on it. **Every amendment above came from a rule
+failing in practice — which is the meta-rule: if a rule fails you, the failure
+is itself an instance. Record it and amend the rule.***

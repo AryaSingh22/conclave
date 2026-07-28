@@ -127,8 +127,11 @@ func (m msgServer) UpdateParams(goCtx context.Context, msg *types.MsgUpdateParam
 	return &types.MsgUpdateParamsResponse{}, nil
 }
 
-// findSigilAnyChamber resolves a sigil id; Phase 0 has only chamber 0.
-// CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates.
+// findSigilAnyChamber resolves a sigil id; only chamber 0 is active today.
+// CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates —
+// owned by task 3.11 (Chambers). Owner named at Rev 3 (D-090). Whether sigils
+// stay GLOBAL across chambers or partition with sessions/veil is one of the
+// questions 3.11's design doc must resolve before any code.
 func (m msgServer) findSigilAnyChamber(ctx sdk.Context, sigilID string) (types.Sigil, error) {
 	return m.GetSigil(ctx, 0, sigilID)
 }

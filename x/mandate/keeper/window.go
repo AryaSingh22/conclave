@@ -201,7 +201,9 @@ func (k Keeper) ExecuteFeeAbstraction(ctx sdk.Context, m types.Mandate, fee sdk.
 }
 
 // phase0Chamber is the only active chamber until Phase 3 (SPEC §1.2).
-// CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates.
+// CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates —
+// owned by task 3.11 (Chambers), the one SPEC §10 Phase-3 task, design-doc
+// first. Owner named at Rev 3 (D-090); it had been inferable, not written.
 const phase0Chamber uint32 = 0
 
 // Phase0Chamber exposes the active chamber to the ante decorators.

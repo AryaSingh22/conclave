@@ -45,7 +45,18 @@ const (
 // written in Half B: per Decision C the receipts live in the x/session store
 // and 0.9's x/receipt reads them cross-module (never migrates), so the byte
 // layout is a frozen contract from now on.
-// CONCLAVE-TODO(phase-3): revisit index sharding when chamber_id > 0 activates.
+// CONCLAVE-TODO(phase-3): revisit index sharding when chamber_id > 0 activates
+// — owned by task 3.11 (Chambers). Owner named at Rev 3 (D-090).
+//
+// 3.11 INPUT, do not rediscover it: activating chamber_id > 0 RE-ARMS the class
+// of bug task 2.11 fixed (D-088). Six of the eight truncated iterator ranges
+// there were latent purely because chamber_id is 0x00000000, so the byte after
+// the prefix could never be 0xFF. All eight now use the SDK's PrefixEndBytes,
+// and `TestIterateMandatesFindsHighByteChamber` pins the high-byte-chamber case
+// — but any NEW chamber-keyed iterator must use a correct exclusive upper bound
+// from the start, and this package's local `PrefixEnd` (below) is the one to
+// reach for. A truncated range fails silently: no error, no log, just a short
+// read that reads exactly like "no such record".
 var (
 	SessionKeyPrefix      = []byte{0x01}
 	SessionStateIdxPrefix = []byte{0x02}

@@ -327,17 +327,124 @@ three checkpoints:
 2. **Engagement.** O2 pre-closure lands in-repo BEFORE the engagement (the DST
    cross-codebase uniqueness sweep + the suite-identity assertion — one grep +
    one test, D-066(b)); auditor selected from the threshold-crypto-experienced
-   class (R7); audited commit tagged; scope = AUDIT_SCOPE_1.8 **extended
-   with**: the D-076 ZK units (circuit soundness: MiMC opening + EscrowID
-   public-input binding; gnark-verifier-in-consensus), T1–T3 verification,
-   the named Pedersen-DKG DoS probe area (R3), and the **fee-TWAP
-   manipulation surface (D-082, task 2.5)** — the §6.2 fee-conversion rate
-   is a windowed average of solver-set clearing prices, so whoever wins
-   solutions can steer it at the cost of bonds/skim/gas; the recorded bound
-   (window averaging + per-height damping + fee-only blast radius, never
-   ceilings) is an ARGUMENT, not a proof — the auditor prices the
-   manipulation economics, and a 2.6-style outlier-clipping hardening task
-   is created IF the audit finds the bound insufficient.
+   class (R7); audited commit tagged; scope = AUDIT_SCOPE_1.8 **extended with
+   the Phase-2 authored surface enumerated in §3.1.1 below**, T1–T4 and L1–L3
+   verification, the seven §4 security arguments (A-bind, A-barriers, A-floor,
+   A-F4, A-inject, A-reg, A-just) checked rather than reconstructed, and the
+   named Pedersen-DKG DoS probe area (R3).
+
+#### 3.1.1 — The Phase-2 authored security-bearing surface (scope extension)
+
+**Why this list exists, stated plainly:** `AUDIT_SCOPE_1.8.md` is pinned at
+`5f5feb8` (Phase-1 BUILD complete) and its §2.2 inventory is *scoped-true for
+that revision*. Everything tasks 2.1–2.6 authored is therefore **outside** it,
+and an engagement contracted against the scope document alone would review the
+wrong tree. Each item below is authored, security-bearing, and post-`5f5feb8`:
+
+- **`crypto/zkdelivery` (D-076)** — the BN254 groth16 `DeliveryCircuit` (MiMC)
+  proving `MiMC(payload) == schema_commitment`; the **compiled-in vk_id
+  registry** (`//go:embed`, 396 B); and the **instance-binding replay defense**:
+  the verifier reconstructs the public witness (escrow id + signed
+  `schema_commitment`) **from the RECORD, never from the submitter**. Verify the
+  binding is sound, that `groth16.Verify` in consensus is randomness-free and
+  cannot panic on adversarial proof bytes, and the circuit's soundness/
+  completeness (MiMC opening + EscrowID public-input binding).
+- **The D-075 / D-076 consent chokepoints** — arguably the highest-value
+  authored security surface Phase 2 produced, and both were **Rule-4 holes found
+  in review, not by test**. A delivery condition is *solver-attached*
+  (`IntentLeg` has no condition field), so it is bound to the seller's SIGNED
+  `IntentPayload.condition` at **both** solution-validation and the settlement
+  boundary (`ErrConditionNotConsented`, fail-closed) — and for ZK the **buyer
+  must also sign the exact condition**, closing the mirror-image hole. Verify
+  both chokepoints are unbypassable, including from contract-originated flows
+  (D-079 claims they are structurally unreachable from CVM — check it) and
+  across 2.6's new partial-fill paths (D-089 claims a DataGrant is exact-fill
+  only in both new matchers, so no partial fill can arise on a conditioned leg).
+- **The escrow `nextState` gate (D-073/D-076)** — one authoritative transition
+  gate over three per-class legal sub-graphs, backed by an exhaustive
+  transition-table test. Verify the sub-graphs are not a permissive union and
+  that terminal states are genuinely terminal in every class.
+- **D-084 — the grantee-rebind guard.** `IssueMandate` REPLACE is same-sigil
+  only (`ErrGranteeConflict`); without it any sigil controller could delete a
+  victim's mandate and carry its `outstanding_commitment` cross-principal.
+  Verify the guard covers every path that writes the reverse index.
+- **D-085 — `SubmitIntentPrevalidationDecorator` + `ValidateSubmitIntent
+  Preconditions`.** An **ante-chain change** protecting the D-059/D-064
+  conservation invariant, resting on a one-source-of-truth claim: the ante and
+  the veil msg server call the same function, so no ante-passing submit can fail
+  the msg server. Verify that equivalence actually holds (including the
+  nested-msg walk and the deliberate root-key scoping), because if it ever
+  diverges the strand vector reopens silently.
+- **`app/cvm` (D-079)** — the three-layer no-forge authority model: escrow-msg
+  allowlist with contract-address signer stamping, Any/Stargate passthrough
+  disabled, bounded query plugins, read-only CONCLUDE. Verify a contract cannot
+  forge a CONCLUDE or bypass the consent gates.
+- **D-089 — `checkLimitRate`, and note this one is NEW consensus panic
+  surface.** The clause runs inside **EndBlock**, `LegacyDec.MulInt` panics on
+  overflow, and **nothing bounds an agent-signed `limit`** — so it carries a
+  `recover()` that fails closed. Verify the recover's scope is exactly the
+  arithmetic, that it is deterministic across nodes, and that failing closed is
+  the right posture (a rejected match, never a halted chain).
+- **D-088 — the store-iterator range ends.** A truncated exclusive upper bound
+  made 1-in-256 records invisible on a consensus path (the §6.4 rule-5
+  `has_credential` predicate). Fixed with the SDK's `PrefixEndBytes`; verify no
+  remaining iterator anywhere constructs its range end by appending `0xFF`.
+- **The fee-TWAP manipulation surface (D-082, task 2.5)** — the §6.2
+  fee-conversion rate is a windowed average of solver-set clearing prices, so
+  whoever wins solutions can steer it at the cost of bonds/skim/gas. The
+  recorded bound (window averaging + per-height damping + fee-only blast radius,
+  never ceilings) is an **ARGUMENT, not a proof** — price the manipulation
+  economics. A 2.6-style outlier-clipping hardening task is created IF the bound
+  fails review.
+
+#### 3.1.2 — STANDING OBLIGATION: re-derive the inventory from the tree
+
+**This is the mechanism, and it exists because the failure is structural, not
+incidental.** The authored-surface inventory has now gone stale **twice**:
+
+1. D-066 claimed "the four authored pieces are the ENTIRE authored surface";
+   **task 1.7** authored consensus-integration surface (registration binding,
+   justification transport, VE injection, share custody) that the four-piece
+   list would have steered an auditor *away* from. O3 exists to record that
+   correction.
+2. **Tasks 2.1–2.6** then authored everything in §3.1.1 — escrow gates, consent
+   binding, zkdelivery, ante prevalidation, limit-rate — and the scope document,
+   pinned at `5f5feb8`, could not have covered it. Caught only by the D-090
+   reconciliation audit.
+
+Twice is a pattern, and the pattern says a hand-maintained inventory decays
+between boundaries. So METHODOLOGY Rule 9's inventory-diff is **promoted from
+advice to a scheduled gate**:
+
+> **The authored-surface inventory is RE-DERIVED FROM THE TREE — never
+> re-read — at (a) every phase boundary and (b) before the audit engagement is
+> contracted. The re-derivation is diffed against the last recorded inventory,
+> and every addition gets a direct read (Rule 9) before the diff is closed.**
+
+The mechanical procedure, so it is executable rather than aspirational:
+
+```
+# 1. crypto surface: what imports a crypto primitive, anywhere
+grep -rln 'drand/kyber\|consensys/gnark\|groth16\|encrypt/ibe\|crypto/aes\|crypto/rand' \
+     --include='*.go' . | grep -v '_test.go'
+# 2. authorization chokepoints: every fail-closed authority/consent rejection
+grep -rn 'ErrUnauthorized\|ErrConditionNotConsented\|ErrSigilMismatch\|ErrGranteeConflict\|ErrMandateExceeded\|ErrMsgNotPermitted' \
+     --include='*.go' x/ app/ | grep -v '_test.go'
+# 3. key material + share custody
+grep -rn 'PrivKey\|SecretShare\|KeyShare\|ShareProvider\|dkg_shares' \
+     --include='*.go' . | grep -v '_test.go'
+# 4. consensus-path recover() sites — each is a fail-closed panic boundary
+grep -rn 'recover()' --include='*.go' x/ app/ crypto/ | grep -v '_test.go'
+# 5. ante-chain composition (order is security-bearing)
+grep -n 'Decorator' app/ante.go
+```
+
+Diff the result against §2.2 of `AUDIT_SCOPE_1.8.md` plus §3.1.1 above. **Any
+line the greps surface that neither document names is a finding**, and the
+inventory is updated in the same session that finds it — never in a later "docs
+pass" (Rule 6). Without this gate §3.1.1 goes stale again during Phase 3
+exactly as §2.2 went stale during Phase 2; **task 3.0 runs it first, and 3.1
+step 2 runs it again immediately before contracting.**
 3. **Findings triage (re-entrant).** Every finding → an ADR: fixed (with a
    watched test), or accepted-risk with reasoning. A refuted O1 re-plans the
    phase through this task's fallback branch — (b) or (c) above.
@@ -558,9 +665,10 @@ dependency); CLV distribution/allocation questions the SPEC never addressed
 ### 3.10 — Governance + operational readiness *[PROPOSED — BEYOND CURRENT SPEC; FLAG P3-E]*
 
 **What.** (1) **Param registry sweep**: every module param classified
-(gov-votable / authority-gated / compile-time constant), the 2.7
-timeouts→params outcome inherited, the permissioned-wasm posture's governance
-path documented; (2) **incident runbooks**: chain halt, DKG failure /
+(gov-votable / authority-gated / compile-time constant), the **2.8**
+timeouts→params outcome inherited (that item was owned by both 2.7 and 2.8 and
+was resolved to 2.8 at D-090 — this row said 2.7), the permissioned-wasm
+posture's governance path documented; (2) **incident runbooks**: chain halt, DKG failure /
 epoch-FAILED loop, reveal-retry storm → mass CANCEL, compromised validator
 (incl. DKG share custody breach — T3's operational face: containment =
 exclusion at next epoch, drain-before-rotate bounds exposure), compromised
@@ -651,6 +759,9 @@ plan-stop can hard-require it.
 | T1 confirmation-count basis | D-068 | → **3.1** (verify quorum soundness) |
 | T2 kyber lowest-index premise | D-067 | → **3.1** (verify) + **3.3** (pin-bump re-runs the probe) |
 | T3 share custody / daemon boundary | D-070 | → **3.1** (review) + **3.10** (custody runbook) |
+| **T4 dependency pin & license** *(added D-090)* | D-066 §8 | → **3.3** — the two-pin double-re-validation IS T4's re-verification (`kyber`/`kyber-bls12381` MPL-2.0 re-checked on the bump, no transitive divergent BLS12-381) + **3.1** (auditor confirms the pinned versions are the audited ones) |
+| **L3 per-share proof = intrinsic pairing check** *(added D-090)* | D-066, FLAG III | → **3.1**, jointly with O1 — L3 says so itself ("verify the two together"): the same `id = H(DST‖C_dem)` per-ciphertext binding that O1 interrogates for IND-CCA is what makes a share non-replayable across ciphertexts |
+| **A-bind, A-barriers, A-floor, A-F4, A-inject, A-reg, A-just** *(added D-090)* | AUDIT_SCOPE_1.8 §4 | → **3.1** — these are the arguments already constructed, handed to the auditor to CHECK rather than reconstruct; each names its code and its evidence tests. They had no rows before, which risked an engagement scoped to O1–O4 alone and silently dropping seven security arguments |
 | VK MPC ceremony | D-076 | → **3.2** |
 | Circuit-soundness audit unit | D-076 | → **3.1** scope extension |
 | gnark-verifier-in-consensus audit unit | D-076 | → **3.1** scope extension |
@@ -660,12 +771,17 @@ plan-stop can hard-require it.
 | F-3 / D-020 / D-044 PriceSource swap | AUDIT | → **3.4** |
 | F-5 float ban review-only | AUDIT | → **3.3** CI guard |
 | F-6 goleveldb pin unguarded | AUDIT | → **3.3** CI guard |
+| **F-7 §5.1 limit rate ignored (D-049)** *(added D-090)* | AUDIT | ✅ **CLOSED by task 2.6** (D-089) — recorded against F-7 for the first time at D-090; it had been closed-in-fact and open-on-paper |
+| **F-8 stale `CONCLAVE-TODO(phase-0)` markers** *(added D-090)* | AUDIT | ✅ **CLOSED by the Rev-3 marker sweep** (D-090). It was unowned for two phases and independently rediscovered — see docs/AUDIT.md's disposition section for the transferable lesson |
 | Two-pin go-1.23 ceiling (now EOL) | PHASE2 §4, R2 | → **3.3** (executes the recorded escape hatch; gates 3.8) |
 | block-sdk archived | D-077, R1 | → **3.3** STOP #1 disposition |
 | SDK v0.50 / ibc-go v8 EOL | R1 | → **3.3** (new since D-077 — see §5.2 advisory) |
 | Sigverify fork retirement | D-027/D-077 | → 2.5 checkpoint result; residual → **3.3** |
 | Epoch-inert determinism sim | D-069 | → **3.5** |
 | wasm-inert sim posture | D-079 | → **3.5** (re-affirm or revise, recorded) |
+| **Sim intent-generator widening** *(added D-090)* | D-089 | → **3.5**, as a NAMED sub-item. D-089 called it "a legitimate task in its own right" and gave it no number — a floating phrase, Rule 6's failure mode. The generator emits one leg per side, never sets `limit`/`allow_partial`, and its cycle has one coin give-asset, which is *why* the vector cannot reach the matcher's rich paths (D-069/086/088/089). 3.5 must decide explicitly: widen the generator, or ratify hand-built adversarial fixtures as the permanent primary gate for matcher richness — and record which |
+| **Mirror `.git` foot-gun** *(added D-090)* | this-audit / D-090 | ✅ **FIXED in-task** — `scripts/dev-mirror-sync.sh` rsyncs with `--exclude .git`, so a stale `.git` left in the Windows mirror was never updated: `git log` there reported `b2f633b` (5 commits behind) with 40+ phantom "modified" files, and a `git checkout`/`git stash` run there from habit would have silently reverted the mirror. The script now removes any `.git` in the mirror and drops a sentinel. No forward owner needed |
+| **Reputation whole-USDC `1e6` scaling quirk** *(added D-090)* | D-082 | → **3.4**. D-082 recorded it as "noted not fixed … 2.6/3.4 surface if it matters"; 2.6 did not surface it, so it was half-owned by a task that has closed. `economics.go` divides ANY numeraire by 1e6 — correct for 6-decimal USDC, inherited for others. 3.4 owns it because it is the same valuation-provenance question as the D-044 swap |
 | No upgrade handlers | re-eval | → **3.6** |
 | No observability | re-eval | → **3.7** |
 | No testnet / genesis infra | re-eval | → **3.8** |
@@ -673,9 +789,11 @@ plan-stop can hard-require it.
 | D7 naming (+ AP2 "Mandate" collision) | SPEC §14, R5 | → gate row (pre-3.8-announcement) |
 | Chambers | SPEC §10 | → **3.11** |
 | Richer typed-schema circuit | D-076 | → **3.12** (default: defer past Phase 3; fixed at 3.2 STOP) |
-| FW-1, FW-2, timeouts→params | D-075/076/078 | **stay Phase 2 (2.7)**; 3.0 verifies closure |
-| 5 matcher TODOs + `randAddr()` flake | D-072/078 | **stay Phase 2 (2.6)**; 3.0 verifies closure |
+| FW-1, FW-2 (+ the two D-089 re-points) | D-075/076/078/089 | **stay Phase 2 (2.7)**; 3.0 verifies closure. *Updated D-090:* `timeouts→params` was owned by BOTH 2.7 and 2.8 — resolved to **2.8**; and D-089's two re-points (multi-intent-per-sigil, the `ErrLimitRateUnsupported` lift) are now written INTO 2.7's acceptance criteria rather than merely pointed at it |
+| 5 matcher TODOs + `randAddr()` flake | D-072/078/088/089 | *Updated D-090 — this row was stale:* **3 closed by 2.6** (limit rate, cycles, 2-party partial fill); **2 split into new Phase-2 tasks** (2.10 in-consensus cycle-aware fallback, 2.12 multi-asset in-kind skim); **1 re-pointed** to 2.7/FW-2 (multi-intent-per-sigil); the "flake" was **not a flaky fixture** — it was a real 1-in-256 store-iterator bug shipped as **task 2.11** (D-088). 3.0 verifies the remaining 2.10/2.12 |
 | Localnet contract smoke | D-079 | **stays Phase 2** (§6 exit demo); 3.0 verifies |
+| **Live relayer USDC demo** *(added D-090)* | D-082 | **stays Phase 2** (§6 exit demo) — decided at 2.5's plan-stop, not a late deviation; 3.0 verifies |
+| **§6 exit demo itself** *(added D-090)* | SPEC §10 | **stays Phase 2 — it is 3.0's trigger.** UNBLOCKED at PHASE2_DESIGN Rev 3: all four legs DONE, and 2.7–2.12 are all off the exit path. Carries a hard condition: if its output is ever used as EXTERNAL-FACING evidence, task **2.9** becomes a prerequisite (D-087's `condition_outcome` reads NONE for the conditioned ZK buy) |
 
 ### 5.2 Advisories to the remaining Phase-2 tasks (research fallout; not Phase-3 scope)
 

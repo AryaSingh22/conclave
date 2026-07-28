@@ -32,7 +32,11 @@ const (
 // example omits it, and every sweep (boundary seal, Reveal, expiry) is
 // state-scoped, not chamber-scoped, until Phase 3.
 // CONCLAVE-TODO(phase-3): revisit index sharding when chamber_id > 0
-// activates.
+// activates — owned by task 3.11 (Chambers). Owner named at Rev 3 (D-090).
+// 3.11 input: the chamber-less 0x02 index is exactly what makes the sweeps
+// global today, so partitioning sessions/veil per chamber forces a decision
+// here, not a mechanical re-key. See x/session/types/keys.go for the paired
+// D-088 warning about iterator range ends under a non-zero chamber id.
 var (
 	// IntentKeyPrefix: 0x01 | chamber(4) | intent_id(32) → IntentRecord
 	IntentKeyPrefix = []byte{0x01}

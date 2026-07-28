@@ -152,9 +152,11 @@ type ConclaveApp struct {
 	// SessionKeeper is a pointer so SetVeilKeeper can wire the veil↔session
 	// dependency cycle in place after both keepers exist (Guard 1).
 	SessionKeeper *sessionkeeper.Keeper
-	// EpochKeeper owns the Phase-1 DKG epoch key lifecycle (PHASE1_DESIGN
-	// §2(b), D-068). A pointer so SetVeilKeeper can wire the veil↔epoch cycle in
-	// place. The live Reveal stays on StubScheme until Task 1.6.
+	// EpochKeeper owns the DKG epoch key lifecycle (PHASE1_DESIGN §2(b), D-068).
+	// A pointer so SetVeilKeeper can wire the veil↔epoch cycle in place. Since
+	// task 1.6 (D-069) the live Reveal dispatches PER INTENT on the envelope's
+	// epoch_id — StubScheme for 0, real threshold decryption otherwise — so this
+	// keeper's published epoch key is on the live path, not a future one.
 	EpochKeeper *epochkeeper.Keeper
 	// ReceiptKeeper is the SPEC §6.6 query/proof surface over the receipts
 	// x/session writes (D-045). It owns no store (D-052).
@@ -351,8 +353,12 @@ func NewConclaveApp(
 	)
 	app.VeilKeeper = veilkeeper.NewKeeper(
 		app.appCodec, runtime.NewKVStoreService(veilKey),
-		// SPEC §6.3 Phase 0 STUB mode: identity Reveal behind the real
-		// ThresholdScheme interface; Phase 1 swaps the implementation only
+		// The BASE scheme, not the only one: SPEC §6.3 STUB mode (identity
+		// Reveal) behind the real ThresholdScheme interface. Since task 1.6
+		// (D-069) RevealSealed selects per intent on the envelope's epoch_id —
+		// this scheme serves epoch_id == 0 (the epoch-0 bootstrap window, L1),
+		// while a non-zero epoch_id builds a real threshold scheme from the
+		// epoch's published commits. See crypto/reveal/stub.go.
 		reveal.StubScheme{},
 		app.BankKeeper, app.DistrKeeper, app.SigilKeeper, app.MandateKeeper,
 		// the real x/session keeper now supplies the session-boundary hand-off
@@ -392,8 +398,11 @@ func NewConclaveApp(
 	// BEFORE RegisterModules captures the veil keeper copy, mirroring SetEpochKeeper
 	// — so the BeginBlocker copy observes the wired source. The ABCI handlers
 	// themselves are built in setBlockSDKLanes (they wrap the Block-SDK proposal
-	// handlers). The StubScheme stays the live Reveal scheme until the Phase-B
-	// cutover; the cache is populated but not yet consumed.
+	// handlers). The cache is populated by the PreBlocker AND CONSUMED by
+	// BeginBlock's Reveal — the Phase-B cutover shipped in task 1.6 (D-069), so
+	// for any intent carrying a non-zero epoch_id this transport is the live
+	// path, not a staged one. (Comment corrected at Rev 3, D-090: it still read
+	// "populated but not yet consumed", which stopped being true at 1.6.)
 	app.RevealShareCache = NewRevealShareCache()
 	// Node-local DKG secret-share store ExtendVote reads (D-062). On a real node
 	// (home dir set in appOpts) it is FILE-backed under <home>/data/dkg_shares —
@@ -638,8 +647,12 @@ func (app *ConclaveApp) setBlockSDKLanes(logger log.Logger, anteHandler sdk.Ante
 	// delegating to the lane handler. ExtendVote/VerifyVoteExtension produce/check
 	// the per-block reveal shares, and the PreBlocker collects them into the
 	// share cache BEFORE BeginBlock. block-sdk ships no vote-extension handling,
-	// so this is the only VE surface. The StubScheme stays the live Reveal scheme
-	// until the Phase-B cutover (reviewed at STOP #2 first).
+	// so this is the only VE surface. The Phase-B cutover shipped (task 1.6 STOP
+	// #2, D-069): StubScheme now serves only epoch_id == 0, and a non-zero
+	// epoch_id reveals through these shares. Timing is B+2, not B+1 — ExtendVote(h)
+	// runs BEFORE FinalizeBlock(h) and reads committed state through h-1, which
+	// STRENGTHENS order-then-reveal: a share needs the seal COMMITTED, not merely
+	// decided. (Comment corrected at Rev 3, D-090.)
 	ve := NewRevealVoteExtensions(
 		logger, app.VeilKeeper, app.EpochKeeper, app.StakingKeeper,
 		app.ShareProvider, app.RevealShareCache,

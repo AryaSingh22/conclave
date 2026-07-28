@@ -38,8 +38,14 @@ import (
 // Veil and session msgs route and verify through proposals (their types
 // are decodable since 0.6, D-033). Veil msgs also EXECUTE through
 // FinalizeBlock since task 0.7 (TestVeilLaneFinalizeBlockExecution below;
-// D-024 resolved). CONCLAVE-TODO(phase-0): extend to FinalizeBlock
-// execution coverage of session txs at 0.8.
+// D-024 resolved). Session txs are still covered only through
+// PrepareProposal/ProcessProposal here, never through FinalizeBlock execution.
+//
+// CONCLAVE-TODO(phase-3): extend to FinalizeBlock execution coverage of
+// session txs — owned by task 3.5 (gate-coverage expansion). RE-TAGGED from
+// phase-0 at PHASE2_DESIGN Rev 3 (D-090): the marker deferred this to task
+// 0.8, which completed two phases ago without adding the coverage, so it was
+// an unowned debt rather than a pending one — AUDIT F-8's exact class.
 
 // prepare runs PrepareProposal for the next height.
 func (c *conformanceChain) prepare(maxTxBytes int64) *abci.ResponsePrepareProposal {

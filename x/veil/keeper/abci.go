@@ -9,9 +9,14 @@ import (
 // EndBlock that fixed ordering — the order-then-reveal invariant is real
 // even in stub mode.
 //
-// CONCLAVE-TODO(phase-0): at task 0.8, x/session takes over downstream
-// processing per §6.4's EndBlock order of operations; the Reveal itself
-// stays here.
+// MARKER RETIRED at Rev 3 (D-090): the former phase-0 marker said
+// "at task 0.8, x/session takes over downstream processing per §6.4's EndBlock
+// order of operations; the Reveal itself stays here." Task 0.8 did exactly
+// that, and both halves held: x/session owns the §6.4 EndBlock ordering, and
+// the Reveal is still driven from this BeginBlocker. Since task 1.6 (D-069) it
+// dispatches per intent on the envelope's `epoch_id` — 0 to the identity
+// StubScheme, non-zero to real threshold decryption over vote-extension shares
+// collected by the PreBlocker.
 func (k Keeper) BeginBlocker(ctx sdk.Context) error {
 	return k.RevealSealed(ctx)
 }

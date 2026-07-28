@@ -17,11 +17,14 @@ const DefaultSessionLengthBlocks = 3
 //
 // SessionLengthBlocks is constructor-fixed (not a veil param): the
 // governable session_length_blocks param belongs to x/session per SPEC
-// §6.4 and lands at task 0.8 — parking it in veil params now would create
-// a param-migration conflict.
+// §6.4 — parking it in veil params would have created a param-migration
+// conflict.
 //
-// CONCLAVE-TODO(phase-0): task 0.8 replaces this with the real x/session
-// keeper in app wiring.
+// MARKER RETIRED at Rev 3 (D-090): the former phase-0 marker said
+// "task 0.8 replaces this with the real x/session keeper in app wiring", and
+// 0.8 did — app.go wires the real keeper and this type has ZERO non-test
+// callers. It is kept as a test double, not as a live path, which is why the
+// marker was stale rather than pending (AUDIT F-8's class).
 type StubSessionKeeper struct {
 	SessionLengthBlocks uint64
 }

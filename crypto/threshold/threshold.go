@@ -1,7 +1,14 @@
-// Package threshold implements the Phase-1 BLS12-381 threshold-encryption
+// Package threshold implements the BLS12-381 threshold-encryption
 // ThresholdScheme (SPEC §8) behind crypto/reveal.ThresholdScheme, plus the
-// epoch DKG sub-protocol (D-062). It is OFFLINE in Task 1.3: no consensus
-// wiring, and the live chain keeps using reveal.StubScheme until Task 1.6.
+// epoch DKG sub-protocol (D-062).
+//
+// It was OFFLINE when authored in task 1.3 — no consensus wiring — and task 1.6
+// (D-069) wired it: the live Reveal now selects PER INTENT on the envelope's
+// epoch_id, so this scheme is on the consensus path for every non-zero epoch_id
+// and reveal.StubScheme serves only the epoch-0 bootstrap window (L1). Task 1.7
+// (D-070) then proved it on a live 4-validator localnet. (Header corrected at
+// PHASE2_DESIGN Rev 3, D-090 — it still said the chain "keeps using StubScheme
+// until Task 1.6", two tasks after 1.6 shipped.)
 //
 // # Construction (D-066): tlock-style timelock encryption over threshold BLS
 //

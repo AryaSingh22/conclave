@@ -72,13 +72,28 @@ func ReputationNonNegativeInvariant(k Keeper) sdk.Invariant {
 }
 
 // RevokedCredentialsInactiveInvariant implements SPEC §6.1 invariant 3:
-// revoked credentials never satisfy counterparty-class predicates. The
-// predicate evaluator (x/session, task 0.8) must gate on IsCredentialActive;
-// this invariant asserts that accessor never reports a revoked credential
+// revoked credentials never satisfy counterparty-class predicates. This
+// invariant asserts that IsCredentialActive never reports a revoked credential
 // active.
 //
-// CONCLAVE-TODO(phase-0): task 0.8 wires CEL counterparty-class evaluation
-// through IsCredentialActive; this invariant then covers the full chain.
+// MARKER RETIRED at PHASE2_DESIGN Rev 3 (D-090). The former phase-0 marker
+// said "task 0.8 wires CEL counterparty-class
+// evaluation through IsCredentialActive; this invariant then covers the full
+// chain." Task 0.8 DID wire the chain — `x/session`'s predicate environment
+// calls HasActiveCredentialSchema, which walks credentials and gates on
+// IsCredentialActive, backing the SPEC §6.4 rule-5 `has_credential(schema)`
+// predicate — so this invariant now covers it end to end. The one word that
+// was wrong is "CEL": the evaluator is a Go predicate environment, not a CEL
+// interpreter (no CEL library is imported anywhere in the tree). The wiring
+// landed; only the mechanism differed, and a completed decision must not keep
+// wearing a TODO's clothing (AUDIT F-8's class).
+//
+// That chain is load-bearing and has already failed once: task 2.11 (D-088)
+// found IterateCredentials silently dropping 1-in-256 credentials through a
+// truncated iterator range end, so a genuinely credentialed party was wrongly
+// rejected by rule 5. Deterministic across nodes, hence no fork — but a real
+// correctness loss on a consensus path this invariant does not detect (the
+// dropped record is invisible to the walk, so it looks like "no such record").
 func RevokedCredentialsInactiveInvariant(k Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		var msg string

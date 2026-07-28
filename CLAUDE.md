@@ -239,11 +239,17 @@ green and the task is reviewed + committed.
 
 One task per session, in order. Mark complete only after `make lint test` is
 green and the task is reviewed + committed. **`docs/PHASE2_DESIGN.md` is the
-approved phase authority** (D-072; **Rev 2** as-built reconciliation, D-078 —
-scoreboard, resolved FLAGs A/B, 2.2 resume checklist, new task 2.7) — each
-task below bootstraps from it.
+approved phase authority** (D-072; **Rev 3** reconciliation audit, D-090 —
+scoreboard current, FLAG C discharged, rows for 2.8–2.12, ownership collisions
+resolved, exit demo unblocked) — each task below bootstraps from it.
 
-- [x] 2.0 Phase-2 design ledger authored — `docs/PHASE2_DESIGN.md` (D-072). Docs-only
+**Execution order deviated from ledger order once, recorded here (Rule 8):**
+2.5 (`dccd607`) landed before 2.3 (`8756575`) and 2.4 (`c830e55`). PHASE2_DESIGN
+§1 has always made 2.3/2.4/2.5 parallel siblings, so nothing was built on an
+unbuilt dependency. The other resequencing — 2.11 before 2.6 — was recorded at
+the time (D-088).
+
+- [x] 2.0 Phase-2 design ledger authored — `ee70722`, `docs/PHASE2_DESIGN.md` (D-072). Docs-only
       (no source/proto/logic touched; `make lint test` green at `39cb207`). Per-task
       sections 2.1–2.5 + numbered task 2.6 (matcher-richness hardening pass owning the
       five latent matcher TODOs); all ten `CONCLAVE-TODO(phase-2)` markers
@@ -254,7 +260,7 @@ task below bootstraps from it.
       handoff; `PenalizeLostDispute` reputation-hook wiring; D5 ratification. Split into
       **2.1a (HASHLOCK+OPTIMISTIC, D-073/074/075)** and **2.1b (ZK_DELIVERY/gnark, D-076)**;
       both complete.
-  - [x] 2.1a HASHLOCK + OPTIMISTIC — D-073/D-074/D-075. `x/escrow` stood up (keeper,
+  - [x] 2.1a HASHLOCK + OPTIMISTIC — `22bdc98`, D-073/D-074/D-075. `x/escrow` stood up (keeper,
         AppModule, msg server, query, genesis, EndBlock sweep; codespace 15xx). Single
         authoritative transition gate (`nextState`) → §11-rule-2 exhaustive transition-table
         test; every illegal transition a load-bearing REJECT. Funding = payment-into-escrow
@@ -270,7 +276,7 @@ task below bootstraps from it.
         (writer-going-forward; x/receipt unaffected — never read escrows). Bilateral-pairing
         constraint recorded (D-074). Deterministic height-keyed sweep, ordered after
         x/session. NO ZK/gnark. `make lint test` + determinism vector green.
-  - [x] 2.1b ZK_DELIVERY/gnark — D-076. **Spike outcome (a):** gnark works on the CURRENT
+  - [x] 2.1b ZK_DELIVERY/gnark — `4122fda`, D-076. **Spike outcome (a):** gnark works on the CURRENT
         toolchain (no Go bump, kyber pin intact) by PINNING `gnark v0.13.0` + `gnark-crypto
         v0.18.0` (floor go 1.23.0 = the directive); latest v0.15.0 needs go 1.25.7 and
         v0.14.0 needs go 1.24.0 (the bump D-066 avoided), so v0.13.0 is the highest line ≤
@@ -303,7 +309,7 @@ task below bootstraps from it.
         rejected (watched). Trusted-setup
         MPC ceremony + circuit-soundness audit = mainnet gates (carried to 1.8-style audit).
         `make lint test` + determinism vector green; 2.1a HASHLOCK/OPTIMISTIC suites green.
-- [x] 2.2 wasmd + CVM custom bindings — **DONE (D-077 + D-079).** STOP #1: stay
+- [x] 2.2 wasmd + CVM custom bindings — `9722912`, **DONE (D-077 + D-079).** STOP #1: stay
       v0.50 (D-077 — block-sdk frozen = decisive; v0.53-wasmd line needs go 1.24 =
       kyber collision). STOP #2 approved: wasmd v0.54.9 (SDK v0.50.15 / ibc-go
       v8.8.0 exact match; go 1.23.2 — two-pin ceiling intact), READ-ONLY CONCLUDE,
@@ -318,7 +324,7 @@ task below bootstraps from it.
       libwasmvm_muslc). DEVIATION surfaced (D-079): the localnet contract-release
       smoke is deferred to the §6 exit demo — needs a CVM-schema contract binary
       (Rust toolchain); reflect's typed Custom cannot spell it.
-- [x] 2.3 x402 gateway — surface contract **(D-083/D-084/D-085).** Node-surface
+- [x] 2.3 x402 gateway — `8756575`, surface contract **(D-083/D-084/D-085).** Node-surface
       verdict: **ALREADY COMPLETE** (no new gRPC — tx service + unordered ext,
       veil/session/receipt/mandate/sigil/epoch queries incl. Twap +
       ReceiptProof, §6.2 fee abstraction). In-repo deliverable =
@@ -351,7 +357,7 @@ task below bootstraps from it.
       `conclave-x402-gateway`, NOT in `make test`. Vector: run #1
       (docs/tests/tooling) byte-identical; run #2 (D-084 in isolation)
       byte-identical — no re-baseline.
-- [x] 2.4 7683 resolver — surface contract **(D-086/D-087).** Node-surface
+- [x] 2.4 7683 resolver — `c830e55`, surface contract **(D-086/D-087).** Node-surface
       verdict: COMPLETE after ONE genuine gap the new conformance test found
       by walking the FALLBACK path (the no-solver default): fallback
       clearings applied their matches without persisting them, so the
@@ -384,7 +390,7 @@ task below bootstraps from it.
       ISOLATION on the fallback-Solution change — **byte-identical**, no
       re-baseline (the sim generates no fillable pair; the conformance test
       is the covering gate).
-- [x] 2.5 Real USDC via IBC + session-TWAP fee — **D-081 (STOP #1) + D-082 (build).**
+- [x] 2.5 Real USDC via IBC + session-TWAP fee — `dccd607`, **D-081 (STOP #1) + D-082 (build).**
       TWO-STOP run: STOP #1 = the IBC-line decision in isolation (stay ibc-go
       v8.8.0 — the pin already wired; v10-on-v0.50 is a DEADER sub-line;
       the family bump is 3.3's, still blocked by block-sdk-frozen + the
@@ -410,7 +416,7 @@ task below bootstraps from it.
       baseline (recorded in D-082), two-pass identical. Watched-red proofs:
       seam / cold-gate / pruning each red-without-guard. Fee-TWAP
       manipulation surface → 3.1 audit input (PHASE3_PLAN §3.1 updated).
-- [x] 2.6 Matcher-richness hardening pass — **D-089.** Three enrichments, each landed
+- [x] 2.6 Matcher-richness hardening pass — `aa21274`, **D-089.** Three enrichments, each landed
       alone with the determinism vector run in ISOLATION between them. **(8) §5.1
       limit-RATE honoring — CLOSES D-049:** `IntentLeg.limit` was signed and read by
       nobody (Rule 4 in its purest form); `checkLimitRate` is a SEPARATE final clause in
@@ -445,12 +451,22 @@ task below bootstraps from it.
       (multi-asset in-kind skim); TODO 9 (multi-intent-per-sigil) folded into 2.7/FW-2.
       The Rev-2 "flake-hardening" item shipped separately as **2.11/D-088** — it was a real
       1-in-256 iterator bug, not a flaky fixture.
-- [ ] 2.7 Escrow consent completeness (NEW in Rev 2, D-078) — owns the D-075/D-076 FW
-      seams: FW-1 (HASHLOCK/OPTIMISTIC class/window-level buyer-side consent; ZK's
+- [ ] 2.7 Escrow consent completeness (NEW in Rev 2, D-078; scope corrected at Rev 3,
+      D-090) — owns the D-075/D-076 FW seams **plus the two items D-089 re-pointed
+      here**: FW-1 (HASHLOCK/OPTIMISTIC class/window-level buyer-side consent; ZK's
       exact-param gate shipped in 2.1b), FW-2 (per-leg `IntentLeg.condition` proto
-      refinement, incl. the does-it-relax-D-074 plan-stop question), and the
-      timeouts→params promotion (`ZkDeliveryTimeoutBlocks` et al., plan-stop). Off the
-      exit path; sequenced after 2.6; proto change ⇒ determinism vector re-baseline.
+      refinement, incl. the does-it-relax-D-074 plan-stop question), **TODO 9
+      multi-intent-per-sigil** (`solution.go:143` — needs a `SettleLeg` intent-tag
+      proto field so §6.4 rule 3 can attribute a leg to one of a sigil's several
+      intents; collides with D-074's two-distinct-sigil constraint, which IS the FW-2
+      plan-stop question), and **lifting `ErrLimitRateUnsupported`'s multi-counter-asset
+      shape** (session `1428`, D-089 — a per-leg counter-asset makes the §5.1 rate
+      computable without reaching for the D-044 price source, which stays 3.4).
+      ~~timeouts→params~~ **MOVED to 2.8** (it was owned twice; 2.8 is the single
+      owner). Acceptance additionally requires the FW-2 plan-stop to return an EXPLICIT
+      verdict on both re-points — implemented, or re-deferred to a named task with
+      reasoning; neither may be left silently open. Off the exit path; sequenced after
+      2.6; proto change ⇒ determinism vector re-baseline.
 - [ ] 2.8 Submit-charge STRUCTURAL fork (NEW in 2.3, G2/D-085) — the G2 SECURITY
       hole (a msg-server-failing submit stranding its ante charge → conservation
       break) is already CLOSED in 2.3 by ante pre-validation
@@ -459,7 +475,11 @@ task below bootstraps from it.
       keep ante-prevalidation as the permanent design, or adopt a v0.50 mode-split
       charging (CheckTx-only ante charge; DeliverTx charge inside the veil msg
       server, revisiting D-059's "zero mode branching") — plus the escrow/veil
-      timeouts→params promotion. Opens with that plan-stop; off the exit path;
+      **timeouts→params promotion, of which 2.8 is now the SINGLE owner** (Rev 3,
+      D-090: it had been assigned to both 2.7 and 2.8; 2.8 wins because it is already
+      the params/charging-shape task and 2.7 is already carrying a proto change).
+      That covers `ZkDeliveryTimeoutBlocks` and the other compile-time timeout/bond
+      constants (D-073/D-076 posture). Opens with that plan-stop; off the exit path;
       any charging-path change ⇒ determinism vector re-run in isolation.
 - [ ] 2.9 Receipt condition-outcome integrity (NEW in 2.4, G1/D-087) — the §6.6
       receipt's `condition_outcome` is stamped NONE unconditionally and never
@@ -474,7 +494,30 @@ task below bootstraps from it.
       Rule-3 watched-red on the write-back. Acceptance: a conditioned
       settlement's receipt reflects its escrow terminal state; unconditioned
       receipts unchanged. Off the exit path.
-- [x] 2.11 Store-iterator range-end correctness (x/mandate, x/sigil) — **D-088.**
+- [ ] 2.10 In-consensus cycle-aware fallback (NEW in 2.6, D-089) — the second half of the
+      old `fallback.go:35` TODO. 2.6/6a shipped 2-party partial fills; an N-party CYCLE in
+      the in-consensus matcher is a materially larger determinism surface (cycle
+      enumeration must be bounded and byte-identical on every node, and it runs in
+      EndBlock where a panic halts the chain), so it was split out at 2.6's plan-stop
+      rather than stacked under it. Every candidate stays behind the same
+      `validateSolution` bar. **DESIGN INPUT, state it in 2.10's plan up front (don't
+      rediscover it): the determinism vector CANNOT be 2.10's primary gate.** The sim
+      generates thin, one-sided, single-asset flow, so the matcher's rich paths are
+      unreachable by it — now a STRUCTURAL property of the gate, not an observation,
+      evidenced four times (D-069 epoch-inert reveal, D-086 no fillable pair, D-088 no
+      `0xFF` id, D-089 no `limit`/`allow_partial`/multi-coin cycle). A cycle-finder whose
+      determinism the vector cannot exercise must be gated by HAND-BUILT ADVERSARIAL
+      FIXTURES (cycle shapes, tie orderings, enumeration-bound boundaries, node-identical
+      traversal) as the primary evidence, with the vector as a regression backstop only.
+      Acceptance: a 3-party cycle no solver proposed clears via the fallback; enumeration
+      bounded by an explicit param; the adversarial fixture suite above, each guard
+      watched red; determinism vector in isolation with any drift ADR'd to a single named
+      cause; the D-074 bilateral constraint on conditioned legs preserved (a conditioned
+      leg must not become reachable through a cycle). Off the exit path.
+- [x] 2.11 Store-iterator range-end correctness (x/mandate, x/sigil) — `d34ede0`, **D-088.**
+      **Numbered 2.11 but executed before 2.6** (and therefore before 2.7–2.10 and 2.12):
+      it was SPLIT OUT of 2.6 at a STOP, so it took the next free number while landing
+      first — the resequencing is the recorded one, not an accident of ordering.
       SPLIT OUT of 2.6 at a STOP and landed BEFORE the matcher enrichments
       (Rule 1's 1.0/1.0b precedent). 2.6's "flake-hardening" item was NOT a
       flaky fixture: `TestIssueMandateReplace` was reproduced at **8/2000
@@ -502,27 +545,6 @@ task below bootstraps from it.
       in ISOLATION → **byte-identical, no re-baseline** (honest caveat in
       D-088: the 5 seeds never populate a `0xFF` id, so the vector does not
       reach this path — the watched-red tests are the covering gate).
-
-- [ ] 2.10 In-consensus cycle-aware fallback (NEW in 2.6, D-089) — the second half of the
-      old `fallback.go:35` TODO. 2.6/6a shipped 2-party partial fills; an N-party CYCLE in
-      the in-consensus matcher is a materially larger determinism surface (cycle
-      enumeration must be bounded and byte-identical on every node, and it runs in
-      EndBlock where a panic halts the chain), so it was split out at 2.6's plan-stop
-      rather than stacked under it. Every candidate stays behind the same
-      `validateSolution` bar. **DESIGN INPUT, state it in 2.10's plan up front (don't
-      rediscover it): the determinism vector CANNOT be 2.10's primary gate.** The sim
-      generates thin, one-sided, single-asset flow, so the matcher's rich paths are
-      unreachable by it — now a STRUCTURAL property of the gate, not an observation,
-      evidenced four times (D-069 epoch-inert reveal, D-086 no fillable pair, D-088 no
-      `0xFF` id, D-089 no `limit`/`allow_partial`/multi-coin cycle). A cycle-finder whose
-      determinism the vector cannot exercise must be gated by HAND-BUILT ADVERSARIAL
-      FIXTURES (cycle shapes, tie orderings, enumeration-bound boundaries, node-identical
-      traversal) as the primary evidence, with the vector as a regression backstop only.
-      Acceptance: a 3-party cycle no solver proposed clears via the fallback; enumeration
-      bounded by an explicit param; the adversarial fixture suite above, each guard
-      watched red; determinism vector in isolation with any drift ADR'd to a single named
-      cause; the D-074 bilateral constraint on conditioned legs preserved (a conditioned
-      leg must not become reachable through a cycle). Off the exit path.
 - [ ] 2.12 Multi-asset in-kind skim + in-kind solver payout (NEW in 2.6, D-089) — the
       `skim.go:37` TODO. Split out of 2.6 because it is a FEE-MODEL question
       (D-050/D-051), not a matcher enrichment: D-051 skims numeraire coin receive-excess
@@ -533,19 +555,37 @@ task below bootstraps from it.
       per class; the solver payout stays solvent-by-construction; vector in isolation.
       Off the exit path.
 
-**Phase-2 exit:** the §1.3 demo extended — external x402 agent buys ZK-verified
-data from a Conclave agent; receipt IBC-verified on a second chain (spans
-2.1+2.2+2.3+2.5; 2.4 is the parallel inbound rail, off the exit path).
+- [ ] **§6 EXIT DEMO — the next task.** The §1.3 demo extended: an external x402
+      agent buys ZK-verified data from a Conclave agent; receipt IBC-verified on a
+      second chain (spans 2.1+2.2+2.3+2.5; 2.4 is the parallel inbound rail, off the
+      exit path). **UNBLOCKED at Rev 3 — all four legs are DONE**, and every one of
+      2.7–2.12 is explicitly off the exit path, so this is the only remaining
+      phase-closing item. It is also the sole owner of two obligations deferred into
+      it: the **D-079 localnet contract-release smoke** (needs a purpose-built
+      CVM-schema contract binary — a Rust-toolchain dependency, so the session is
+      larger than its leg count suggests) and the **D-082 live relayer USDC demo**.
+      **HARD CONDITION at its plan-stop (D-090):** the x402 leg is the conditioned ZK
+      buy, so its receipt reads `condition_outcome = NONE` for a conditioned
+      settlement (D-087). That is acceptable for an **internal acceptance run** —
+      both edge contracts disclose the true semantics, so no consumer is misled — but
+      **if the demo output is ever repurposed as EXTERNAL-FACING evidence, task 2.9
+      becomes a prerequisite.** Decide and record which it is before building.
 
 ## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
 
-Authored 2026-07-10 mid-Phase-2 (research + planning session, docs-only).
+Authored 2026-07-10 mid-Phase-2 at `b2f633b` (research + planning session,
+docs-only). **This session carries no Phase-2 task number** — it is a
+plan-authoring session, not a ledger task, and it is noted here so the commit
+maps to something (Rev 3, D-090).
 **SPEC §10's Phase 3 is Chambers ALONE**; the plan proposes the surrounding
 production-readiness scope with three-class authority labels in every section
 header ([SPEC §10 PHASE 3] / [SPEC-MANDATED, NOT PHASE-NUMBERED] /
 [PROPOSED — BEYOND CURRENT SPEC]). **NOT yet the phase authority** — task 3.0
-(Rev at the Phase-2 boundary) re-validates it after 2.3–2.7 + the exit demo
-close. Headline structure: 3.1 audit = the gating dependency (opens with an
+(Rev at the Phase-2 boundary) re-validates it once the Phase-2 ledger closes.
+**Rev-3 status of that gate:** 2.3/2.4/2.5/2.6/2.11 are DONE; 2.7–2.10 and 2.12
+are open but all off the exit path, so 3.0's trigger is the **§6 exit demo**,
+after which 3.0 must re-verify every §5.1 disposition row (several were refreshed
+at Rev 3 — see D-090). Headline structure: 3.1 audit = the gating dependency (opens with an
 adopt-vs-audit STOP); 3.3 platform migration GATES the public testnet (go 1.23
 + SDK v0.50 + ibc-go v8 all EOL, block-sdk archived — D-080 research record);
 3.11 Chambers = the one spec-named task, design-doc-first. Carries §5.2

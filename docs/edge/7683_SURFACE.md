@@ -23,13 +23,21 @@ same argument, and the same division of breakage risk, as
 [X402_SURFACE.md](X402_SURFACE.md)'s x402 posture.
 
 **Contract stability.** Everything named here lives in `conclave.*.v1`
-proto packages at pinned commit lineage `8756575`→(this task). Fields are
+proto packages at pinned commit lineage `8756575`→`aa21274`. Fields are
 never renumbered; additive evolution only. If a future task changes a named
 behavior, that task updates this document in the same session (CLAUDE.md
-working method). **Warning owned by task 2.6:** the fallback matcher's
-internals (pairing rules, pricing) are scheduled to change; nothing in this
-contract depends on them — the evidence chain reads *stored* state (§5),
-never re-derives matcher output.
+working method).
+
+**The task-2.6 warning is now DISCHARGED (D-090).** This contract used to warn
+that the fallback matcher's internals (pairing rules, pricing) were *scheduled*
+to change. **Task 2.6 changed them** (`aa21274`, D-089), and the warning's
+substantive claim held: nothing in this contract depends on matcher internals,
+because the evidence chain reads *stored* state (§5) and never re-derives
+matcher output — the `terms_hash` pre-image is still fetched, not recomputed.
+Two consequences ARE resolver-visible, though, and 2.6 did not record them here;
+they are §3.2 below. (2.6 shipped without updating either edge contract; the
+omission was caught by the D-090 reconciliation audit and is fixed here rather
+than left for the resolver repo to discover at integration time.)
 
 ---
 
@@ -152,6 +160,61 @@ Field contract as X402_SURFACE.md §3.1; the 7683-specific rules:
   (§6.3 check 3).
 - **Bond sizing, lifecycle states, cancel:** X402_SURFACE.md §3.1/§3.3.
 
+### 3.2 Matcher behavior that became resolver-visible in task 2.6 (D-089)
+
+Two changes in `aa21274` are visible to a filler. Neither breaks this
+contract's evidence chain (§6), but both change what a submitted fill can DO.
+
+**(a) `IntentLeg.limit` is now ENFORCED — and it can reject your fill.** Before
+2.6 the §5.1 `limit` field was signed by the agent and read by nobody; the
+matcher bounded quantities only. It is now honored as a **rate** bound on each
+party's own achieved terms, computed from settled flows alone (no external price
+source): a give leg bounds `given/recv ≤ limit`, a want leg bounds
+`recv/given ≥ limit`. Comparison is exact by cross-multiplication — nothing
+rounds. Two new rejections a resolver can now hit:
+
+| Error | Codespace | When |
+|---|---|---|
+| `ErrLimitViolation` | session `1416` | the settled rate breaches a limit some party signed |
+| `ErrLimitRateUnsupported` | session `1428` | the limit's rate is **not evaluable** for the match shape |
+
+**`ErrLimitRateUnsupported` is the one that will surprise a 7683 resolver**,
+because multi-output orders walk straight into it. A leg's rate is undefined
+when the intent's counter-side carries **more than one distinct asset** — there
+is no single counter-asset to divide by, and valuing a basket would need exactly
+the price lens this check refuses. Such a match is **REJECTED rather than
+settled against an unhonored limit**. Concretely: if you translate a
+multi-output order into a fill that gives two or more distinct denoms and you
+put a `limit` on a want leg, the match is rejected. **Recommended posture for
+the v1 fill-back rail: leave `limit` unset on translated fills** and bound your
+economics origin-side, where you control them. If you do set it, set it only on
+fills whose counter-side is a single asset. (Malformed and negative limits fail
+the same way. Lifting the multi-asset restriction is task 2.7/FW-2's per-leg
+field.)
+
+**(b) Partial fills are now reachable through the IN-CONSENSUS fallback.**
+Before 2.6 the fallback matcher only ever cleared a pair at full give; partial
+fills existed solely in solver-proposed solutions. `tryFallbackPair` now tries
+FULL-GIVE first — so anything that cleared before 2.6 still clears at identical
+terms — and falls back to a **FLOOR-FILL** in which a party that signed
+`allow_partial` hands over only what its counterparty's want-floor needs and
+**keeps the remainder**. Consequences for a resolver:
+
+- **`allow_partial` in your envelope is now load-bearing.** Setting it means a
+  fill may settle for less than the full give you offered. Leave it **unset**
+  (the default) for fill-or-kill semantics — that is the correct posture when an
+  origin-chain order must be filled exactly or not at all. The fill-or-kill
+  guarantee is enforced on-chain by §6.4 rule 3, proven load-bearing in D-089.
+- **A settled `Match` leg amount may be less than the intent's offered
+  quantity.** Read fill amounts from the **stored Match** (§5), never from your
+  own submitted intent, when constructing the fill-back claim. §6.3 check 3 —
+  "some leg pays the order's recipient at least `minReceived`" — already reads
+  the verified Match, so a bridge implementing this contract correctly is
+  unaffected; a bridge that shortcuts by trusting the submitted intent is not.
+- A partially-filled intent is marked CONCLUDED like any other; its remainder is
+  never re-offered into a later session.
+- **The evidence chain stays uniform across full and partial fills** — see §6.1.
+
 ---
 
 ## 4. Fee/gas surface
@@ -195,6 +258,13 @@ terms_hash, clearing_prices, condition_outcome, height, chamber_id }`
   asset, **per-leg condition**), and the clearing prices. The pre-image is
   the winning `Match` inside the stored winning `Solution` (§5), byte-
   reproducible via deterministic proto marshaling.
+- **Uniformity holds across full AND partial fills (D-089).** A partial fill
+  produces a Match whose leg amount is the FILLED quantity, not the intent's
+  offered quantity — a genuinely new pre-image shape. The persisted fallback
+  Solution carries the filled amount, and `sha256(Marshal(queried Match))`
+  recomputes to each party's `receipt.terms_hash` for that shape too, so the
+  `Session → winning_solution_id → Solutions → Match` chain needs no special
+  case. Pinned by `TestFallbackPartialFill_PreImageUniformity` (§7).
 - ⚠️ **`condition_outcome` is currently decorative — never read it**
   (D-087, task 2.9): the only writer stamps `CONDITION_OUTCOME_NONE`
   unconditionally, including for settlements whose legs DID carry
@@ -311,11 +381,29 @@ nothing updates a receipt when its escrow later resolves. Consequences:
     under-declared fill passes the ante, INVALID at the Reveal, 50% bond
     slash, no receipt, window charge retained (watched RED with the Reveal
     cross-check bypassed; run recorded in D-086).
+- **`x/session/keeper/partial_fill_test.go`** (in `make test`) —
+  `TestFallbackPartialFill_PreImageUniformity` pins §6.1's uniformity claim for
+  the **partial** shape: it queries the persisted fallback Solution, asserts the
+  stored leg carries the FILLED amount (not the offered one), and recomputes
+  `terms_hash` against BOTH parties' receipts. **Coverage boundary, stated
+  honestly:** this runs at the keeper level. The app-level chain in
+  `erc7683_surface_conformance_test.go` — query → marshal → ICS-23 verify
+  against a real header-anchored root — still exercises **full fills only**. So
+  the partial shape's pre-image identity is proven, but not yet through the
+  full external evidence path a bridge actually walks. A bridge implementing
+  §6.3 as written is unaffected (it reads the stored Match either way); closing
+  the asymmetry is a candidate for the §6 exit demo or task 2.10.
+- **`x/session/keeper/limit_rate_test.go`** (in `make test`) — pins §3.2(a):
+  give/want rate breaches rejected, the multi-counter-asset shape rejected with
+  `ErrLimitRateUnsupported`, malformed/negative limits rejected, and the
+  zero-denominator boundary.
 - **`scripts/7683_surface_check.sh` + `conclave-demo 7683-check`**
   (localnet; dev tooling, not in `make test`) — the live sweep: every
   endpoint named in §3/§5 against a running node, the evidence chain
   gathered and verified exactly as §6.5, and the live negatives.
 
 *Authored task 2.4 (D-086 surface + fallback-solution persistence; D-087
-condition_outcome disclosure). The resolver repo pins the commit of this
-document it builds against; changes land here first.*
+condition_outcome disclosure). Updated at PHASE2_DESIGN Rev 3 (D-090) with the
+task-2.6 matcher changes §3.2 — the update task 2.6 owed this document and did
+not make. The resolver repo pins the commit of this document it builds against;
+changes land here first.*

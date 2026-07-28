@@ -73,8 +73,15 @@ func (d FeeAbstractionDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate
 // Keeper.FeeAbstractionMandate, so no tx is double-charged and none
 // escapes fee payment.
 //
-// CONCLAVE-TODO(phase-0): skipped txs carry the default 0 mempool priority;
-// task 0.6 lane fee logic replaces priority handling per lane (SPEC §6.7).
+// CONCLAVE-TODO(phase-3): skipped txs carry the default 0 mempool priority;
+// per-lane fee/priority handling (SPEC §6.7) still does not replace it. Owned
+// by task 3.3 (platform re-baseline), because 3.3's block-sdk disposition —
+// fork-and-maintain vs an app-side PrepareProposal lane implementation — is
+// what decides who owns lane priority at all, and settling it before that
+// settles it twice. RE-TAGGED from phase-0 at PHASE2_DESIGN Rev 3 (D-090):
+// the marker deferred this to task 0.6, which completed in Phase 0, so it was
+// an unowned debt rather than a pending one (AUDIT F-8's class). Mempool
+// ordering only — no consensus or authorization property depends on it.
 type ConditionalDeductFeeDecorator struct {
 	keeper keeper.Keeper
 	inner  sdk.AnteDecorator

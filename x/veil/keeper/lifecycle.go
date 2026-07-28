@@ -661,8 +661,9 @@ func decodePayload(plaintext []byte) (payload types.IntentPayload, ok bool) {
 // FaceValuePriceSource units, so the comparison is apples-to-apples;
 // non-coin (data/svc) give legs value 0 and never appear in `give`, so a
 // coin-give-free intent is correctly unbounded by a coin commitment (the
-// inherited F-3 boundary — CONCLAVE-TODO(phase-0): the D-044 price-source
-// swap values data/svc legs and would bound them).
+// inherited F-3 boundary — CONCLAVE-TODO(phase-3): the D-044 price-source
+// swap values data/svc legs and would bound them; owned by task 3.4 with the
+// swap itself. RE-TAGGED from phase-0 at Rev 3, D-090).
 func (k Keeper) giveExceedsCommitment(ctx sdk.Context, rec types.IntentRecord, payload types.IntentPayload) (bool, error) {
 	var env types.IntentEnvelope
 	if err := env.Unmarshal(rec.Intent.Envelope); err != nil {
@@ -705,12 +706,18 @@ func (k Keeper) giveLegValue(ctx sdk.Context, payload types.IntentPayload) (spen
 // unpayable bond and rejects as ErrBondInsufficient).
 var maxFaceValue = math.NewIntWithDecimal(1, 50)
 
-// faceValueScalar reduces a give-leg valuation to the D-041 Phase-0 face
-// value: the denom-blind sum of the per-denom max amounts in base units.
-// No cross-denom prices exist before task 0.8; this is the only
-// deterministic scalar available and it scales the §6.3 bond with intent
-// size. CONCLAVE-TODO(phase-0): 0.8's clearing-price source normalizes
-// give legs to uusdc, replacing this approximation.
+// faceValueScalar reduces a give-leg valuation to the D-041 face value: the
+// denom-blind sum of the per-denom max amounts in base units. It is the only
+// deterministic cross-denom-free scalar available here, and it scales the §6.3
+// bond with intent size.
+//
+// CONCLAVE-TODO(phase-3): normalize give legs to the settlement denom via a
+// clearing-price source, replacing this approximation — owned by task 3.4,
+// the same D-044 swap as `PriceSource` (AUDIT F-3). RE-TAGGED from phase-0 at
+// Rev 3 (D-090): the marker said "0.8's clearing-price source", and 0.8 shipped
+// without changing this. Cross-denom prices DO exist now — task 2.5's session
+// TWAP (D-082) — but 3.4 owns the decision to consume them here, under the
+// containment review D-082 recorded.
 func faceValueScalar(giveSpend sdk.Coins) math.Int {
 	total := math.ZeroInt()
 	for _, coin := range giveSpend {

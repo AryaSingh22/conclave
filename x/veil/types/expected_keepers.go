@@ -50,12 +50,14 @@ type PriceSource interface {
 }
 
 // SessionKeeper is the x/session surface x/veil depends on for the
-// session-boundary hand-off (SPEC §6.3 ABCI hooks). x/session lands at task
-// 0.8; until then StubSessionKeeper implements it (D-038).
+// session-boundary hand-off (SPEC §6.3 ABCI hooks). The REAL x/session keeper
+// has implemented it since task 0.8, wired in app.go; StubSessionKeeper
+// (D-038) survives for tests only.
 //
-// CONCLAVE-TODO(phase-0): task 0.8 supplies the real x/session keeper and
-// moves the boundary/Reveal/expiry sweep ownership under x/session
-// EndBlock's §6.4 order of operations.
+// MARKER RETIRED at Rev 3 (D-090): the former phase-0 marker said
+// "task 0.8 supplies the real x/session keeper and moves the boundary/Reveal/
+// expiry sweep ownership under x/session EndBlock's §6.4 order of operations."
+// Done, and the interface is why the swap was a one-line app-wiring change.
 type SessionKeeper interface {
 	// SessionBoundary reports whether intent ordering fixes at this height's
 	// EndBlock and, if so, the id of the session sealed intents belong to.

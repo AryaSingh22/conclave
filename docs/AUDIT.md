@@ -95,6 +95,38 @@ replace pin; the custom (non-no-op) ProcessProposal
 
 ---
 
+## Disposition of every finding (added 2026-07-28, D-090)
+
+**Why this section exists.** The table above was written in 2026-06-15 and then
+functioned as a *write-only* list. F-1…F-6 were picked up by the Phase-1 design
+and the Phase-3 plan, but **F-7 and F-8 were never given an owner anywhere** — a
+repo-wide grep at `aa21274` found zero mentions of either outside this file.
+F-7 turned out to be closed by task 2.6 without anyone recording it against F-7;
+F-8 stayed genuinely open for two phases and was **independently rediscovered**
+by a marker sweep that did not know F-8 existed. That rediscovery is the proof
+it was invisible.
+
+> **The lesson, stated so it transfers: A FINDINGS LIST NEEDS THE SAME
+> OWNER-PER-ROW DISCIPLINE AS A LEDGER, OR IT GOES WRITE-ONLY.** This is
+> METHODOLOGY Rule 6's own counterexample — the D-044 "dedicated post-0.8 task"
+> that was a phrase rather than a task number, floated across two phases, and
+> came back as **F-3** — reproduced on the very list that recorded F-3.
+> Rule 6 has been amended to say so explicitly, and this table now carries a
+> disposition column that must never be blank.
+
+| ID | Disposition | Status |
+|---|---|---|
+| **F-1** | Determinism-harness hardening → **task 1.0** (`a496e7e`, D-063) | ✅ **CLOSED.** The hardened gate then caught a real pre-existing mandate-accounting bug at seed 7, which became task 1.0b (D-064) — the gate paid for itself before the feature it was hardened for existed. |
+| **F-2** | Unvalued msg types → **task 3.4** (PHASE3_PLAN §5.1) | 🔶 **OPEN, owned, and PINNED.** Task 2.5 (D-082) deliberately did not move it — real IBC vouchers make the exposure carry real value, so `TestSpendIntentF2BoundaryPin` asserts `MsgTransfer` values at zero BY NAME, forcing 3.4 to flip it via a deliberate red rather than by drift. |
+| **F-3** | D-020 / D-044 PriceSource swap → **task 3.4** | 🔶 **OPEN, owned.** The index it will read now exists (2.5's session TWAP, D-082); 3.4 owns the decision to consume it, under D-082's recorded containment argument. The greppable markers are re-tagged `phase-3` and name 3.4 (D-090). |
+| **F-4** | Order-then-reveal on vote-extension share availability → **task 1.6** (D-069) | ✅ **CLOSED by construction**, and strengthened: the ABCI++ off-by-one found during 1.6 means reveal is B+2, so a share needs the seal *committed*, not merely decided. Proven live on 4 validators in 1.7 (D-070). |
+| **F-5** | Machine-enforced float ban → **task 3.3** CI guard | 🔶 OPEN, owned. |
+| **F-6** | goleveldb pin regression guard → **task 3.3** CI guard | 🔶 OPEN, owned. |
+| **F-7** | §5.1 `limit` rate ignored (D-049) → **task 2.6** (`aa21274`, D-089) | ✅ **CLOSED — recorded here for the first time.** D-089 closed it under the name "D-049" and never mentioned F-7, so the finding sat closed-in-fact and open-on-paper. `checkLimitRate` now bounds each party's own achieved rate from flows alone; a shape whose rate is not computable is REJECTED (`ErrLimitRateUnsupported`) rather than settled against an unhonored limit. Note the original F-7 rationale — "safe under Phase-0 fill-or-kill" — was **half wrong**: 2.6's watched red showed the in-consensus fallback settling a party at a rate it never signed (state 4, CONCLUDED) once the clause was removed. |
+| **F-8** | Stale `CONCLAVE-TODO(phase-0)` markers → **swept at PHASE2_DESIGN Rev 3** (D-090) | ✅ **CLOSED.** All 22 markers audited against Rule 6. Three that were the F-3/D-044 debt re-tagged `phase-3` and pointed at 3.4; two unowned ones given owners (3.5 for session-tx FinalizeBlock coverage, 3.3 for per-lane fee priority); four retired because the work completed (0.8's session-keeper swap and EndBlock hand-off, the counterparty-class predicate wiring, and 1.3/1.6's threshold implementation — where `StubScheme` now persists *deliberately* as the epoch-0 window, L1); the six `phase-3` Chambers markers now name **3.11** instead of relying on inference. **Not cosmetic after all:** the sweep is what surfaced that a completed design decision (StubScheme) had been wearing a TODO's clothing for two phases, which is how greppable-marker discipline decays into noise. |
+
+---
+
 ## Phase-1 boundary triage
 
 ### PRE-PHASE-1 — entry criteria (resolve before threshold crypto begins)

@@ -20,10 +20,12 @@ protocol detail — it is plain Conclave gRPC — so x402 spec drift never
 invalidates this contract, only the gateway's outward facade.
 
 **Contract stability.** Everything named here lives in `conclave.*.v1` proto
-packages at pinned commit lineage `dccd607`→(this task). Fields are never
+packages at pinned commit lineage `dccd607`→`aa21274`. Fields are never
 renumbered; additive evolution only. If a future task changes a named
 behavior, that task updates this document in the same session (CLAUDE.md
-working method).
+working method). *Task 2.6 changed two named behaviors without updating this
+document; the omission was caught by the D-090 reconciliation audit and is
+recorded in §3.4.*
 
 ---
 
@@ -161,7 +163,7 @@ gRPC server is the standard `start`-served one; no custom tx service exists.
 | `sender` | The gateway hot key's address; the tx signer. Must resolve to `sender_sigil` (§1.1 step 2). |
 | `sender_sigil` | The principal's sigil id (Model A: the gateway's own; Model B: the delegating agent's). |
 | `ciphertext` | The `IntentPayload` bytes — plaintext in the epoch-0/stub window, IBE-encrypted to the epoch key otherwise (see `epoch_id`). Contains `give`/`want` legs, optional `condition` (D-075/D-076 consent applies), `counterparty_class`. |
-| `envelope` | Serialized `IntentEnvelope` (always plaintext): `ttl_height`, `fee_bid` (veil-lane priority, Dec string), `allow_partial`, `chamber_id` (0), **`spend_commitment`** (Coins — the declared upper bound on give-leg value; the ante binds ceilings to it, and at the Reveal an actual give exceeding it in any denom is INVALID with a 50% bond slash, D-065 — the gateway derives it from the quoted price, in the settlement denom), `epoch_id` (0 = stub window; non-zero must be a currently-decryptable epoch queried from `conclave.epoch.v1.Query`). |
+| `envelope` | Serialized `IntentEnvelope` (always plaintext): `ttl_height`, `fee_bid` (veil-lane priority, Dec string), **`allow_partial`** (leave UNSET for fill-or-kill — it became load-bearing on the in-consensus fallback path in task 2.6; see §3.4), `chamber_id` (0), **`spend_commitment`** (Coins — the declared upper bound on give-leg value; the ante binds ceilings to it, and at the Reveal an actual give exceeding it in any denom is INVALID with a 50% bond slash, D-065 — the gateway derives it from the quoted price, in the settlement denom), `epoch_id` (0 = stub window; non-zero must be a currently-decryptable epoch queried from `conclave.epoch.v1.Query`). |
 | `bond` | uclv; `≥ max(min_bond, bond_bps × faceValue(spend_commitment))` — both params from `conclave.veil.v1.Query/Params`. Escrowed from `sender`'s account. Refunded on CONCLUDED/EXPIRED/CANCELLED; 50% slashed on INVALID. |
 | `chamber_id` | 0 until Phase 3. |
 
@@ -200,6 +202,45 @@ mandate management), but the gateway's submission path should be unordered.
 A Model-A/B gateway mandate allowlist is therefore typically exactly:
 `{/conclave.veil.v1.MsgSubmitIntent, /conclave.veil.v1.MsgCancelIntent,
 /cosmos.bank.v1beta1.MsgSend}`.
+
+### 3.4 Matcher behavior that became gateway-visible in task 2.6 (D-089)
+
+Two payload/envelope fields the gateway may set changed from inert to
+load-bearing in `aa21274`. Both default to safe; the risk is setting them
+without knowing they now bite.
+
+**(a) `IntentLeg.limit` is now ENFORCED.** Before 2.6 the §5.1 `limit` field
+was signed and read by nobody — the matcher bounded quantities only, so a
+gateway could set it and see no effect. It is now honored as a **rate** bound on
+the party's own achieved terms, computed from settled flows alone (no price
+source): a give leg bounds `given/recv ≤ limit`, a want leg bounds
+`recv/given ≥ limit`, compared exactly by cross-multiplication. Two rejections
+the gateway can now receive at settlement time:
+
+- **`ErrLimitViolation`** (session `1416`) — the settled rate breaches a signed
+  limit. The intent does not settle; it ROLLs or EXPIREs normally.
+- **`ErrLimitRateUnsupported`** (session `1428`) — the limit's rate is **not
+  evaluable for the match shape**, specifically when the intent's counter-side
+  carries **more than one distinct asset** (no single counter-asset to divide
+  by). The match is REJECTED rather than settled against an unhonored limit.
+
+**Gateway posture:** a `limit` is now a real price bound and is the correct way
+to express "do not fill me worse than my quote" — but only set it on intents
+whose counter-side is a single asset, which is the normal x402 shape (pay
+`uusdc`, receive one data/service leg). A quoted purchase is otherwise already
+bounded by `spend_commitment` (§3.1), which is enforced at the Reveal.
+
+**(b) `allow_partial` is now reachable through the IN-CONSENSUS fallback.**
+Previously partial fills could only arise from solver-proposed solutions; the
+fallback matcher always cleared at full give. It now tries FULL-GIVE first (so
+nothing that cleared pre-2.6 changes) and then a **FLOOR-FILL** in which a party
+that signed `allow_partial` hands over only what its counterparty's want-floor
+needs and keeps the remainder. **For an x402 purchase, leave `allow_partial`
+unset** — the default — so the buy is fill-or-kill: a partially-filled purchase
+would collect full payment semantics for a partial good. The fill-or-kill
+guarantee is enforced on-chain by §6.4 rule 3 (D-089). If you ever do set it,
+read settled amounts from the receipt's Match pre-image, never from the intent
+you submitted.
 
 ---
 
@@ -296,9 +337,19 @@ the receipt.
   allowlist-less mandate is denied in ante; an over-ceiling commitment is
   denied; the D-084 binding-stability guard holds (cross-sigil re-issue
   rejected, `ErrGranteeConflict`).
+- **`app/x402_surface_conformance_test.go`** also carries
+  `TestX402FailedSubmitDoesNotStrand_G2Closed` — the D-085 proof that a
+  would-fail submit is rejected in the ante and charges nothing (§1.3), with the
+  conservation invariant asserted GREEN and a valid submit still landing and
+  still charging. Watched red by commenting out the decorator in `app/ante.go`.
+- **`x/session/keeper/limit_rate_test.go`** (in `make test`) — pins §3.4(a):
+  give/want rate breaches rejected, the multi-counter-asset shape rejected with
+  `ErrLimitRateUnsupported`, malformed/negative limits rejected.
 - **`scripts/x402_surface_check.sh`** (localnet, not in `make test`) —
   exercises every endpoint named in §3–§5 once against a running node
   (PHASE2_DESIGN §2.3 acceptance).
 
-*Authored task 2.3 (D-083/D-084). The gateway repo pins the commit of this
-document it builds against; changes land here first.*
+*Authored task 2.3 (D-083/D-084/D-085). Updated at PHASE2_DESIGN Rev 3 (D-090)
+with the task-2.6 matcher changes (§3.4) — the update task 2.6 owed this
+document and did not make. The gateway repo pins the commit of this document it
+builds against; changes land here first.*

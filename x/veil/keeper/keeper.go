@@ -23,7 +23,8 @@ import (
 const domainIntent = 0x04
 
 // phase0Chamber is the only active chamber until Phase 3 (SPEC §1.2).
-// CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates.
+// CONCLAVE-TODO(phase-3): chamber routing once chamber_id > 0 activates —
+// owned by task 3.11 (Chambers). Owner named at Rev 3 (D-090).
 const phase0Chamber uint32 = 0
 
 // Keeper provides access to the x/veil store (SPEC §6.3).

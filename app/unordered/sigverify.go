@@ -13,13 +13,23 @@ package unordered
 // sequences. The behavioral pin is the conformance suite
 // (app/unordered_conformance_test.go); this header is the provenance pin.
 //
-// CONCLAVE-TODO(phase-2+): replace this fork with the SDK's native ADR-070
-// unordered-tx support on the v0.53 bump. The task-2.2 re-evaluation (D-077,
-// updating D-060) RE-RESOLVED stay-on-v0.50: block-sdk remains frozen with no
-// v0.53 line (a bump forfeits the laned mempool) and the v0.53 wasmd line's
-// current patches need go 1.24 (the D-066 kyber collision). Next checkpoint:
-// task 2.5's IBC-line check, or a later boundary once block-sdk has a v0.53
-// path. We migrate deliberately, not opportunistically.
+// CONCLAVE-TODO(phase-3): replace this fork with the SDK's native ADR-070
+// unordered-tx support on the SDK-family bump. Owned by task 3.3 (platform
+// re-baseline), STOP #1.
+//
+// Checkpoint history — the fork survives on evidence, not inertia:
+//   - task 2.2 (D-077, updating D-060) RE-RESOLVED stay-on-v0.50: block-sdk
+//     frozen with no v0.53 line (a bump forfeits the §6.7 laned mempool) and
+//     the v0.53 wasmd line's patches need go 1.24 (the D-066 kyber collision).
+//   - task 2.5 (D-081) RAN the next checkpoint and CLOSED it: block-sdk is
+//     still v2.1.5 with no v2.1.6 and no /v3, so flip-condition (a) still
+//     fails. New input for 3.3 — on the v0.53 path the toolchain collision now
+//     comes from wasmd (v0.61.14+ → go 1.24), not from ibc-go (v10.7.0 floors
+//     at go 1.23.8, inside the ceiling).
+//
+// So the fork's retirement is 3.3's to decide alongside the block-sdk
+// disposition (fork-and-maintain vs app-side lanes), because both answers move
+// together. We migrate deliberately, not opportunistically.
 
 import (
 	"fmt"
