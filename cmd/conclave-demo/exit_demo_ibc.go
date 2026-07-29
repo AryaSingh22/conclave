@@ -143,7 +143,8 @@ func (c *cli) exitDemoIBC(b *cli) error {
 	fmt.Println("   · Chain A is single-node, so the Veil is in its epoch-0 plaintext")
 	fmt.Println("     bootstrap window (D-070 owns the encrypted reveal).")
 	fmt.Println("   · Conditioned escrows remain reachable live only through demo")
-	fmt.Println("     tooling (task 2.13) — the network still has no such writer.")
+	fmt.Println("     tooling — the network still has no such writer. Verdict: GAP")
+	fmt.Println("     (D-093); enforcement = task 2.7, reference path = task 2.14.")
 	fmt.Println("=================================================================")
 	return nil
 }

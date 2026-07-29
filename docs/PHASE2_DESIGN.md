@@ -23,9 +23,11 @@ CosmWasm/CVM integration with CONCLUDE + escrow bindings (2.2), the x402 gateway
 (2.3) and 7683 resolver (2.4) edge services, real USDC over IBC + a session-TWAP
 fee (2.5) — **all five DONE** — plus seven numbered follow-on tasks: the
 matcher-richness hardening pass (2.6, **done**), the store-iterator fix (2.11,
-**done**), and the five open ones (2.7 escrow consent completeness, 2.8
-submit-charge structural fork, 2.9 receipt condition-outcome integrity, 2.10
-in-consensus cycle-aware fallback, 2.12 multi-asset in-kind skim). Exit: the
+**done**), the condition-attachment verdict + error-code fix (2.13, **done**),
+and the six open ones (2.7 escrow consent completeness — now including the
+`signed ⇒ attached` downgrade, 2.8 submit-charge structural fork, 2.9 receipt
+condition-outcome integrity, 2.10 in-consensus cycle-aware fallback, 2.12
+multi-asset in-kind skim, 2.14 reference condition attachment). Exit: the
 §1.3 demo extended end-to-end across chains (§6 below) — **now unblocked: all
 four exit legs are green.**
 **Working method:** unchanged — one task per session with a stop-and-review and
@@ -49,19 +51,20 @@ load-bearing and recorded (§4).
 | 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | **DONE** — surface complete after ONE gap the conformance test found (fallback clearings now persist their winning Solution); G1(2.4) `condition_outcome` disclosed + neutralized | `c830e55`, D-086/087 · artifact: `docs/edge/7683_SURFACE.md` |
 | 2.11 | Store-iterator range-end correctness (x/mandate, x/sigil) | **DONE** — split out of 2.6 at a STOP and landed FIRST; 8 sites, 2 LIVE-broken (one on the §6.4 rule-5 consensus path); vector byte-identical | `d34ede0`, D-088 |
 | 2.6 | Matcher-richness hardening (3 of the 5 matcher TODOs closed; 2 split out) | **DONE** — §5.1 limit RATE honored (closes D-049/F-7), partial-fill cycles + alternate anchoring, 2-party partial-fill fallback; all three strictly ADDITIVE, vector byte-identical three times | `aa21274`, D-089 |
-| 2.7 | Escrow consent completeness (FW-1 + FW-2, incl. the items re-pointed here by D-089) | **open** | D-078, D-089 |
+| 2.7 | Escrow consent completeness (FW-1 + FW-2, incl. the items re-pointed here by D-089) **+ the DOWNGRADE row written in by 2.13** — `signed ⇒ attached` is enforced nowhere, incl. the ZK case its own narrowed FW-1 had orphaned | **open** | D-078, D-089, **D-093** |
 | 2.8 | Submit-charge STRUCTURAL fork (design question only — the G2 security hole is CLOSED in 2.3) + the timeouts→params promotion | **open** | D-085 |
 | 2.9 | Receipt condition-outcome integrity (`CONDITION_OUTCOME_PENDING` + escrow write-back) | **open** | D-087 |
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
-| 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **open** (NEW in §6a) | D-091 |
+| 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | D-093 |
+| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **open** (NEW in 2.13) | D-093 |
 | §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13) | D-091 · artifact: `docs/EXIT_DEMO.md` |
 | §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED** | D-092 · artifact: `docs/EXIT_DEMO.md` |
 
 > ## PHASE-2 EXIT CRITERION: **MET** (§6b, D-092)
 >
 > Every task on the exit path is complete. The remaining open tasks
-> (2.7–2.10, 2.12, 2.13) are each recorded as off the exit path, so
+> (2.7–2.10, 2.12, 2.14) are each recorded as off the exit path, so
 > **PHASE3_PLAN task 3.0 — the Phase-2 boundary re-validation — is now
 > TRIGGERED.** Its stated trigger was this demo. 3.0 owns the Rule-9
 > authored-surface re-derivation and the §5.1 disposition re-verification.
@@ -846,6 +849,20 @@ CONCLUDE — so the entire escrow condition system had been exercised solely by
 keeper-level hand-built Matches. §6a's driver is now the only live writer, and it
 is **demo tooling**: "the demo can do it now" is not "the network can do it now".
 
+**ANSWERED by task 2.13 (D-093): the verdict is GAP, and it is a protocol
+property.** Consent is enforced in one direction only — `attached ⇒ signed` is
+guarded at both chokepoints, `signed ⇒ attached` is guarded nowhere (both loops
+skip a NONE leg before comparing). So **a signed delivery condition is a
+permission ceiling, never a requirement**: a party can bound what may be imposed
+on it and cannot obtain what it asked for. Crucially the downgrade is not a
+solver-behaviour question — `buildFallbackMatch` emits no condition at all and
+the fallback is the DEFAULT clearing path for every session no solver wins, so
+two parties who both signed the same ZK condition are cleared unconditioned **by
+the state machine itself**. The closure is split and both halves are owned:
+enforcement is the new DOWNGRADE row inside **2.7**'s criteria, the reference
+implementation is new task **2.14**, and the boundary is pinned in executable
+form by `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`.
+
 **Hard condition at the demo's plan-stop (D-090).** The x402 leg is the
 conditioned ZK buy, so its receipt reads `condition_outcome = NONE` for a
 conditioned settlement (D-087). Acceptable for an **internal acceptance run** —
@@ -883,13 +900,18 @@ mainnet cannot.
 6. **Escrow record ownership** — CLOSED: writer-going-forward; x/receipt was
    never a constraint (D-073, correcting Rev 1). **Re-verified at Rev 3:**
    non-test `x/receipt` code contains zero escrow references.
-7. **Consent invariants** — load-bearing and now proven reached from every
-   direction: D-075 seller-signed condition + D-076 buyer-signed ZK condition,
-   enforced fail-closed at validation *and* settlement; 2.2 proved them
-   structurally unreachable from CVM (D-079) and 2.6 proved partial fills cannot
-   arise on a conditioned leg (a DataGrant is exact-fill only in both new
-   matchers), so D-074's bilateral shape is reached exactly as before.
-   Completeness (FW-1/FW-2) owned by **2.7**.
+7. **Consent invariants** — load-bearing and proven reached from every direction
+   **in the ATTACH direction only** (corrected at 2.13, D-093): D-075
+   seller-signed condition + D-076 buyer-signed ZK condition, enforced
+   fail-closed at validation *and* settlement; 2.2 proved them structurally
+   unreachable from CVM (D-079) and 2.6 proved partial fills cannot arise on a
+   conditioned leg (a DataGrant is exact-fill only in both new matchers), so
+   D-074's bilateral shape is reached exactly as before. **The REQUIREMENT
+   direction is not enforced at all:** `signed ⇒ attached` is guarded nowhere,
+   so a signed condition is a permission ceiling and the in-consensus fallback
+   downgrades every condition-signing pair it clears (D-093). Completeness
+   (FW-1/FW-2 **+ the downgrade**) owned by **2.7**; the reference attachment
+   path by **2.14**.
 8. **The determinism vector's coverage shadow is a STRUCTURAL PROPERTY, not an
    observation** (promoted at D-089 on its fourth instance; supersedes the old
    "five matcher TODOs owned by 2.6" entry, whose scope is now split across
@@ -907,6 +929,15 @@ mainnet cannot.
    stated design input** (§2.8/2.9/2.10/2.12 above); (c) widening the sim's
    generator until the vector reaches these paths is a legitimate task in its
    own right — **now owned by PHASE3_PLAN 3.5**, no longer a floating phrase.
+   **A FIFTH instance, differing in KIND (D-093):** the four above are all about
+   what the generator fails to EMIT, so a wider generator fixes them. Task 2.13
+   changed a tx RESULT CODE — consensus data on a real network (CometBFT hashes
+   `{Code, Data, GasWanted, GasUsed}` into `LastResultsHash`) — yet the vector
+   is structurally blind to it, because the quantity it hashes is the sim's
+   store-commit app hash and `SimDeliver` never builds a CometBFT block. **No
+   generator change would help**, so consequence (c) does not cover this class:
+   result-code conformance must be gated by ABCI-level tests and by a live node,
+   never by the vector.
 9. **2.2 resume order was load-bearing** — determinism re-baseline on the
    already-bumped deps (iavl 1.2.4) BEFORE wasmd wiring, so drift is
    attributable. As executed the vector ran *after* wiring; the deviation was

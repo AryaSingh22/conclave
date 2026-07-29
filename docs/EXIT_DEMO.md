@@ -159,9 +159,20 @@ conditioned-escrow proof in the tree was a keeper-level hand-built `Match`.
 §6a, the escrow condition system is still not reachable by any production
 path.** Whether that is intended (third-party solvers will attach conditions,
 and the chain's job is only to verify consent — which stage 7 proves it does) or
-a gap (no reference implementation shows a solver how) is an open question owned
+a gap (no reference implementation shows a solver how) was an open question owned
 by **task 2.13**. Do not read "the demo can do it now" as "the network can do it
 now".
+
+**ANSWERED (task 2.13, D-093): GAP** — and larger than "no reference
+implementation". The consent gates are one-directional: `attached ⇒ signed` is
+enforced at both chokepoints, `signed ⇒ attached` at neither, so **a signed
+condition is a permission ceiling, never a requirement**. The in-consensus
+FALLBACK emits no condition at all and is the default clearing path whenever no
+solver wins the auction, so a pair who BOTH signed the same ZK condition is
+cleared unconditioned by the state machine itself — a protocol property, not a
+tooling gap. Enforcement is owned by task **2.7** (its new DOWNGRADE row), the
+reference attachment path by new task **2.14**, and the boundary is pinned in
+executable form by `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`.
 
 ---
 
@@ -169,7 +180,7 @@ now".
 
 | # | Finding | Disposition |
 |---|---|---|
-| F-1 | `ProposeSolution` returns `errors.Join(ErrInvalidSolution, ruleErr)`; `cosmossdk.io/errors` cannot walk a multi-error `Unwrap() []error`, so the **registered code is lost** and the tx surfaces internal code `1` instead of session `1412`. The reason text does survive. Every invalid solution therefore looks like an internal error to an off-chain solver. | **NOT fixed here** — tx result codes are consensus data (`LastResultsHash`), so changing one is a state-machine-visible change needing the determinism gate. Owned by **task 2.13**; pinned by name in stage 7 so the fix flips it deliberately |
+| F-1 | `ProposeSolution` returns `errors.Join(ErrInvalidSolution, ruleErr)`; `cosmossdk.io/errors` cannot walk a multi-error `Unwrap() []error`, so the **registered code is lost** and the tx surfaces internal code `1` instead of session `1412`. The reason text does survive. Every invalid solution therefore looks like an internal error to an off-chain solver. | **CLOSED by task 2.13 (D-093).** Fixed with a typed composite (`types.InvalidSolution`) that carries `ABCICode()`/`Codespace()` explicitly while keeping both `errors.Is` directions. The stage-7 pin did exactly what it was built to do: with the fix applied it failed the live demo on its own message (`EXIT_RC=1`), and it is now replaced by assertions on the (codespace, code) PAIR — the run prints `codespace "session" code 1412`. Note the correction D-093 records: the determinism gate could never have caught this either way — the vector hashes the sim's store-commit app hash, and `SimDeliver` builds no CometBFT block, so result codes never enter it |
 | F-2 | Rust ≥1.82 emits the wasm `reference-types` proposal by default — including inside the precompiled `rust-std` — and wasmvm v2.2.8 rejects such a module. Watched: no flags → failed at offset `0x6ff`; `-C target-feature=-reference-types` → **still** failed at `0x1c94d`; Rust 1.81.0 → accepted | fixed in the demo crate by `rust-toolchain.toml` (+ four lockfile pins, since 1.81's Cargo predates `edition2024`) |
 | F-3 | The first version of stage 4's permissioned-posture check asserted only `code != 0`, and **passed for the wrong reason** (code 11, out of gas on tx size) | fixed in-task: it now requires `ErrUnauthorized` specifically. Recorded because a check that passes for the wrong reason is the exact failure Rule 4 exists to catch, and this one was mine |
 

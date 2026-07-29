@@ -34,9 +34,21 @@
 // SettleLeg.Condition — and it is DEMO TOOLING, so that statement is still
 // true of production paths. See D-091.
 //
+// VERDICT (task 2.13, D-093): that absence is a GAP, not a design posture, and
+// it is worse than "no reference implementation". The consent gates run in ONE
+// direction — `attached => signed` is enforced at both chokepoints, `signed =>
+// attached` at neither — so a signed condition is a PERMISSION CEILING, never a
+// requirement. The in-consensus fallback emits no condition at all and is the
+// default clearing path whenever no solver wins, so a pair who BOTH signed the
+// same condition is cleared unconditioned by the state machine itself.
+// Enforcement is owned by task 2.7 (its DOWNGRADE row); a reference attachment
+// path is task 2.14; the boundary is pinned by
+// TestSignedConditionIsPermissionNotRequirement_BoundaryPin.
+//
 // This proposer lives here and NOT in solver/ deliberately: solver/ is imported
 // by x/session/simulation, so changing it puts the determinism vector on the
-// critical path (METHODOLOGY Rule 7).
+// critical path (METHODOLOGY Rule 7) — the constraint task 2.14 opens its
+// plan-stop on.
 //
 // Dev tooling only — not consensus code.
 package main
@@ -405,7 +417,7 @@ func (c *cli) proposeConditionedSolution(s *exitState) error {
 	if err := c.waitForAuction(s.sessionID); err != nil {
 		return err
 	}
-	code, log, err := c.proposeMatch(s.solver, s.sessionID,
+	code, _, log, err := c.proposeMatch(s.solver, s.sessionID,
 		conditionedMatch(s.buyID, s.sellID, s.sigilP, s.sigilS, s.cond, s.settleDenom))
 	if err != nil {
 		return err
@@ -447,12 +459,16 @@ func conditionedMatch(buyID, sellID, buyerSigil, sellerSigil string,
 	}
 }
 
-func (c *cli) proposeMatch(solver cryptotypes.PrivKey, sessionID uint64, m sessiontypes.Match) (uint32, string, error) {
-	return c.deliverCode(solver, sdk.Coins{}, &sessiontypes.MsgProposeSolution{
+// proposeMatch returns the tx result's (code, codespace, log). The codespace is
+// carried because task 2.13's stage-7 assertion dispatches on the PAIR, which is
+// what a real off-chain solver must do (D-093).
+func (c *cli) proposeMatch(solver cryptotypes.PrivKey, sessionID uint64, m sessiontypes.Match) (uint32, string, string, error) {
+	_, code, space, log, err := c.broadcastAndWaitFull(solver, sdk.Coins{}, &sessiontypes.MsgProposeSolution{
 		Solver:    addrOf(solver).String(),
 		SessionId: sessionID,
 		Matches:   []sessiontypes.Match{m},
 	})
+	return code, space, log, err
 }
 
 func (c *cli) waitForAuction(sessionID uint64) error {
@@ -892,9 +908,15 @@ func (c *cli) exitAssertConditionBoundary(s *exitState, ev *exitEvidence) error 
 // Shape: the seller signs the ZK condition, the BUYER signs nothing (a plain
 // intent), and the proposer attaches the condition anyway. That is exactly the
 // D-076 buyer-side hole, and validateSolution must reject the whole solution
-// (ErrInvalidSolution joined with ErrConditionNotConsented) and slash the
+// (ErrInvalidSolution carrying ErrConditionNotConsented) and slash the
 // over-reaching solver 5%. Run last: the slash takes solver1's bond below
 // solver_min_bond, so nothing after it may need a solution.
+//
+// It also asserts the WIRE IDENTITY of that rejection (task 2.13/D-093): the
+// (codespace, code) pair an off-chain solver dispatches on. This was D-091's
+// finding F-1 — the registered code was lost to errors.Join and the rejection
+// arrived as the internal code 1 — and the assertion below is the live proof
+// the fix reaches the wire, not merely the keeper.
 func (c *cli) exitStageConsentNegative(s *exitState) error {
 	height, err := c.height()
 	if err != nil {
@@ -922,7 +944,7 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 	if err := c.waitForAuction(rec.SessionId); err != nil {
 		return err
 	}
-	code, log, err := c.proposeMatch(s.solver, rec.SessionId,
+	code, space, log, err := c.proposeMatch(s.solver, rec.SessionId,
 		conditionedMatch(ids[0], ids[1], s.sigilP, s.sigilS, s.cond, s.settleDenom))
 	if err != nil {
 		return err
@@ -938,25 +960,28 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 	fmt.Println("consent gate reached from the live path: the proposer CANNOT impose an unsigned")
 	fmt.Printf("  ZK condition — solution rejected and the solver slashed 5%% ✓\n")
 
-	// BOUNDARY PIN (D-091 finding F-1, task 2.13). ProposeSolution returns
-	// errors.Join(ErrInvalidSolution, <rule error>). cosmossdk.io/errors cannot
-	// walk a multi-error Unwrap() []error, so the REGISTERED code is lost and the
-	// tx surfaces the internal code 1 instead of session 1412 — every invalid
-	// solution looks like an internal error to an off-chain solver. Pinned by
-	// name rather than silently tolerated: when 2.13 fixes it, this goes red
-	// deliberately (the TestSpendIntentF2BoundaryPin pattern).
-	const joinedErrorInternalCode = 1
-	switch code {
-	case joinedErrorInternalCode:
-		fmt.Printf("  boundary pinned: wire code is %d, NOT session %d — the errors.Join code loss\n",
-			code, sessiontypes.ErrInvalidSolution.ABCICode())
-		fmt.Println("  (D-091 finding F-1; owned by task 2.13. The reason text does survive.)")
-	case sessiontypes.ErrInvalidSolution.ABCICode():
-		return fmt.Errorf("wire code is now %d — D-091's F-1 appears FIXED; retire this pin and close task 2.13",
-			code)
-	default:
-		return fmt.Errorf("unexpected wire code %d for an invalid solution: %s", code, log)
+	// WIRE-IDENTITY ASSERTION (task 2.13 / D-093, replacing D-091's F-1 boundary
+	// pin). An off-chain solver dispatches on the (codespace, code) PAIR, so both
+	// halves are asserted: a bare code is ambiguous across modules, and a bare
+	// codespace does not distinguish this rejection from any other session error.
+	//
+	// Before 2.13 this arrived as code 1 / codespace "" — ProposeSolution
+	// returned errors.Join(ErrInvalidSolution, ruleErr) and cosmossdk.io/errors
+	// cannot walk a multi-error Unwrap() []error, so the registered code was
+	// dropped and every invalid solution looked like an internal error. The pin
+	// that recorded that boundary was watched RED against the fixed tree before
+	// being replaced by these assertions.
+	if code != sessiontypes.ErrInvalidSolution.ABCICode() {
+		return fmt.Errorf("wire code is %d, want session %d (ErrInvalidSolution) — "+
+			"the registered code is not reaching the wire (D-091 F-1 / task 2.13): %s",
+			code, sessiontypes.ErrInvalidSolution.ABCICode(), firstLine(log))
 	}
+	if space != sessiontypes.ModuleName {
+		return fmt.Errorf("wire codespace is %q, want %q — a client cannot dispatch on the "+
+			"documented SPEC §13 codespace (D-091 F-1 / task 2.13)", space, sessiontypes.ModuleName)
+	}
+	fmt.Printf("  wire identity: codespace %q code %d (ErrInvalidSolution) — an off-chain solver\n", space, code)
+	fmt.Println("  can dispatch on the documented SPEC §13 codespace, and the rule text survives ✓")
 	return nil
 }
 

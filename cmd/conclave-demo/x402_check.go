@@ -412,33 +412,41 @@ func (c *cli) deliverCode(priv cryptotypes.PrivKey, fee sdk.Coins, msgs ...sdk.M
 }
 
 func (c *cli) broadcastAndWait(priv cryptotypes.PrivKey, fee sdk.Coins, msgs ...sdk.Msg) (string, uint32, string, error) {
+	hash, code, _, log, err := c.broadcastAndWaitFull(priv, fee, msgs...)
+	return hash, code, log, err
+}
+
+// broadcastAndWaitFull additionally returns the tx result's CODESPACE. A client
+// dispatches on the (codespace, code) PAIR — a bare code is ambiguous across
+// modules — so the task-2.13 boundary assertion needs both (D-093).
+func (c *cli) broadcastAndWaitFull(priv cryptotypes.PrivKey, fee sdk.Coins, msgs ...sdk.Msg) (string, uint32, string, string, error) {
 	acc, err := c.account(addrOf(priv))
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", "", err
 	}
 	bz, err := c.signTxFee(priv, acc.GetAccountNumber(), acc.GetSequence(), fee, msgs...)
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", "", err
 	}
 	res, err := c.txc.BroadcastTx(context.Background(), &txtypes.BroadcastTxRequest{
 		TxBytes: bz, Mode: txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
 	})
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", "", err
 	}
 	sum := sha256.Sum256(bz)
 	hash := strings.ToUpper(hex.EncodeToString(sum[:]))
 	if res.TxResponse.Code != 0 {
-		return hash, res.TxResponse.Code, res.TxResponse.RawLog, nil
+		return hash, res.TxResponse.Code, res.TxResponse.Codespace, res.TxResponse.RawLog, nil
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		got, err := c.txc.GetTx(context.Background(), &txtypes.GetTxRequest{Hash: hash})
 		if err == nil && got.TxResponse.Height > 0 {
-			return hash, got.TxResponse.Code, got.TxResponse.RawLog, nil
+			return hash, got.TxResponse.Code, got.TxResponse.Codespace, got.TxResponse.RawLog, nil
 		}
 		if time.Now().After(deadline) {
-			return hash, 0, "", fmt.Errorf("tx %s not included before deadline", hash)
+			return hash, 0, "", "", fmt.Errorf("tx %s not included before deadline", hash)
 		}
 		time.Sleep(300 * time.Millisecond)
 	}

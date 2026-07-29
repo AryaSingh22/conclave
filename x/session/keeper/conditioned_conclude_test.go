@@ -247,6 +247,92 @@ func TestProposeConditioned_Zk_BuyerNotConsentedAtValidation(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrConditionNotConsented)
 }
 
+// TestSignedConditionIsPermissionNotRequirement_BoundaryPin records task
+// 2.13(a)'s verdict IN EXECUTABLE FORM (D-093), the way the F-2 and D-091 F-1
+// boundaries were pinned: it asserts what is TRUE TODAY, by name, so the fix
+// turns it red deliberately instead of drifting.
+//
+// THE BOUNDARY. Consent is enforced in ONE direction only. Every guard above
+// proves `attached ⇒ signed`: a solver cannot IMPOSE a condition (D-075 seller,
+// D-076 buyer, at validation and at settlement). Nothing anywhere enforces
+// `signed ⇒ attached` — both chokepoints skip a leg whose condition is NONE
+// (validateConditionConsent and openConditionedEscrows each `continue`). So a
+// signed IntentPayload.condition is a PERMISSION CEILING, never a REQUIREMENT:
+// a party can bound what may be imposed on it, and cannot obtain what it asked
+// for. Nothing in x/session even reads the signed condition unless a leg
+// carries one.
+//
+// Both halves below are the same boundary from the two paths that can clear a
+// session, and the SECOND is what makes this a protocol property rather than a
+// solver-behaviour question.
+//
+// Owned by task 2.7 (D-075-FW-1(b)/FW-3, written into 2.7's criteria by D-093).
+// When 2.7 lands, this test SHOULD fail — replace it with the enforcement
+// assertions; do not relax it.
+func TestSignedConditionIsPermissionNotRequirement_BoundaryPin(t *testing.T) {
+	cond := &escrowtypes.DeliveryCondition{Condition: &escrowtypes.DeliveryCondition_ZkDelivery{
+		ZkDelivery: &escrowtypes.ZkDeliveryCondition{SchemaCommitment: zktest.SchemaCommitment([]byte("p")), VkId: zkdelivery.VKIDDeliveryV1},
+	}}
+
+	// (1) A SOLVER may simply omit it. Both parties signed the exact ZK
+	// condition; the solver attaches none. The solution validates and CONCLUDE
+	// succeeds. Note what the buyer gets instead of the escrow it signed for:
+	// an unconditioned DataGrant still opens an x/escrow entry, but a RECORD-ONLY
+	// one (conclude.go applyLeg) — zero amount, NONE condition, no release gate —
+	// while the payment goes STRAIGHT to the seller through the ordinary coin
+	// leg. The buyer has paid in full, up front, for a delivery it can no longer
+	// withhold payment against. And the solver was not slashed, rejected, or
+	// scored lower for dropping it.
+	f := setupKeeper(t)
+	b := f.setupBilateralBoth(t, cond, cond)
+	solver := randAddr()
+	f.registerSolver(t, solver, minSolverBond())
+	sellerBefore := f.bank.balanceOf(b.seller.String()).AmountOf(usdcDenom)
+
+	require.NoError(t, f.propose(t, solver, b.sessionID, b.match(nil)),
+		"BOUNDARY: an unconditioned settlement of a pair who BOTH signed a condition is accepted")
+	require.NoError(t, f.k.Conclude(f.ctx, b.sessionID, b.match(nil)))
+
+	esc := mustEscrow(t, f)
+	require.Nil(t, esc.Condition.Condition,
+		"BOUNDARY: the escrow opened is the NONE record-only kind — no release gate at all")
+	require.True(t, esc.Amount.IsZero(),
+		"BOUNDARY: it holds no funds, so there is nothing to release or refund")
+	require.Equal(t, sellerBefore.Add(b.payment.Amount), f.bank.balanceOf(b.seller.String()).AmountOf(usdcDenom),
+		"BOUNDARY: the payment went straight to the seller instead of into the signed ZK escrow")
+
+	sv, err := f.k.GetSolver(f.ctx, 0, solver)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), sv.SlashedCount,
+		"BOUNDARY: dropping a signed condition is not a punishable offence, so a rational solver never attaches one")
+
+	// (2) The IN-CONSENSUS FALLBACK does the same, and cannot do otherwise:
+	// buildFallbackMatch emits SettleLegs with no Condition field set at all.
+	// The fallback is the DEFAULT clearing path for every session no solver
+	// wins, so this downgrade is performed by the state machine itself — not by
+	// an untrusted third party. That is why 2.13(a)'s verdict is GAP and not
+	// "solver-attached by design".
+	f2 := setupKeeper(t)
+	b2 := f2.setupBilateralBoth(t, cond, cond)
+	session, err := f2.k.GetSession(f2.ctx, 0, b2.sessionID)
+	require.NoError(t, err)
+	params, err := f2.k.GetParams(f2.ctx)
+	require.NoError(t, err)
+
+	matches, err := f2.k.buildFallbackMatches(f2.ctx, session, params)
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "the pair is mutually fillable, so the fallback clears it")
+	dataLegs := 0
+	for _, leg := range matches[0].Legs {
+		if leg.GetData() != nil {
+			dataLegs++
+			require.Nil(t, leg.Condition,
+				"BOUNDARY: the in-consensus fallback clears a both-parties-signed condition UNCONDITIONED")
+		}
+	}
+	require.Equal(t, 1, dataLegs, "the fixture's fallback match must carry the DataGrant leg")
+}
+
 // mustEscrow returns the single escrow in the store (test convenience).
 func mustEscrow(t testingT, f *fixture) escrowtypes.Escrow {
 	var out escrowtypes.Escrow

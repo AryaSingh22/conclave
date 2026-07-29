@@ -67,6 +67,21 @@ Every gateway-submitted transaction passes, in order:
    those bindings are enforced against each party's own signed payload at
    solution validation and at the settlement boundary.
 
+   ⚠️ **A signed condition is NOT a guarantee it will be ATTACHED** (D-093).
+   Those gates run in one direction only: they stop a condition being imposed
+   on you. Nothing requires a condition you signed to be honored — a solver
+   may settle your intent with no condition at all, and the in-consensus
+   fallback matcher (the default path whenever no solver wins the auction)
+   **always** does, because it never attaches conditions. Today nothing on a
+   live network attaches one: the only writer in the tree is the
+   `conclave-demo` exit-demo driver. For a gateway this means setting
+   `IntentPayload.condition` bounds what may be imposed on your principal but
+   **must not be treated as escrowed-delivery protection** — if the settlement
+   clears unconditioned, the payment leg settles straight to the seller and the
+   `x/escrow` record that opens is the record-only NONE kind (zero amount, no
+   release gate). Enforcement is task 2.7; a reference attachment path is task
+   2.14.
+
 **Binding stability (D-084).** A grantee key's sigil binding cannot be
 changed by any third party: re-issuing a mandate to an already-bound grantee
 is accepted only from the **same sigil** (`ErrGranteeConflict` otherwise),

@@ -4737,3 +4737,326 @@ neither IBC nor escrow conditions. The covering gates are
   remain open and are all off the exit path, so PHASE3_PLAN task **3.0** (the
   Phase-2 boundary re-validation) is now triggered — its trigger was the §6 exit
   demo.
+
+## D-093 — Task 2.13: the `ErrInvalidSolution` wire-code loss FIXED (D-091 F-1); and the condition-attachment verdict = **GAP** — a signed delivery condition is a PERMISSION CEILING, never a REQUIREMENT
+
+- **Date:** 2026-07-29 (task 2.13, both halves, after the approved plan-stop).
+- **SPEC:** §6.4 (solution validation), §6.5 (escrow classes), §13 (stable
+  per-module error codespaces), §11.6 (determinism); builds on **D-075/D-076**
+  (the consent gates), **D-085** (the path-enumeration lesson), **D-089** (the
+  coverage shadow), **D-090** (the findings-list discipline), **D-091**
+  (finding F-1 and the condition-writer finding), **D-092** (§6b);
+  METHODOLOGY Rules 1/2/3/4/6/7/8/9.
+- **Plan-stop decisions (approved, recorded before building):** S1 as the fix
+  shape (below); GAP as the (a) verdict; one session, strictly sequenced
+  (source + gate first, docs after, so vector attribution is clean by
+  construction); the closure split enforcement→2.7 / reference→**2.14**; a
+  single commit.
+
+### Three premise corrections made AT the plan-stop, before any code (Rule 1 step 3)
+
+The kickoff brief carried three claims that did not survive reading the tree.
+They are recorded because a fix justified by a claim that does not hold is
+unauditable later.
+
+1. **"The determinism vector is required because result codes enter
+   `LastResultsHash`."** True of a real network — CometBFT v0.38 hashes
+   `deterministicExecTxResult{Code, Data, GasWanted, GasUsed}`, so a tx result
+   code IS consensus data and this change IS state-machine-visible on chain.
+   But the project's vector cannot see it: `DETERMINISM-HASH` is `appHashes[i]`,
+   the SIM's store-commit hash (`app/sim_test.go:477`), and `SimDeliver` never
+   builds a CometBFT block. So a byte-identical vector here **licenses
+   nothing**. Run in isolation anyway (attributable absence-of-drift is worth
+   having); see the coverage-shadow entry under Gates.
+2. **"Both edge docs document the codespace 2.13(b) restores."** They do not.
+   Neither `X402_SURFACE.md` nor `7683_SURFACE.md` mentions `MsgProposeSolution`
+   at all — a gateway and a resolver submit INTENTS; only a solver proposes
+   solutions. Their `1416`/`1428` tables name error IDENTITIES for outcomes that
+   surface in EndBlock, not tx result codes. The contract 2.13(b) restores is
+   **SPEC §13 / CLAUDE.md** ("stable codespaces … `session`=14xx"); the only
+   document stating the BROKEN behaviour was `EXIT_DEMO.md`'s F-1 row plus the
+   stage-7 pin. So (b) is a SPEC-§13 conformance fix, not an edge-doc retrofit,
+   and no edge-doc change was needed for (b). (Both edge docs ARE changed by
+   (a) — for a different reason.)
+3. **`ErrInvalidSolution` is not the only registered code in play.** Every §6.4
+   rule error is registered too, and **18 in-tree assertions** depend on
+   `errors.Is` finding BOTH the sentinel and the rule error. That is why
+   `errors.Join` was chosen in the first place, and it is the constraint that
+   selected the fix shape.
+
+---
+
+## (b) The registered code now reaches the wire
+
+### Root cause, read from the pinned library
+
+`cosmossdk.io/errors@v1.0.1` `abci.go` extracts the ABCI code by walking exactly
+two interfaces — `coder{ABCICode() uint32}`, then `causer{Cause() error}` — and
+falls through to `internalABCICode = 1` / `UndefinedCodespace` otherwise.
+`errors.Join`'s value implements neither (it exposes `Unwrap() []error`), so
+`ProposeSolution`'s rejection arrived as **code 1, codespace `""`**: every
+invalid solution looked like an internal error, and no client could dispatch on
+the documented codespace.
+
+### The shape decision (S1), and the two alternatives REJECTED
+
+| | ABCI code | `Is(…, ErrInvalidSolution)` | `Is(…, ruleErr)` | cost |
+|---|---|---|---|---|
+| as built (`errors.Join`) | **1** / `""` | yes | yes | the defect |
+| **S1 — `types.InvalidSolution(rule)`** | **1412** / `session` | yes | yes | ~25 authored lines |
+| S2 — `errorsmod.Wrapf(ErrInvalidSolution, "%s", rule)` | 1412 / `session` | yes | **no** | 10 assertions degrade to string matching |
+| S3 — `errorsmod.Wrapf(rule, "%s", ErrInvalidSolution)` | rule code | **no** | yes | 8 assertions break; retires 1412 |
+
+**S2 rejected:** it buys the wire code by deleting ten
+`require.ErrorIs(t, err, tc.err)` assertions in favour of `ErrorContains` —
+trading one vacuity for ten, directly against the write-time rule that a
+negative must assert the SPECIFIC error.
+
+**S3 rejected on an ASYMMETRY, not on taste.** Surfacing the rule's own code
+(1416/1427/1428…) is genuinely richer for a solver and is what a future sub-code
+scheme should do. But per-rule sub-codes can be added later WITHOUT breaking a
+client that dispatches on 1412, and 1412 could not be restored later without
+breaking clients that had come to depend on the rule codes. S1 preserves the
+option S3 forecloses. The code deliberately stays the MESSAGE-level 1412; the
+rule identity remains in the log text and via `errors.Is`.
+
+**S1 as built:** `types.InvalidSolution(rule)` returns an `invalidSolutionError`
+implementing `ABCICode()` and `Codespace()` (the library's `coder`/`codespacer`,
+implemented explicitly rather than relying on `causer` traversal, so the ABCI
+mapping is legible at the point of definition) plus stdlib `Unwrap() []error`.
+One call site — `solution.go:117` was the ONLY `errors.Join` in non-test code,
+tree-wide. Determinism: a pure function of the rule error; no map iteration, no
+clock, no float (§11.6).
+
+### Load-bearing tests (Rule 3) — PREDICTED, then watched
+
+Two sabotages, each predicted in writing before running:
+
+- **Revert the CALL SITE to `errors.Join`.** Predicted: only
+  `TestProposeSolution_RejectionCarriesRegisteredABCICode` reds, with
+  "expected 1412, got 1"; `x/session/types` stays green. **Observed exactly
+  that** — `expected: 0x584, actual: 0x1`, one test.
+- **Make `types.InvalidSolution` itself return `errors.Join`.** Predicted: BOTH
+  new gates red (all five subcases of the types table plus the keeper site),
+  while `TestErrorsJoinLosesTheRegisteredCode` and
+  `TestInvalidSolutionDoesNotMatchUnrelatedErrors` stay green. **Observed
+  exactly that.**
+
+New tests: `x/session/types/errors_test.go` —
+`TestInvalidSolutionSurfacesRegisteredCode` over five rule-error shapes;
+`TestInvalidSolutionDoesNotMatchUnrelatedErrors`, guarding the other direction
+(without it, a value that matched everything would pass); and
+`TestErrorsJoinLosesTheRegisteredCode`, which pins the LIBRARY behaviour in
+executable form so a future edit reaching for `errors.Join` — it reads like the
+natural composition — learns what it costs. In `x/session/keeper`,
+`TestProposeSolution_RejectionCarriesRegisteredABCICode` asserts the wire code
+on the value the msg server actually propagates, and also that the fix does NOT
+blanket-stamp 1412 over `ProposeSolution`'s other rejections (equivocation stays
+1410).
+
+`errorsmod.ABCIInfo` is not a proxy for the wire path — it IS the wire path:
+`sdkerrors.ResponseExecTxResultWithEvents`, which baseapp calls to build a
+failed tx result, is exactly `space, code, log := errorsmod.ABCIInfo(err, debug)`
+(cosmos-sdk v0.50.15 `types/errors/abci.go`).
+
+**The finding inside the finding:** all 18 pre-existing `ErrorIs` assertions
+pass under BOTH the broken and the fixed shape. That is precisely why a suite
+full of green assertions never caught this, and it is Rule 4 in miniature — the
+sentinel was PRESENT in the error chain and simply never READ by the layer that
+mattered.
+
+### The §6a stage-7 pin: watched RED on a live node, then replaced
+
+D-091 built the pin to self-announce, and it did. With the fix applied and the
+OLD pin still in place, `scripts/exit_demo.sh` failed at stage 7 with D-091's
+own words — *"wire code is now 1412 — D-091's F-1 appears FIXED; retire this pin
+and close task 2.13"* — exit code **1**. The pin was then replaced by assertions
+on the (codespace, code) PAIR, and the demo re-run **green**:
+
+```
+wire identity: codespace "session" code 1412 (ErrInvalidSolution) — an off-chain solver
+can dispatch on the documented SPEC §13 codespace, and the rule text survives ✓
+```
+
+The pair matters: a bare code is ambiguous across modules, and a bare codespace
+does not distinguish this rejection from any other session error. Carrying the
+codespace needed `broadcastAndWaitFull` in the demo driver (the existing helper
+dropped it); `broadcastAndWait` is now a thin wrapper over it, so no other call
+site changed.
+
+**A measurement self-correction (Rule 8).** The first red run was reported by my
+own tooling as `RC=0`, which would have meant `scripts/exit_demo.sh` exits 0 on
+failure — a gate that cannot fail, which would have been a finding in its own
+right. Before recording that, I built a minimal repro of the script's `set -e` +
+EXIT-trap structure: it exited **1**, as did four narrowed variants. The `RC=0`
+was an artefact of nested `$?` expansion through PowerShell → `wsl` →
+`bash -lc` (the same quoting pitfall left a loop variable unexpanded in the same
+output). Re-measured from a file-based runner: **`EXIT_RC=1` on the red run,
+`EXIT_RC=0` on the green run.** The gate is sound; there was no defect. Recorded
+because a phantom defect reported as real costs a later session a day, and
+because the faulty measurement was mine.
+
+---
+
+## (a) VERDICT: **GAP** — and structurally worse than "no reference implementation"
+
+D-091 left the question open: is the absence of a production writer for
+`SettleLeg.Condition` INTENDED (solver-attached by design, chain verifies
+consent) or a GAP? Read from the code, three findings:
+
+1. **Consent is enforced in ONE direction only.** Every guard in the tree proves
+   `attached ⇒ signed` — a solver cannot IMPOSE a condition (D-075 seller,
+   D-076 buyer, at validation AND at settlement). **Nothing anywhere enforces
+   `signed ⇒ attached`:** both chokepoints skip a NONE leg
+   (`validateConditionConsent` and `openConditionedEscrows` each `continue`
+   before ever reaching the comparison). The party bearing none of the delivery
+   risk — the solver — is the only party who can opt the system in, and it is
+   neither obliged nor rewarded for doing so.
+2. **The IN-CONSENSUS FALLBACK performs the downgrade, so this is a protocol
+   property, not a solver-behaviour question.** `buildFallbackMatch` emits
+   `SettleLeg`s with no `Condition` set at all, and `validateSolution` accepts
+   them. The fallback is the DEFAULT clearing path for every session no solver
+   wins. Two parties who BOTH signed the same ZK condition are therefore cleared
+   UNCONDITIONED **by the state machine itself** — proven, not argued, by part
+   (2) of the boundary pin below, which drives the real `buildFallbackMatches`
+   and gets back a match whose DataGrant leg has a nil condition.
+3. **No reference implementation, and no incentive to write one.** Non-test
+   `solver/` never reads `IntentPayload.Condition` (zero hits). Nothing shows a
+   third-party solver the required shape — exact-param equality, the D-074
+   bilateral constraint, the buyer signature for ZK — and attaching a condition
+   costs a solver shape constraints and rejection risk for no score benefit.
+
+**The honest statement: a signed condition is a permission ceiling, never a
+requirement, and no document says so.** A party can bound what may be imposed on
+it; it cannot obtain what it asked for. The only live-network writer of
+`SettleLeg.Condition` remains `cmd/conclave-demo`.
+
+### What the downgrade actually costs — THE HEADLINE, and worse than "the condition is dropped"
+
+Writing the boundary pin corrected my own model, and the correction is kept
+visible (Rule 8) because it changes the SEVERITY, not just the wording. I
+predicted "no escrow is opened". The truth:
+
+**Every** DataGrant leg opens an `x/escrow` entry (`conclude.go` `applyLeg`).
+For a NONE condition that entry is a **record-only, zero-amount shell** with no
+release gate — **while the buyer's payment goes STRAIGHT to the seller** through
+the ordinary coin leg. So the downgrade does not merely remove a protection: it
+converts a signed escrowed-delivery trade into **buyer-pays-first with no
+recourse**, and leaves behind an empty escrow record that exists to be mistaken
+for the protection that was removed. The buyer has paid in full, up front, for a
+delivery it can no longer withhold payment against — nothing to release, nothing
+to refund, nothing to dispute.
+
+Combine that with finding 2 — the fallback is the DEFAULT clearing path — and
+the statement is: **two parties who both signed a ZK delivery condition are
+cleared into buyer-pays-first-with-no-recourse BY CONSENSUS.** Not by an
+untrusted solver; by the state machine, on the path taken whenever no solver
+wins the auction. That is not a nicety for 2.7 to weigh among its other seams —
+it is why 2.7 has a DOWNGRADE row and why the verdict is GAP.
+
+The boundary pin asserts that exact shape — nil condition, **zero amount**, and
+the seller's balance up by the **full payment** — rather than the weaker thing I
+first wrote.
+
+### The verdict recorded in EXECUTABLE form
+
+`TestSignedConditionIsPermissionNotRequirement_BoundaryPin` (x/session/keeper)
+pins what is TRUE TODAY, by name, in the F-2 / D-091-F-1 idiom, so the fix turns
+it red DELIBERATELY instead of the verdict quietly decaying in a document. It
+asserts both paths: (1) a solver omitting the condition is accepted, concludes,
+and is not slashed; (2) the in-consensus fallback produces the nil-condition
+match. Its doc comment names task 2.7 as the owner and says: when 2.7 lands this
+test SHOULD fail — replace it with the enforcement assertions, do not relax it.
+
+### TWO RECORD CORRECTIONS (Rule 6 / Rule 8) — both loud
+
+- **D-075-FW-3's disposition is wrong for the case that matters.** It reads
+  *"the seller binding already rejects a seller-signed condition settled as a
+  different one"* and dispositions FW-3 as subsumed. That is **true for a
+  DIFFERENT condition and false for a DROPPED one** — the loop `continue`s
+  before ever reaching `conditionEqual`. FW-3 has therefore been reading CLOSED
+  while its principal case is OPEN. Corrected here; the drop-to-NONE case is
+  written into 2.7 below.
+- **2.7's narrowed FW-1 leaves the ZK downgrade owned by NOBODY.** 2.7's row
+  scopes FW-1 to "HASHLOCK/OPTIMISTIC class/window-level buyer-side consent;
+  ZK's exact-param gate shipped in 2.1b" — accurate about the ATTACH direction,
+  but it means no task owns the ZK DOWNGRADE. A buyer who signed a ZK condition
+  can still be settled unconditioned, and no row anywhere said who fixes that.
+
+**The recurrence is the observation worth naming.** This is exactly the Rule-6
+one-way-pointer failure that D-090's reconciliation audit found, wrote into
+METHODOLOGY as sub-rules 5 and 6, and closed — reproduced in the SAME ledger
+weeks later, in rows written after the lesson. Twice was a pattern; three times
+says the discipline does not survive contact with a narrowing edit: **when a
+receiving task narrows its own scope, the item that was pointed at it is
+silently orphaned, and nothing in the process re-checks the pointer.** The
+sub-rules say to write the item INTO the receiving task; they do not say to
+re-verify it when that task's wording later changes. Recorded here as a
+candidate METHODOLOGY amendment rather than applied unilaterally.
+
+### Closure, scoped and OWNED (not built here)
+
+- **Enforcement half → written INTO task 2.7's acceptance criteria** as its own
+  row (D-075-FW-1(b) + FW-3, including the ZK case and what the FALLBACK must do
+  with a condition-signing intent — reject the pair, attach, or an explicit
+  documented "permission not requirement" posture). Written into the receiving
+  task, not pointed at it: that IS the fix for the failure found above.
+- **Reference half → NEW task 2.14** (a solver-side attachment path plus the
+  solver-facing contract doc). Separate because `solver/` is imported by
+  `x/session/simulation`, so any change there runs the determinism vector in
+  isolation, and because it is reference/tooling work rather than consensus work.
+
+### Consumer-visible disclosure
+
+Both edge docs stated only the imposition direction, which is half the story.
+`X402_SURFACE.md` §1.4 and `7683_SURFACE.md` §3.1 now also state that a signed
+condition is not a guarantee it will be attached, and that nothing on a live
+network attaches one today.
+
+---
+
+### Gates
+
+`make lint` + `make test` green. Determinism vector run **in ISOLATION on the
+(b) source change, before any doc edit** — two independent processes, five
+committed seeds, **byte-identical to the D-082 baseline**, no re-baseline; tree
+fingerprinted before and after the run and **identical** (Rule 9). A final
+confirming run was made on the shipping tree.
+
+**Named covering gate (Rule 7) — the vector covers NOTHING here, and this is a
+coverage shadow of a SECOND, DISTINCT CATEGORY.** The distinction is not
+pedantry: the two categories have different remediations, and conflating them
+would send a future session to fix this one with a tool that cannot reach it.
+
+- **Category 1 — GENERATOR gaps (D-069, D-086, D-088, D-089).** The gate could
+  observe the behaviour; the sim's intent generator never produces the input
+  that reaches it. Remediation: **a wider generator**, which is real work and is
+  already scoped (PHASE3_PLAN 3.5).
+- **Category 2 — OBSERVABLE-SURFACE gaps (this task, first instance).** The
+  quantity the gate hashes is the sim's store-commit app hash, and `SimDeliver`
+  never builds a CometBFT block, so **tx result codes are outside what the gate
+  can observe at all** — for any input, under any generator. A wider generator
+  buys exactly nothing here. Remediation: **a DIFFERENT GATE.**
+
+For this change that different gate is `scripts/exit_demo.sh` **stage 7 on a
+live node** — the only gate in the project that exercises the real CometBFT
+result path end to end — backed in `make test` by the two `ABCIInfo` tests (the
+literal wire extractor) and the boundary pin. Naming which gate actually covers
+a change, every time, is precisely what Rule 7's covering-gate step is for; this
+instance shows the step has to name the gate's *observable surface*, not just
+its inputs.
+
+**Deviation surfaced (Rule 8), stated so the fingerprint claim is not quietly
+broken.** `cmd/conclave-demo` and `docs/` were edited AFTER the ISOLATED vector
+run, by the approved sequencing; neither can affect it (`go list -deps ./app`
+and `go list -deps ./x/session/...` each contain zero `conclave-demo` packages),
+and the final confirming run covers that tree. After the FINAL run, one further
+round of edits landed at the review stop — **`docs/DECISIONS.md` and `CLAUDE.md`
+only, prose, no source and no test** (this severity framing, the two-category
+coverage-shadow split, and this paragraph). The shipping fingerprint therefore
+differs from the one recorded at the final gate by exactly those two documents.
+Re-running a 292-second consensus gate to bless a prose edit would be theatre;
+saying nothing would be worse, because "the gate ran on the shipping tree" is
+the single most load-bearing claim in the checklist (Rule 9 step 4) and it is
+now true modulo two Markdown files, which is what this sentence exists to make
+checkable.

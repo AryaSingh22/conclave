@@ -452,9 +452,11 @@ the time (D-088).
       The Rev-2 "flake-hardening" item shipped separately as **2.11/D-088** — it was a real
       1-in-256 iterator bug, not a flaky fixture.
 - [ ] 2.7 Escrow consent completeness (NEW in Rev 2, D-078; scope corrected at Rev 3,
-      D-090) — owns the D-075/D-076 FW seams **plus the two items D-089 re-pointed
+      D-090; **scope corrected AGAIN at 2.13, D-093 — see the DOWNGRADE row**) —
+      owns the D-075/D-076 FW seams **plus the two items D-089 re-pointed
       here**: FW-1 (HASHLOCK/OPTIMISTIC class/window-level buyer-side consent; ZK's
-      exact-param gate shipped in 2.1b), FW-2 (per-leg `IntentLeg.condition` proto
+      exact-param ATTACH gate shipped in 2.1b — but see below, the ZK DOWNGRADE was
+      left unowned by that narrowing), FW-2 (per-leg `IntentLeg.condition` proto
       refinement, incl. the does-it-relax-D-074 plan-stop question), **TODO 9
       multi-intent-per-sigil** (`solution.go:143` — needs a `SettleLeg` intent-tag
       proto field so §6.4 rule 3 can attribute a leg to one of a sigil's several
@@ -467,6 +469,31 @@ the time (D-088).
       verdict on both re-points — implemented, or re-deferred to a named task with
       reasoning; neither may be left silently open. Off the exit path; sequenced after
       2.6; proto change ⇒ determinism vector re-baseline.
+      **THE DOWNGRADE ROW — written INTO 2.7 by task 2.13 (D-093), not pointed at
+      it.** Consent is enforced in ONE direction: `attached ⇒ signed` is guarded at
+      both chokepoints, `signed ⇒ attached` is guarded NOWHERE (both loops `continue`
+      on a NONE leg, before `conditionEqual`). So **a signed condition is a permission
+      ceiling, never a requirement** — a solver may silently drop it, and the
+      IN-CONSENSUS FALLBACK always does, since `buildFallbackMatch` emits no
+      `Condition` at all and is the default path for every session no solver wins.
+      **SEVERITY — read this before treating it as one seam among several.** The
+      downgrade does not merely remove a protection. Every DataGrant leg opens an
+      escrow, so for NONE it is a record-only ZERO-AMOUNT shell **while the payment
+      goes straight to the seller**: a signed escrowed-delivery trade becomes
+      **buyer-pays-first with no recourse**, leaving an empty escrow record that can
+      be mistaken for the protection that was removed — nothing to release, refund,
+      or dispute. With the fallback as the default path, **two parties who BOTH
+      signed a ZK condition are cleared into buyer-pays-first-with-no-recourse BY
+      CONSENSUS.** 2.7 owns
+      **D-075-FW-1(b) + FW-3 including the ZK case** — D-075-FW-3's "already rejects
+      … a different one" disposition is TRUE for a different condition and FALSE for a
+      dropped one, so it has been reading closed while its principal case is open
+      (D-093) — and must return an explicit verdict on **what the FALLBACK does with a
+      condition-signing intent**: reject the pair, attach the signed condition, or an
+      explicitly documented permission-not-requirement posture. Pinned in executable
+      form by `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`; **when 2.7
+      lands, that test SHOULD go red — replace it with the enforcement assertions, do
+      not relax it.**
 - [ ] 2.8 Submit-charge STRUCTURAL fork (NEW in 2.3, G2/D-085) — the G2 SECURITY
       hole (a msg-server-failing submit stranding its ante charge → conservation
       break) is already CLOSED in 2.3 by ante pre-validation
@@ -555,26 +582,78 @@ the time (D-088).
       per class; the solver payout stays solvent-by-construction; vector in isolation.
       Off the exit path.
 
-- [ ] 2.13 Solver-side condition attachment + the F-1 error-code loss (NEW in §6a,
-      D-091) — two items, one owner, both surfaced by the exit demo. **(a) The
-      escrow condition system has no PRODUCTION writer.** `SettleLeg.Condition` is
-      set by nothing in the tree except `cmd/conclave-demo` (added by §6a): the
-      in-consensus fallback never attaches a condition, non-test `solver/` never
-      does, and escrows are created only by CONCLUDE. Decide and RECORD whether that
-      is intended (solver-attached by design — third-party solvers attach, and the
-      chain verifies consent, which §6a proved live) or a gap (no reference
-      implementation shows a solver how); if the latter, ship it — the reference
-      solver is the natural home, but it is imported by `x/session/simulation`, so
-      any change there runs the determinism vector in ISOLATION. **(b) F-1:**
-      `ProposeSolution` returns `errors.Join(ErrInvalidSolution, ruleErr)` and
-      `cosmossdk.io/errors` cannot walk a multi-error `Unwrap() []error`, so the tx
-      surfaces internal code **1** instead of session **1412** — every invalid
-      solution looks like an internal error to an off-chain solver (the reason text
-      does survive). Tx result codes are consensus data (`LastResultsHash`), so the
-      fix is state-machine-visible: plan-stop first, determinism vector in
-      isolation. Acceptance: an unsigned-condition solution returns `1412` with the
-      rule error still readable, and §6a's stage-7 boundary pin is retired in the
-      same task. Off the exit path.
+- [x] 2.13 Solver-side condition attachment + the F-1 error-code loss (NEW in §6a,
+      D-091) — **DONE, D-093.** Both halves, one commit, strictly sequenced.
+      **(b) FIXED — the registered code reaches the wire.** `ProposeSolution`
+      returned `errors.Join(ErrInvalidSolution, ruleErr)`; `cosmossdk.io/errors`
+      extracts the ABCI code by walking `coder`→`causer` ONLY, and a multi-error
+      satisfies neither, so every invalid solution arrived as internal code **1** /
+      codespace `""`. Now `types.InvalidSolution(rule)` (shape **S1**), a typed
+      composite carrying `ABCICode()`/`Codespace()` explicitly plus stdlib
+      `Unwrap() []error`, so **1412 + `session` reach the wire AND `errors.Is` still
+      finds both the sentinel and the specific §6.4 rule** — the property the join
+      existed for and that 18 in-tree assertions depend on. S2 (flatten) rejected
+      for degrading those ten assertions to string matching; **S3 (surface the rule's
+      own code) rejected on an asymmetry**: sub-codes can be added later without
+      breaking a 1412 client, not vice versa. Gates: `errorsmod.ABCIInfo` is the
+      literal wire extractor (`ResponseExecTxResultWithEvents`), asserted at BOTH the
+      types level (5 rule shapes) and the keeper call site (+ equivocation still
+      1410, so the fix isn't blanket-stamping). Two sabotages, each PREDICTED then
+      watched: call-site revert → exactly one test red (`0x584` vs `0x1`); constructor
+      revert → both gates red, all else green. **§6a's stage-7 pin watched RED on a
+      live node** (its own self-announcing message, `EXIT_RC=1`), then replaced by
+      (codespace, code) PAIR assertions and re-run green:
+      `codespace "session" code 1412`. **The finding inside the finding:** all 18
+      pre-existing `ErrorIs` assertions pass under BOTH shapes — which is why a green
+      suite never caught it (Rule 4 in miniature).
+      **(a) VERDICT = GAP** (recorded in D-093 with reasoning, and in both edge docs).
+      Not merely "no reference implementation": (1) consent is enforced in ONE
+      direction — `attached ⇒ signed` guarded everywhere, `signed ⇒ attached` guarded
+      NOWHERE; (2) the **in-consensus fallback** emits no `Condition` at all and is
+      the default clearing path, so the downgrade is performed **by the state machine
+      itself**, not by an untrusted solver; (3) non-test `solver/` never reads
+      `IntentPayload.Condition`, and a solver has no incentive to attach one.
+      **A signed condition is a permission ceiling, never a requirement, and no
+      document said so.** Pinned by
+      `TestSignedConditionIsPermissionNotRequirement_BoundaryPin` (both paths).
+      Closure split, both owners written into the RECEIVING task: enforcement → the
+      new DOWNGRADE row in **2.7**; reference implementation → new task **2.14**.
+      Two record corrections recorded loudly: D-075-FW-3's "subsumed" disposition is
+      false for the dropped-condition case, and 2.7's narrowed FW-1 had left the ZK
+      downgrade owned by nobody — the Rule-6 one-way-pointer failure **recurring** in
+      the same ledger weeks after D-090 wrote it into METHODOLOGY, which is itself
+      recorded as a candidate methodology amendment (a narrowing edit to a receiving
+      task silently orphans what was pointed at it). `make lint test` green;
+      determinism vector run in ISOLATION on the source change — **byte-identical to
+      the D-082 baseline**, fingerprints identical before/after — with the honest
+      caveat that **the vector is structurally blind to result-code changes** (it
+      hashes the sim's store-commit app hash; `SimDeliver` builds no CometBFT block),
+      a FIFTH coverage-shadow instance differing in kind from D-069/086/088/089.
+      Covering gates named separately: the two ABCIInfo tests, the boundary pin, and
+      `scripts/exit_demo.sh` stage 7 on a live node.
+
+- [ ] 2.14 Reference solver-side condition attachment (NEW in 2.13, D-093) — the
+      REFERENCE half of 2.13(a)'s GAP verdict. Nothing in the tree shows a
+      third-party solver how to attach a delivery condition correctly: non-test
+      `solver/` never reads `IntentPayload.Condition`, and the only live-network
+      writer of `SettleLeg.Condition` is `cmd/conclave-demo` (dev tooling). Ship a
+      reference attachment path plus the solver-facing contract: read the seller's
+      (and, for ZK, the buyer's) signed `IntentPayload.condition`, attach the EXACT
+      condition to the DataGrant leg, and respect the D-074 bilateral shape —
+      together with the documented consequences of getting it wrong
+      (`ErrConditionNotConsented` 1427, `ErrConditionUnsupportedMatch` 1426, both now
+      dispatchable by codespace thanks to 2.13(b)). **Separate from 2.7 because the
+      blast radius differs:** `solver/` is imported by `x/session/simulation`, so any
+      change there is a determinism-vector-in-isolation task, and this is
+      reference/tooling work rather than consensus work. Opens with a plan-stop on
+      whether the reference lives in `solver/` at all given that import (the D-091
+      D4 decision put the §6a writer in `cmd/` precisely to avoid it). Acceptance: a
+      solver that attaches a signed condition clears a conditioned settlement without
+      hand-built keeper Matches; the solver-facing contract documented; vector run in
+      isolation if `solver/` changes. **Sequencing note: 2.14 is the reference half
+      only — whether a signed condition MUST be attached is 2.7's DOWNGRADE row, and
+      2.7 should be answered first, since its verdict determines what 2.14's
+      reference is demonstrating.** Off the exit path.
 
 - [x] **§6a EXIT DEMO part A — x402 ingress + ZK escrow + CVM release, LIVE** —
       D-091. Split from the exit demo at the approved plan-stop (D1); the exit
@@ -635,10 +714,13 @@ the time (D-088).
       `scripts/exit_demo.sh` — the vector covers nothing here).
 
 **Phase-2 EXIT CRITERION MET (§6b, D-092).** Every remaining Phase-2 task
-(2.7–2.10, 2.12, 2.13) is off the exit path, so **PHASE3_PLAN task 3.0 — the
+(2.7–2.10, 2.12, 2.14) is off the exit path, so **PHASE3_PLAN task 3.0 — the
 Phase-2 boundary re-validation — is now TRIGGERED**; its trigger was this demo.
 3.0 owns the Rule-9 authored-surface re-derivation and the §5.1 disposition
-re-verification before Phase 3 opens.
+re-verification before Phase 3 opens. **3.0 input from D-093:** the Rule-6
+one-way-pointer failure has now recurred a third time, in rows written AFTER
+D-090 closed it — 3.0's row-by-row re-verification should treat a task's
+NARROWING edits as the specific trigger to re-check every item pointed at it.
 
 ## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
 

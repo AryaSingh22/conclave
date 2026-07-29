@@ -3,7 +3,6 @@ package keeper
 import (
 	"bytes"
 	"encoding/hex"
-	"errors"
 	"sort"
 	"strconv"
 
@@ -108,13 +107,16 @@ func (k Keeper) ProposeSolution(ctx sdk.Context, solver sdk.AccAddress, sessionI
 	}
 
 	if err := k.validateSolution(ctx, session, matches, params); err != nil {
-		// invalid solution: 5% slash, reject (SPEC §6.4). Join so both the
-		// ErrInvalidSolution sentinel and the specific rule error stay in the
-		// chain (errorsmod.Wrap with %s would flatten the inner sentinel).
+		// invalid solution: 5% slash, reject (SPEC §6.4). types.InvalidSolution
+		// keeps BOTH the registered ErrInvalidSolution code on the wire (session
+		// 1412 — SPEC §13) and the specific rule error reachable by errors.Is.
+		// This was errors.Join, which loses the registered code: cosmossdk.io/
+		// errors cannot walk a multi-error, so every invalid solution surfaced
+		// the internal code 1 (D-091 finding F-1, fixed in task 2.13/D-093).
 		if slashErr := k.slashSolver(ctx, &s, params.InvalidSolutionSlashBps, "invalid_solution"); slashErr != nil {
 			return slashErr
 		}
-		return errors.Join(types.ErrInvalidSolution, err)
+		return types.InvalidSolution(err)
 	}
 
 	sol := types.Solution{

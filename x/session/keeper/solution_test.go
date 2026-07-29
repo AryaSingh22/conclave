@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -203,6 +204,55 @@ func TestProposeSolution_InvalidSlashes(t *testing.T) {
 			require.Empty(t, sols)
 		})
 	}
+}
+
+// TestProposeSolution_RejectionCarriesRegisteredABCICode closes D-091's finding
+// F-1 at the CALL SITE (task 2.13): the composition can be right in
+// x/session/types and wrong where ProposeSolution builds its return, so this
+// asserts the wire code on the value the msg server actually propagates.
+//
+// errorsmod.ABCIInfo is the extractor baseapp itself runs
+// (sdkerrors.ResponseExecTxResultWithEvents), so this is the code a solver sees.
+// Before 2.13 this test fails with code 1 / codespace "undefined": the return
+// was errors.Join(ErrInvalidSolution, rule), which cosmossdk.io/errors cannot
+// walk. Note that every OTHER assertion in this file passes under both shapes —
+// that is precisely why a suite full of green ErrorIs checks never caught it.
+func TestProposeSolution_RejectionCarriesRegisteredABCICode(t *testing.T) {
+	// (a) a solution rejected by a §6.4 rule → the message-level 1412, with the
+	// rule error still readable and still matchable.
+	f := setupKeeper(t)
+	s := f.setupSwap(t, "", "")
+	solver := randAddr()
+	f.registerSolver(t, solver, minSolverBond())
+
+	m := s.match()
+	m.IntentIds = []string{s.aliceID, "00ff"} // rule 1: intent not open
+
+	err := f.propose(t, solver, s.sessionID, []types.Match{m})
+	require.Error(t, err)
+
+	space, code, log := errorsmod.ABCIInfo(err, false)
+	require.Equal(t, types.ErrInvalidSolution.ABCICode(), code,
+		"an invalid solution must surface session 1412, not the internal code 1 (D-091 F-1)")
+	require.Equal(t, types.ModuleName, space)
+	require.Contains(t, log, types.ErrIntentNotOpen.Error(),
+		"the rejecting §6.4 rule must stay readable in the reason text")
+	require.ErrorIs(t, err, types.ErrInvalidSolution)
+	require.ErrorIs(t, err, types.ErrIntentNotOpen)
+
+	// (b) the fix must not blanket-stamp 1412 over ProposeSolution's OTHER
+	// rejections: equivocation is its own registered code and stays 1410.
+	f2 := setupKeeper(t)
+	s2 := f2.setupSwap(t, "", "")
+	solver2 := randAddr()
+	f2.registerSolver(t, solver2, minSolverBond())
+	require.NoError(t, f2.propose(t, solver2, s2.sessionID, []types.Match{s2.match()}))
+
+	err2 := f2.propose(t, solver2, s2.sessionID, []types.Match{s2.match()})
+	space2, code2, _ := errorsmod.ABCIInfo(err2, false)
+	require.Equal(t, types.ErrEquivocation.ABCICode(), code2,
+		"a second solution from one solver is equivocation (1410), not an invalid solution")
+	require.Equal(t, types.ModuleName, space2)
 }
 
 // TestProposeSolution_DuplicateSigil pins Decision D: two intents from one
