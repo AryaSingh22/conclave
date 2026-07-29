@@ -16,8 +16,10 @@
 //	                     that contract existed
 //
 // The fourth leg (IBC USDC + receipt verification against a second chain's
-// light client) is §6b's; §6a settles in literal uusdc and §6b re-runs this
-// same flow on the ibc/<hash> voucher.
+// light client) is §6b's — see exit_demo_ibc.go. §6a settles in literal uusdc;
+// §6b re-runs THIS SAME FLOW on the ibc/<hash> voucher by setting
+// exitState.settleDenom, so the stages below are denom-agnostic and
+// scripts/exit_demo.sh doubles as the regression test for that parametrization.
 //
 // THE CONDITION-ATTACHING PROPOSER — READ THIS BEFORE REUSING IT. A delivery
 // condition is SOLVER-ATTACHED by design (D-075: IntentLeg has no condition
@@ -48,6 +50,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,6 +102,18 @@ type exitState struct {
 	escrowID                   string
 	codeID                     uint64
 	contract                   string
+
+	// settleDenom is the asset the purchase settles in — the mandate's
+	// fee_denoms and ceilings, the buy's give leg, the escrow's held amount,
+	// and the clearing-price numeraire all read it. §6a settles in the chain's
+	// native "uusdc"; §6b sets it to the ibc/<hash> VOUCHER received over a
+	// live relayer, which is the whole point of that half (D-082). Every stage
+	// below is denom-agnostic so the two runs share ONE code path: §6a's
+	// scripts/exit_demo.sh is therefore also the regression test that §6b's
+	// parametrization did not change §6a's behavior.
+	settleDenom string
+	// ibc carries §6b's cross-chain artifacts; nil for a §6a (native) run.
+	ibc *ibcLeg
 }
 
 func (c *cli) exitDemo() error {
@@ -108,12 +123,13 @@ func (c *cli) exitDemo() error {
 	fmt.Println("=== if this output is ever repurposed as external-facing evidence.")
 	fmt.Println()
 
-	s := &exitState{}
+	s := &exitState{settleDenom: uusdc}
 	for _, step := range []struct {
 		name string
 		run  func(*exitState) error
 	}{
 		{"stage 1 — actors, sigils, gateway mandate", c.exitStageActors},
+		{"stage 1b — the gateway mandate", c.exitStageMandate},
 		{"stage 2 — x402 ingress: the conditioned ZK buy", c.exitStageBuy},
 		{"stage 3 — conditioned settlement: the ZK escrow opens", c.exitStageSettle},
 		{"stage 4 — the CVM contract, uploaded through governance", c.exitStageUpload},
@@ -171,12 +187,21 @@ func (c *cli) exitStageActors(s *exitState) error {
 	// The PRINCIPAL holds the settlement funds: a coin give leg settles from
 	// the sigil's CONTROLLER address, not from the submitting gateway key
 	// (X402_SURFACE §1.2 custody split). The gateway key fronts only gas+bond.
-	if err := fund(addrOf(s.principal), sdk.NewCoins(
-		sdk.NewInt64Coin(uclv, 100*oneCLV), sdk.NewInt64Coin(uusdc, 2_000*usdc))); err != nil {
+	//
+	// Native (§6a) runs take the settlement asset from the faucet. In the §6b
+	// IBC run the settlement asset does not EXIST on this chain yet — it
+	// arrives as an ibc/<hash> voucher over the live relayer in stage 1a — so
+	// only the CLV gas float is funded here.
+	principalFunds := sdk.NewCoins(sdk.NewInt64Coin(uclv, 100*oneCLV))
+	gatewayFunds := sdk.NewCoins(sdk.NewInt64Coin(uclv, 50*oneCLV))
+	if s.ibc == nil {
+		principalFunds = principalFunds.Add(sdk.NewInt64Coin(uusdc, 2_000*usdc))
+		gatewayFunds = gatewayFunds.Add(sdk.NewInt64Coin(uusdc, 500*usdc))
+	}
+	if err := fund(addrOf(s.principal), principalFunds); err != nil {
 		return err
 	}
-	if err := fund(addrOf(s.gateway), sdk.NewCoins(
-		sdk.NewInt64Coin(uclv, 50*oneCLV), sdk.NewInt64Coin(uusdc, 500*usdc))); err != nil {
+	if err := fund(addrOf(s.gateway), gatewayFunds); err != nil {
 		return err
 	}
 	if err := fund(addrOf(s.seller), sdk.NewCoins(sdk.NewInt64Coin(uclv, 50*oneCLV))); err != nil {
@@ -193,14 +218,28 @@ func (c *cli) exitStageActors(s *exitState) error {
 		return err
 	}
 
+	fmt.Printf("actors: principal=%s gateway(hot)=%s seller=%s\n",
+		short1(s.sigilP), addrOf(s.gateway), short1(s.sigilS))
+	return nil
+}
+
+// exitStageMandate issues the gateway's mandate. SPLIT OUT of exitStageActors
+// for §6b: the mandate's ceilings and fee_denoms are denominated in the
+// SETTLEMENT asset, and in the IBC run that asset's denom is not known until
+// the voucher has actually landed (stage 1a resolves it). Same code, both runs.
+func (c *cli) exitStageMandate(s *exitState) error {
+	if s.settleDenom == "" {
+		return fmt.Errorf("settlement denom unresolved before the mandate is issued")
+	}
 	height, err := c.height()
 	if err != nil {
 		return err
 	}
 	// Model A (X402_SURFACE §1.2): the gateway operator's own sigil, its hot key
 	// mandate-bound. fee_denoms carries the settlement denom so gas is fronted
-	// in it through §6.2 abstraction — §6b swaps this for the ibc/<hash> voucher.
-	ceiling := sdk.NewCoins(sdk.NewInt64Coin(uusdc, 1_000*usdc), sdk.NewInt64Coin(uclv, 10*oneCLV))
+	// in it through §6.2 abstraction — in §6b that is the ibc/<hash> voucher,
+	// i.e. the ceilings BIND in an IBC asset (the 2.5/D-082 property, live).
+	ceiling := sdk.NewCoins(sdk.NewInt64Coin(s.settleDenom, 1_000*usdc), sdk.NewInt64Coin(uclv, 10*oneCLV))
 	if err := c.deliver(s.principal, &mandatetypes.MsgIssueMandate{
 		Controller: addrOf(s.principal).String(),
 		Terms: mandatetypes.MandateTerms{
@@ -213,15 +252,13 @@ func (c *cli) exitStageActors(s *exitState) error {
 			SpendCeilingPerTx:  ceiling,
 			SpendCeilingWindow: ceiling,
 			WindowBlocks:       86_400,
-			FeeDenoms:          []string{uusdc},
+			FeeDenoms:          []string{s.settleDenom},
 			ExpiryHeight:       height + 7*86_400,
 		},
 	}); err != nil {
 		return fmt.Errorf("issue gateway mandate: %w", err)
 	}
-	fmt.Printf("actors: principal=%s gateway(hot)=%s seller=%s\n",
-		short1(s.sigilP), addrOf(s.gateway), short1(s.sigilS))
-	fmt.Println("gateway mandate issued (submit/cancel only; fee_denoms=[uusdc]) ✓")
+	fmt.Printf("gateway mandate issued (submit/cancel only; fee_denoms=[%s]) ✓\n", shortDenom(s.settleDenom))
 	return nil
 }
 
@@ -251,7 +288,7 @@ func (c *cli) exitStageBuy(s *exitState) error {
 	balc := banktypes.NewQueryClient(c.conn)
 	poolAddr := authtypes.NewModuleAddress(mandatetypes.ModuleName)
 	poolBefore, err := balc.Balance(context.Background(), &banktypes.QueryBalanceRequest{
-		Address: poolAddr.String(), Denom: uusdc})
+		Address: poolAddr.String(), Denom: s.settleDenom})
 	if err != nil {
 		return err
 	}
@@ -262,14 +299,14 @@ func (c *cli) exitStageBuy(s *exitState) error {
 	// allow_partial is deliberately LEFT UNSET on both: a purchase must be
 	// fill-or-kill (X402_SURFACE §3.4(b)), and a DataGrant is exact-fill anyway.
 	buy := c.buildIntentCond(addrOf(s.gateway), s.sigilP,
-		[]veiltypes.IntentLeg{coinLeg(uusdc, exitPrice)},
+		[]veiltypes.IntentLeg{coinLeg(s.settleDenom, exitPrice)},
 		[]veiltypes.IntentLeg{dataLeg(exitDataset)}, ttl, s.cond)
 	sell := c.buildIntentCond(addrOf(s.seller), s.sigilS,
 		[]veiltypes.IntentLeg{dataLeg(exitDataset)},
-		[]veiltypes.IntentLeg{coinLeg(uusdc, exitPrice)}, ttl, s.cond)
+		[]veiltypes.IntentLeg{coinLeg(s.settleDenom, exitPrice)}, ttl, s.cond)
 
 	ids, err := c.submitConcurrent([]txSpec{
-		{priv: s.gateway, msg: buy, fee: sdk.NewCoins(sdk.NewInt64Coin(uusdc, exitFee))},
+		{priv: s.gateway, msg: buy, fee: sdk.NewCoins(sdk.NewInt64Coin(s.settleDenom, exitFee))},
 		{priv: s.seller, msg: sell},
 	})
 	if err != nil {
@@ -278,16 +315,16 @@ func (c *cli) exitStageBuy(s *exitState) error {
 	s.buyID, s.sellID = ids[0], ids[1]
 
 	poolAfter, err := balc.Balance(context.Background(), &banktypes.QueryBalanceRequest{
-		Address: poolAddr.String(), Denom: uusdc})
+		Address: poolAddr.String(), Denom: s.settleDenom})
 	if err != nil {
 		return err
 	}
 	if !poolAfter.Balance.Amount.Equal(poolBefore.Balance.Amount.AddRaw(exitFee)) {
-		return fmt.Errorf("x402 leg: gas was not fronted in uusdc — pool %s → %s, want +%d",
-			poolBefore.Balance, poolAfter.Balance, exitFee)
+		return fmt.Errorf("x402 leg: gas was not fronted in %s — pool %s → %s, want +%d",
+			shortDenom(s.settleDenom), poolBefore.Balance, poolAfter.Balance, exitFee)
 	}
-	fmt.Printf("x402 ingress: buy %s submitted by the mandate-bound hot key, gas fronted in uusdc (§6.2 abstraction, pool +%d) ✓\n",
-		short1(s.buyID), exitFee)
+	fmt.Printf("x402 ingress: buy %s submitted by the mandate-bound hot key, gas fronted in %s (§6.2 abstraction, pool +%d) ✓\n",
+		short1(s.buyID), shortDenom(s.settleDenom), exitFee)
 	fmt.Printf("counterparty: seller intent %s (same ZK condition signed by BOTH parties — D-076) ✓\n", short1(s.sellID))
 	return nil
 }
@@ -339,14 +376,14 @@ func (c *cli) exitStageSettle(s *exitState) error {
 	if esc.PayerSigil != s.sigilP || esc.PayeeSigil != s.sigilS {
 		return fmt.Errorf("escrow parties wrong: payer=%s payee=%s", short1(esc.PayerSigil), short1(esc.PayeeSigil))
 	}
-	want := sdk.NewCoins(sdk.NewInt64Coin(uusdc, exitPrice))
+	want := sdk.NewCoins(sdk.NewInt64Coin(s.settleDenom, exitPrice))
 	if !esc.Amount.Equal(want) {
 		return fmt.Errorf("escrow holds %s, want %s", esc.Amount, want)
 	}
 	// the payment is HELD, not delivered: the seller has not been paid yet
 	balc := banktypes.NewQueryClient(c.conn)
 	sellerBal, err := balc.Balance(context.Background(), &banktypes.QueryBalanceRequest{
-		Address: addrOf(s.seller).String(), Denom: uusdc})
+		Address: addrOf(s.seller).String(), Denom: s.settleDenom})
 	if err != nil {
 		return err
 	}
@@ -369,7 +406,7 @@ func (c *cli) proposeConditionedSolution(s *exitState) error {
 		return err
 	}
 	code, log, err := c.proposeMatch(s.solver, s.sessionID,
-		conditionedMatch(s.buyID, s.sellID, s.sigilP, s.sigilS, s.cond))
+		conditionedMatch(s.buyID, s.sellID, s.sigilP, s.sigilS, s.cond, s.settleDenom))
 	if err != nil {
 		return err
 	}
@@ -383,9 +420,9 @@ func (c *cli) proposeConditionedSolution(s *exitState) error {
 // conditionedMatch is the bilateral data-for-coin settlement graph with the
 // condition attached to the DataGrant leg (D-074's two-party shape).
 func conditionedMatch(buyID, sellID, buyerSigil, sellerSigil string,
-	cond *escrowtypes.DeliveryCondition) sessiontypes.Match {
+	cond *escrowtypes.DeliveryCondition, denom string) sessiontypes.Match {
 	dataHash := sha256.Sum256([]byte(exitDataset))
-	payment := sdk.NewInt64Coin(uusdc, exitPrice)
+	payment := sdk.NewInt64Coin(denom, exitPrice)
 	return sessiontypes.Match{
 		IntentIds: []string{buyID, sellID},
 		Legs: []sessiontypes.SettleLeg{
@@ -399,12 +436,13 @@ func conditionedMatch(buyID, sellID, buyerSigil, sellerSigil string,
 				Asset: &sessiontypes.SettleLeg_Coin{Coin: &payment},
 			},
 		},
-		// prices in the uusdc numeraire: the dataset clears at the payment, the
-		// numeraire at 1. CheckPriceBinding demands an EXACT zero residual per
-		// party, so these are the only prices this match can carry.
+		// prices in the SETTLEMENT numeraire (§6b: the ibc/<hash> voucher): the
+		// dataset clears at the payment, the numeraire at 1. CheckPriceBinding
+		// demands an EXACT zero residual per party, so these are the only prices
+		// this match can carry.
 		ClearingPrices: []sessiontypes.PricePoint{
-			{Base: uusdc, Quote: uusdc, Price: math.LegacyOneDec()},
-			{Base: "data/" + hex.EncodeToString(dataHash[:]), Quote: uusdc, Price: math.LegacyNewDec(exitPrice)},
+			{Base: denom, Quote: denom, Price: math.LegacyOneDec()},
+			{Base: "data/" + hex.EncodeToString(dataHash[:]), Quote: denom, Price: math.LegacyNewDec(exitPrice)},
 		},
 	}
 }
@@ -587,7 +625,17 @@ func (c *cli) exitStageRelease(s *exitState) error {
 	if code == 0 {
 		return fmt.Errorf("D-076 instance binding BROKEN: a proof for another escrow released this one")
 	}
-	fmt.Printf("instance binding holds: a proof bound to another escrow is rejected (code %d: %s) ✓\n",
+	// Assert the SPECIFIC rejection. §6a shipped this negative checking only
+	// `code != 0`, which is the very shape §6a's own finding F-3 was about: a
+	// wrong-instance proof rejected for ANY other reason (wrong class, terminal
+	// state, out of gas) would have "passed" it while proving nothing about
+	// instance binding — and this negative is the live proof of D-076. Found on
+	// re-reading it in §6b; tightened here (D-092 finding F-1).
+	if code != escrowtypes.ErrInvalidProof.ABCICode() {
+		return fmt.Errorf("wrong-instance proof: code %d (%s), want ErrInvalidProof — a rejection for any "+
+			"other reason proves nothing about D-076 instance binding", code, firstLine(log))
+	}
+	fmt.Printf("instance binding holds: a proof bound to another escrow is rejected ErrInvalidProof (code %d: %s) ✓\n",
 		code, firstLine(log))
 
 	// (b) NEGATIVE: the contract tries the preimage path on a ZK escrow. The
@@ -643,12 +691,13 @@ func (c *cli) exitStageRelease(s *exitState) error {
 	}
 	balc := banktypes.NewQueryClient(c.conn)
 	sellerBal, err := balc.Balance(context.Background(), &banktypes.QueryBalanceRequest{
-		Address: addrOf(s.seller).String(), Denom: uusdc})
+		Address: addrOf(s.seller).String(), Denom: s.settleDenom})
 	if err != nil {
 		return err
 	}
 	if !sellerBal.Balance.Amount.Equal(math.NewInt(exitPrice)) {
-		return fmt.Errorf("seller holds %s after release, want %d uusdc", sellerBal.Balance, exitPrice)
+		return fmt.Errorf("seller holds %s after release, want %d %s",
+			sellerBal.Balance, exitPrice, shortDenom(s.settleDenom))
 	}
 	fmt.Printf("D-079 SMOKE: a real CVM-schema contract released escrow %s with a groth16 proof; seller paid %s ✓\n",
 		short1(s.escrowID), sellerBal.Balance)
@@ -707,10 +756,35 @@ func (c *cli) execContract(s *exitState, msg map[string]any) (uint32, string, er
 // ---- stage 6: the evidence, including what it does NOT prove ---------------
 
 func (c *cli) exitStageEvidence(s *exitState) error {
+	ev, err := c.gatherExitEvidence(s)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("receipt %s + ICS-23 proof at height %d; terms_hash recomputes from the queried winning Solution ✓\n",
+		short1(ev.receipt.Id), ev.proof.ProofHeight)
+	return c.exitAssertConditionBoundary(s, ev)
+}
+
+// exitEvidence is the fill-back evidence bundle an origin settler is handed
+// (7683_SURFACE §6.5 step 4): the receipt, its ICS-23 proof from the x/receipt
+// product surface, and the winning Match pre-image FETCHED from the stored
+// Solution (never recomputed).
+type exitEvidence struct {
+	receipt *receipttypes.Receipt
+	proof   *receipttypes.QueryReceiptProofResponse
+	match   *sessiontypes.Match
+	matchBz []byte
+}
+
+// gatherExitEvidence collects that bundle and runs §6.3 check 2 (terms
+// authenticity) over it. Shared by §6a's stage 6 and §6b's stage 5 so both
+// verify the SAME bundle by the same rules — §6b only re-roots check 1 in a
+// second chain's light client.
+func (c *cli) gatherExitEvidence(s *exitState) (*exitEvidence, error) {
 	ctx := context.Background()
 	recs, err := c.receiptc.Receipts(ctx, &receipttypes.QueryReceiptsRequest{SigilId: s.sigilP})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var receipt *receipttypes.Receipt
 	for i := range recs.Receipts {
@@ -719,25 +793,25 @@ func (c *cli) exitStageEvidence(s *exitState) error {
 		}
 	}
 	if receipt == nil {
-		return fmt.Errorf("no receipt for the buy intent %s", short1(s.buyID))
+		return nil, fmt.Errorf("no receipt for the buy intent %s", short1(s.buyID))
 	}
 	proof, err := c.receiptc.ReceiptProof(ctx, &receipttypes.QueryReceiptProofRequest{Id: receipt.Id})
 	if err != nil {
-		return fmt.Errorf("receipt.ReceiptProof: %w", err)
+		return nil, fmt.Errorf("receipt.ReceiptProof: %w", err)
 	}
 	if len(proof.Proof) == 0 || proof.ProofHeight == 0 {
-		return fmt.Errorf("empty ICS-23 proof for receipt %s", short1(receipt.Id))
+		return nil, fmt.Errorf("empty ICS-23 proof for receipt %s", short1(receipt.Id))
 	}
 
 	// 7683_SURFACE §6.3 check 2 — terms authenticity — over the winning
 	// Solution's Match, fetched (never recomputed).
 	sres, err := c.sessionc.Session(ctx, &sessiontypes.QuerySessionRequest{Id: s.sessionID})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sols, err := c.sessionc.Solutions(ctx, &sessiontypes.QuerySolutionsRequest{SessionId: s.sessionID})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var winning *sessiontypes.Solution
 	for i := range sols.Solutions {
@@ -746,21 +820,30 @@ func (c *cli) exitStageEvidence(s *exitState) error {
 		}
 	}
 	if winning == nil {
-		return fmt.Errorf("winning solution %s not queryable", short1(sres.Session.WinningSolutionId))
+		return nil, fmt.Errorf("winning solution %s not queryable", short1(sres.Session.WinningSolutionId))
 	}
 	matchBz, err := winning.Matches[0].Marshal()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sum := sha256.Sum256(matchBz)
 	if !bytes.Equal(sum[:], receipt.TermsHash) {
-		return fmt.Errorf("§6.3(2) terms_hash does not recompute from the queried Match")
+		return nil, fmt.Errorf("§6.3(2) terms_hash does not recompute from the queried Match")
 	}
-	fmt.Printf("receipt %s + ICS-23 proof at height %d; terms_hash recomputes from the queried winning Solution ✓\n",
-		short1(receipt.Id), proof.ProofHeight)
+	// §6.3 check 2's second half: the receipt must belong to this Match.
+	if !slices.Contains(winning.Matches[0].IntentIds, receipt.IntentId) {
+		return nil, fmt.Errorf("§6.3(2) receipt.intent_id %s is not in the verified Match",
+			short1(receipt.IntentId))
+	}
+	return &exitEvidence{receipt: receipt, proof: proof, match: &winning.Matches[0], matchBz: matchBz}, nil
+}
 
-	// The D-087 boundary, demonstrated rather than avoided. This settlement IS
-	// conditioned, so:
+// exitAssertConditionBoundary demonstrates the D-087 boundary rather than
+// avoiding it, and is shared by both halves of the demo.
+func (c *cli) exitAssertConditionBoundary(s *exitState, ev *exitEvidence) error {
+	ctx := context.Background()
+	receipt, winningMatch := ev.receipt, ev.match
+	// This settlement IS conditioned, so:
 	//   (i)  its receipt still reads condition_outcome=NONE — the field is
 	//        decorative until task 2.9;
 	//   (ii) 7683_SURFACE §6.3 check 3 requires an UNCONDITIONED leg, so this
@@ -772,8 +855,8 @@ func (c *cli) exitStageEvidence(s *exitState) error {
 			receipt.ConditionOutcome)
 	}
 	admissible := false
-	for i := range winning.Matches[0].Legs {
-		leg := &winning.Matches[0].Legs[i]
+	for i := range winningMatch.Legs {
+		leg := &winningMatch.Legs[i]
 		if leg.ToSigil == s.sigilP && leg.Condition == nil && leg.GetData() != nil {
 			admissible = true
 		}
@@ -820,11 +903,11 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 	ttl := height + settleTTL
 	// the buyer signs NO condition; the seller signs the ZK one
 	buy := c.buildIntent(addrOf(s.gateway), s.sigilP,
-		[]veiltypes.IntentLeg{coinLeg(uusdc, exitPrice)},
+		[]veiltypes.IntentLeg{coinLeg(s.settleDenom, exitPrice)},
 		[]veiltypes.IntentLeg{dataLeg(exitDataset)}, ttl)
 	sell := c.buildIntentCond(addrOf(s.seller), s.sigilS,
 		[]veiltypes.IntentLeg{dataLeg(exitDataset)},
-		[]veiltypes.IntentLeg{coinLeg(uusdc, exitPrice)}, ttl, s.cond)
+		[]veiltypes.IntentLeg{coinLeg(s.settleDenom, exitPrice)}, ttl, s.cond)
 	ids, err := c.submitConcurrent([]txSpec{{priv: s.gateway, msg: buy}, {priv: s.seller, msg: sell}})
 	if err != nil {
 		return err
@@ -840,7 +923,7 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 		return err
 	}
 	code, log, err := c.proposeMatch(s.solver, rec.SessionId,
-		conditionedMatch(ids[0], ids[1], s.sigilP, s.sigilS, s.cond))
+		conditionedMatch(ids[0], ids[1], s.sigilP, s.sigilS, s.cond, s.settleDenom))
 	if err != nil {
 		return err
 	}

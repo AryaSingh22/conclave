@@ -601,17 +601,44 @@ the time (D-088).
       the gate). Findings F-2 (Rust ≥1.82 `reference-types` vs wasmvm 2.2.8) and F-3
       (a check of mine that passed for the wrong reason) recorded in D-091.
 
-- [ ] **§6b EXIT DEMO part B — the IBC leg; the exit criterion is asserted HERE.**
-      The remaining half of the §6 exit demo: a REAL ICS-20 USDC transfer over a
-      LIVE RELAYER between two chains (**D-082's sole-owned obligation** — not the
-      in-process ibctesting harness), the receipt verified against the root held by
-      a **second chain's on-chain light client** of Conclave, and §6a's whole flow
-      re-run on the resulting `ibc/<hash>` voucher as the settlement denom. Approved
-      plan-stop decisions carried in: chain B is a second `conclaved`
-      (`conclave-dev-2`), chain A stays single-node with the epoch-0 plaintext-Veil
-      boundary NAMED (the encrypted reveal is D-070's, on its own 4-validator
-      harness), and the run stays **INTERNAL** unless task 2.9 lands first. Extends
-      `docs/EXIT_DEMO.md` rather than replacing it.
+- [x] **§6b EXIT DEMO part B — the IBC leg; THE §6 EXIT CRITERION IS ASSERTED** —
+      D-092. A REAL ICS-20 USDC transfer over a **LIVE RELAYER** (`cosmos/relayer`
+      v2.6.0, `go install`ed — a TOOL, not a module dep; `go.mod`/`go.sum` hashed
+      unchanged) between `conclave-dev-1` and `conclave-dev-2`: the buyer holds
+      `ibc/8E27BA2D…`, its trace resolving to chain B's `uusdc`, with chain B's
+      ICS-20 escrow asserted to have grown by what chain A minted. **D-082
+      DISCHARGED.** §6a's whole flow then re-ran on that voucher as the settlement
+      denom (mandate `fee_denoms`/ceilings, the buy leg, the escrow's held amount,
+      the seller's payout) — ONE code path via `exitState.settleDenom`, which makes
+      `scripts/exit_demo.sh` a live regression test of the parametrization (re-run
+      green). Stage 5 verifies the receipt against the root held by **chain B's
+      on-chain light client of chain A**, using the approved
+      **light-client-height-first** inversion: `ReceiptProof` only proves at the tip,
+      so the stage reads the height B's client holds and asks A for a proof at
+      version H−1 over the generic ABCI route 7683_SURFACE §6.2 documents; the tip
+      proof is cross-checked to be byte-identical. §6.3 checks 1–4 all run, check 3
+      correctly REJECTING the conditioned leg. **Four negatives, each asserting its
+      SPECIFIC failure message**, including the off-by-one (proof at H vs the root
+      for H) and the nearest-other-root — the two fail with DIFFERENT messages,
+      which is what proves they test different things. Provenance made checkable:
+      B's stored root must equal A's own `header(H).AppHash`. **The honest boundary,
+      stated everywhere:** B→A is verified IN CONSENSUS by chain A's
+      `MsgRecvPacket`; A→B is verified IN THE DRIVER against chain B's root (the
+      settler is separate-repo scope) — it is NOT claimed that chain B's state
+      machine verified the receipt. Run stays **INTERNAL** (2.9 still a prerequisite
+      for external use). Finding F-1: §6a's D-076 wrong-instance negative asserted
+      only `code != 0` — tightened in-task to `ErrInvalidProof`. The predicted
+      injected-`Txs[0]` relayer-compat risk did NOT fire (recorded as a negative
+      result). Record: `docs/EXIT_DEMO.md`. `make lint test` green; determinism
+      vector byte-identical to the D-082 baseline, fingerprinted before/after;
+      covering gates named separately (`scripts/exit_demo_ibc.sh` +
+      `scripts/exit_demo.sh` — the vector covers nothing here).
+
+**Phase-2 EXIT CRITERION MET (§6b, D-092).** Every remaining Phase-2 task
+(2.7–2.10, 2.12, 2.13) is off the exit path, so **PHASE3_PLAN task 3.0 — the
+Phase-2 boundary re-validation — is now TRIGGERED**; its trigger was this demo.
+3.0 owns the Rule-9 authored-surface re-derivation and the §5.1 disposition
+re-verification before Phase 3 opens.
 
 ## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
 

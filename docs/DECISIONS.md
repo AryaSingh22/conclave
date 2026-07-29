@@ -4568,3 +4568,172 @@ an assertion, plus the pre-existing `TestConcludeConditioned_Zk` and
 - **§6b (the remaining exit work)** owns D-082's live relayer USDC demo, the
   second-chain light-client verification, and re-running §6a's flow on the
   `ibc/<hash>` voucher. The exit criterion is asserted there, not here.
+
+## D-092 — Phase-2 §6 EXIT DEMO part B (§6b): the live-relayer IBC leg and second-chain receipt verification; **the SPEC §10 exit criterion is ASSERTED**; D-082 discharged
+
+- **Date:** 2026-07-29 (§6b build, after the approved plan-stop; completes the
+  §6a/§6b split D-091 recorded).
+- **SPEC:** §6.2 (fee abstraction), §6.4 (solutions/CONCLUDE), §6.5 (escrow
+  classes), §6.6 (receipts + `ReceiptProof`), §9 (edges), §10 (Phase-2 exit);
+  PHASE2_DESIGN §6; builds on **D-082** (the live-relayer obligation, the
+  session-TWAP fee seam, the ibc/<hash> ceiling work), **D-053** (the ICS-23
+  proof surface and its height binding), **D-086/D-087** (the fill-back evidence
+  contract and the condition_outcome disclosure), **D-091** (§6a), **D-090**
+  (the internal-run condition); METHODOLOGY Rules 1/2/3/4/5/7/8/9.
+
+### Plan-stop decisions (approved, recorded before building)
+
+- **E1 — the relayer is `cosmos/relayer` v2.6.0**, installed with
+  `go install github.com/cosmos/relayer/v2@v2.6.0`. Rule 5 framing: this is a
+  TOOL in `GOPATH/bin`, not a module dependency — `go install pkg@version` builds
+  in its own module, and conclave's `go.mod`/`go.sum` were hashed before and
+  after to prove it (`ffe1e90c…` / `687b3f8a…`, unchanged). The §4 two-pin
+  go-1.23.x ceiling is untouched. Its own pins (SDK v0.50.11, ibc-go v8.2.0,
+  CometBFT v0.38.12) sit on our major line. Alternatives were unavailable, not
+  merely unattractive: no relayer binary was installed, the docker daemon was
+  down, and D-082 explicitly forbids reusing the in-process ibctesting harness.
+  (Note the package path: the module root is the main package —
+  `.../relayer/v2/cmd/rly` does not exist — and the installed binary is named
+  `relayer`, not `rly`.)
+- **E2 — LIGHT-CLIENT-HEIGHT-FIRST** (the decision that carries the stage; below).
+- **E3 — parametrize §6a's flow, do not fork it:** `exitState.settleDenom` is
+  read by every stage, so §6a and §6b are ONE code path and
+  `scripts/exit_demo.sh` becomes a live regression test of the parametrization.
+- **E4 — default-OFF knobs** in `localnet.sh` (chain id, RPC/P2P/gRPC/API/pprof
+  ports, pruning), defaulting to the exact historical values so every existing
+  caller is unaffected; plus a `dialChain` split of `newCLI` so ONE in-process
+  `ConclaveApp` serves both chain connections (a second would contend for the
+  wasm VM directory — the task-2.2 lock).
+- **E5 — the run stays INTERNAL** (D-090's hard condition; task 2.9 remains a
+  prerequisite for any external-facing use, and both banners say so).
+
+### E2 — the height inversion, which is the load-bearing design choice
+
+A light client's `ConsensusState` at height `H` stores
+`Root = A.header(H).AppHash`, and a header's app hash commits the **previous**
+block's state — so a proof checked against that root must be taken at store
+version **`H−1`**. And `x/receipt`'s `ReceiptProof` proves at the **TIP**: it
+calls `q.proofs.Query(&RequestQuery{Path, Data, Prove: true})` with `Height`
+unset, so rootmulti serves latest−1 and the product surface cannot be asked for
+a chosen height.
+
+The stage therefore **reads the height chain B's client actually holds, then
+asks chain A for a proof at the version that root commits to** — over the
+generic ABCI route 7683_SURFACE §6.2 already documents (`/store/session/key`,
+`prove=true`, explicit height), reached through
+`cosmos.base.tendermint.v1beta1.Service/ABCIQuery` (which accepts `store` paths
+with `Height`+`Prove`; verified in the pinned SDK at
+`client/grpc/cmtservice/service.go:226`). The rejected alternative — fetch the
+tip proof, then hope the relayer lands a client update at exactly
+`ProofHeight+1` — is a race over a header height we do not choose. The module
+surface's tip proof is still fetched and cross-checked to prove **byte-identical
+receipt bytes**, so the product surface stays exercised rather than bypassed.
+
+Real A→B traffic (a token return transfer) advances chain B's client — with
+traffic, not a privileged command.
+
+### THE EXIT CRITERION — ASSERTED
+
+One run, `scripts/exit_demo_ibc.sh`: an external x402 agent (mandate-bound hot
+key, gas fronted through §6.2) bought ZK-verified data from a Conclave agent,
+**settling in real IBC USDC** — `ibc/8E27BA2D…` received over a **live
+`cosmos/relayer` process**, trace resolving to chain B's `uusdc` — with a real
+CosmWasm contract releasing a real ZK escrow on a real groth16 proof, and the
+settlement receipt **ICS-23-verified against the root held by chain B's on-chain
+light client of chain A**. **D-082 DISCHARGED.**
+
+### The honest-claim boundary (stated because it is easy to overstate)
+
+- **B→A is verified by a state machine, in consensus.** The voucher can only
+  exist because chain A executed `MsgRecvPacket`, whose `OnRecvPacket`
+  ICS-23-verifies chain B's packet commitment against chain A's on-chain light
+  client of B. Claimed as such.
+- **A→B is verified in the DEMO DRIVER, against chain B's root.** The §6.3
+  checks run in `cmd/conclave-demo` because the settler is separate-repo scope
+  (7683_SURFACE §1.2/§6.3). What makes it a *second-chain* verification is the
+  **provenance of the root**: read out of chain B's stored `ConsensusState`,
+  established by a live relayer and advanced by real `MsgUpdateClient` txs on B.
+- **NOT claimed: chain B's state machine verified the receipt.** That needs the
+  verification bridge deployed on B, which is resolver-repo scope.
+- **Provenance made CHECKABLE, not merely structural.** A faithful light client
+  holds exactly the bytes chain A's own header carries, so a value check cannot
+  by itself prove where a root came from. The stage therefore asserts the
+  **agreement**: chain B's stored root for height `H` must equal chain A's own
+  `header(H).AppHash`. That turns "the client is tracking chain A" into a
+  measured fact and would catch a client fed something else.
+
+### Load-bearing negatives (Rule 3), all live, each asserting a SPECIFIC failure
+
+Four, and the message each must produce is pinned by name — never "an error":
+
+| Negative | Required failure |
+|---|---|
+| one byte of the receipt flipped | `chained membership proof failed to verify membership of value` |
+| the **nearest other** root chain B holds | `proof did not commit to expected root` |
+| **the off-by-one**: proof at version `H` vs the root for `H` | `proof did not commit to expected root` |
+| §6.3 check 3 skipped | the conditioned leg IS admitted (proving check 3 load-bearing) |
+
+The first two fail with **different** messages, which is what proves they test
+different things rather than each other. "Nearest, not any" is deliberate: the
+first implementation compared against whatever stored height came first (93 vs
+12) — a distant root rejects trivially and would let an adjacent-height
+confusion pass unnoticed. And the off-by-one negative is the mistake a bridge
+implementer actually makes: both artifacts are internally valid and both name
+"height H".
+
+### FINDINGS
+
+- **F-1 (fixed in-task) — §6a's D-076 negative asserted only `code != 0`.** The
+  wrong-instance-proof negative in stage 5a — *the* live proof of D-076 instance
+  binding — checked only that the code was non-zero. A rejection for any other
+  reason (wrong class, terminal state, out of gas) would have "passed" it while
+  proving nothing about instance binding. This is the same shape as §6a's own
+  finding F-3, in a negative guarding a security property, and it was found by
+  re-reading the negative rather than by it failing. Tightened to require
+  `ErrInvalidProof` (1510) specifically; the §6a script re-run confirms it.
+  Fixed rather than deferred because it is an assertion-strength gap in dev
+  tooling, not a chain defect — F-3 is the precedent. Recorded loudly because it
+  means **§6a's D-076 live claim rested on a weaker check than its record
+  implied**.
+- **F-2 — the relayer cannot identify itself.** Installed via `go install` it
+  carries no ldflags, so `rly version` prints `version: ""`. The pin lives in
+  `scripts/exit_demo_ibc.sh` and in this ADR; those are the only sources of
+  truth for what ran.
+- **The watch that did NOT fire (a negative result worth keeping).** The plan
+  named task 1.6's proposer-injected `Txs[0]` (the vote-extension transport) as
+  the most likely place for a third-party relayer to break, with a *silent*
+  non-relay as the expected failure mode, and pre-committed to treating it as a
+  finding about Conclave's compatibility with standard IBC tooling rather than a
+  demo-config problem. It did not happen: `cosmos/relayer` v2.6.0 relayed both
+  directions with no special configuration. Recorded because no test in the tree
+  asserts this, and a future ABCI change could break it quietly.
+
+### A constraint a real bridge operator inherits (contract-relevant)
+
+Stage 5 fetches a proof at the height the counterparty's light client holds, and
+**a pruned version cannot serve one**. Any node serving light-client-driven
+fill-back must retain the versions its counterparty's client tracks. The demo
+nodes run `pruning=nothing` (a new default-OFF `localnet.sh` knob) and the
+driver fails with that explanation rather than a bare "no proof". Stated in
+`docs/EXIT_DEMO.md` because it is a property of the rail, not of the demo.
+
+### Gates
+
+`make lint` + `make test` green; determinism vector **byte-identical to the
+D-082 baseline** across two independent processes, run before and after with the
+tree fingerprinted both times (Rule 9). **Named covering gate (Rule 7): the
+vector covers NOTHING in this task** — no consensus code changed (the diff is
+`cmd/conclave-demo`, `scripts/`, `docs/`), and the sim's generator reaches
+neither IBC nor escrow conditions. The covering gates are
+**`scripts/exit_demo_ibc.sh`** (every stage an assertion) and
+**`scripts/exit_demo.sh`** re-run as the parametrization regression.
+
+### Forward items
+
+- No new task. **Task 2.13 is unchanged by §6b**: the condition-attaching writer
+  is still demo tooling, and §6b's stage 6 re-proves the same F-1 wire-code
+  boundary pin §6a recorded.
+- **Phase-2's ledger is now clear of exit-path work.** 2.7–2.10, 2.12 and 2.13
+  remain open and are all off the exit path, so PHASE3_PLAN task **3.0** (the
+  Phase-2 boundary re-validation) is now triggered — its trigger was the §6 exit
+  demo.

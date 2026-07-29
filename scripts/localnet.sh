@@ -8,12 +8,27 @@
 #   - fast blocks (timeout_commit = 1s), minimum-gas-prices = "0uclv", API + gRPC enabled
 set -euo pipefail
 
-CHAIN_ID="conclave-dev-1"
+# Chain identity, listen ports and pruning are OPTIONAL overrides whose
+# defaults are exactly what this script has always used, so every existing
+# caller is byte-for-byte unaffected. scripts/exit_demo_ibc.sh (§6b) sets them
+# to run a SECOND node (conclave-dev-2) beside the first for the IBC leg.
+CHAIN_ID="${CHAIN_ID:-conclave-dev-1}"
 DENOM="uclv"
 HOME_DIR="${CONCLAVED_HOME:-$HOME/.conclaved}"
-MONIKER="conclave-dev"
+MONIKER="${MONIKER:-conclave-dev}"
 BIN="${CONCLAVED_BIN:-conclaved}"
 KEYRING=(--keyring-backend test)
+
+RPC_PORT="${RPC_PORT:-26657}"
+P2P_PORT="${P2P_PORT:-26656}"
+GRPC_PORT="${GRPC_PORT:-9090}"
+API_PORT="${API_PORT:-1317}"
+PPROF_PORT="${PPROF_PORT:-6060}"
+# PRUNING is unset by default (the node keeps conclaved's own default). §6b
+# sets "nothing": a light-client-driven bridge fetches ICS-23 proofs at the
+# heights its client actually holds, and a pruned version cannot serve one.
+# That constraint is contract-relevant, not demo plumbing — see docs/EXIT_DEMO.md.
+PRUNING="${PRUNING:-}"
 
 # amounts (10^6 uclv = 1 CLV per SPEC §0)
 VALIDATOR_SUPPLY="1100000000000${DENOM}"            # 1.1M CLV (1M self-delegation + fee float)
@@ -152,6 +167,16 @@ sed -i '/^\[api\]/,/^\[/ s/^enable = .*/enable = true/' "$APP_TOML"
 sed -i '/^\[api\]/,/^\[/ s/^swagger = .*/swagger = true/' "$APP_TOML"
 sed -i '/^\[grpc\]/,/^\[/ s/^enable = .*/enable = true/' "$APP_TOML"
 sed -i 's/^timeout_commit = .*/timeout_commit = "1s"/' "$CONFIG_TOML"
+
+# listen addresses (defaults reproduce the historical values exactly)
+sed -i "/^\[api\]/,/^\[/ s|^address = .*|address = \"tcp://localhost:${API_PORT}\"|" "$APP_TOML"
+sed -i "/^\[grpc\]/,/^\[/ s|^address = .*|address = \"localhost:${GRPC_PORT}\"|" "$APP_TOML"
+sed -i "s|^laddr = \"tcp://127.0.0.1:26657\"|laddr = \"tcp://127.0.0.1:${RPC_PORT}\"|" "$CONFIG_TOML"
+sed -i "s|^laddr = \"tcp://0.0.0.0:26656\"|laddr = \"tcp://0.0.0.0:${P2P_PORT}\"|" "$CONFIG_TOML"
+sed -i "s|^pprof_laddr = .*|pprof_laddr = \"localhost:${PPROF_PORT}\"|" "$CONFIG_TOML"
+if [ -n "$PRUNING" ]; then
+  sed -i "s|^pruning = .*|pruning = \"${PRUNING}\"|" "$APP_TOML"
+fi
 
 echo
 echo "Localnet initialized: chain-id=$CHAIN_ID home=$HOME_DIR"

@@ -73,7 +73,7 @@ const (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check|7683-check|exit-demo> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check|7683-check|exit-demo|exit-demo-ibc> [flags]")
 		os.Exit(2)
 	}
 	sub := os.Args[1]
@@ -109,6 +109,18 @@ func main() {
 		err = c.erc7683Check()
 	case "exit-demo":
 		err = c.exitDemo()
+	case "exit-demo-ibc":
+		// §6b drives a SECOND chain (the ICS-20 USDC source and the host of the
+		// light client of chain A). Its connection reuses this process's app —
+		// see dialChain.
+		var b *cli
+		b, err = dialChain(c.conclave, envOr("CONCLAVE_GRPC_B", "localhost:9190"),
+			envOr("CONCLAVED_HOME_B", os.ExpandEnv("$HOME/.conclaved-b")),
+			envOr("CONCLAVE_CHAIN_ID_B", "conclave-dev-2"))
+		if err == nil {
+			defer b.conn.Close()
+			err = c.exitDemoIBC(b)
+		}
 	case "veil-e2e":
 		err = c.veilE2E()
 	case "veil-f4-adversary":
@@ -124,6 +136,13 @@ func main() {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "DEMO FAIL:", err)
 	os.Exit(1)
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 type cli struct {
@@ -142,6 +161,18 @@ type cli struct {
 
 func newCLI(grpcAddr, home, chainID string) (*cli, error) {
 	conclave := app.NewConclaveApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
+	return dialChain(conclave, grpcAddr, home, chainID)
+}
+
+// dialChain builds a cli for ONE chain against an ALREADY-CONSTRUCTED app.
+//
+// The app instance is used only for its interface registry (the gRPC codec
+// below) and its codec (the keyring) — it holds no chain state and is never
+// executed. §6b drives TWO chains from one process, and app.NewConclaveApp
+// opens a wasm VM directory (task 2.2); building a second app in the same
+// process contends for that directory's lock. So the app is built once and
+// shared across every chain connection.
+func dialChain(conclave *app.ConclaveApp, grpcAddr, home, chainID string) (*cli, error) {
 	// force the SDK's gogo-aware codec on the connection: grpc-go's default
 	// codec decodes through protobuf-go reflection and panics on gogoproto
 	// customtype fields ("invalid Go type math.LegacyDec ...") — first hit

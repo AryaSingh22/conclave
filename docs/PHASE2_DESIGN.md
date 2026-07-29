@@ -56,7 +56,18 @@ load-bearing and recorded (§4).
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
 | 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **open** (NEW in §6a) | D-091 |
 | §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13) | D-091 · artifact: `docs/EXIT_DEMO.md` |
-| §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **open — the exit criterion is asserted here** | D-091, D-082 |
+| §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED** | D-092 · artifact: `docs/EXIT_DEMO.md` |
+
+> ## PHASE-2 EXIT CRITERION: **MET** (§6b, D-092)
+>
+> Every task on the exit path is complete. The remaining open tasks
+> (2.7–2.10, 2.12, 2.13) are each recorded as off the exit path, so
+> **PHASE3_PLAN task 3.0 — the Phase-2 boundary re-validation — is now
+> TRIGGERED.** Its stated trigger was this demo. 3.0 owns the Rule-9
+> authored-surface re-derivation and the §5.1 disposition re-verification.
+>
+> The run is **INTERNAL** (D-090): task 2.9 remains a prerequisite before any
+> external-facing use of this evidence.
 
 **Exit-demo leg readiness (§6): all four legs are now DONE.** ZK_DELIVERY
 escrow leg (end-to-end conditioned ZK CONCLUDE proven: both parties signing
