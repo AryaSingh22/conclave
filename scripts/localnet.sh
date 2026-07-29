@@ -77,6 +77,21 @@ jq '.app_state.bank.denom_metadata = [
 jq '.app_state.gov.params.voting_period = "30s"
   | .app_state.gov.params.expedited_voting_period = "15s"' "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
 
+# OPTIONAL session-window widening, default OFF (both unset ⇒ genesis untouched,
+# so every existing script keeps the SPEC §6.4 dev defaults of 3/2 blocks).
+# scripts/exit_demo.sh sets these: its driver must WIN the auction with a
+# conditioned solution, and a 2-block window on a 1s-block node is a race it can
+# lose to the in-consensus fallback — which would clear the pair UNCONDITIONED
+# and open no escrow. This is demo timing only; no code path changes.
+if [ -n "${SESSION_LENGTH_BLOCKS:-}" ]; then
+  jq --arg v "$SESSION_LENGTH_BLOCKS" '.app_state.session.params.session_length_blocks = $v' \
+    "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
+fi
+if [ -n "${SOLUTION_WINDOW_BLOCKS:-}" ]; then
+  jq --arg v "$SOLUTION_WINDOW_BLOCKS" '.app_state.session.params.solution_window_blocks = $v' \
+    "$GENESIS" > "$TMP" && mv "$TMP" "$GENESIS"
+fi
+
 # Task 1.6: ENABLE vote extensions — the reveal share transport (PHASE1_DESIGN
 # §2, AUDIT F-4) requires them. Without this the chain runs but no encrypted
 # (epoch_id!=0) intent can ever reveal. enable_height=1 turns them on from the

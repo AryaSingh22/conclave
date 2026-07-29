@@ -1,0 +1,24 @@
+# LOAD-BEARING PIN. wasmvm v2.2.8's VM rejects a module carrying the wasm
+# `reference-types` proposal, which Rust 1.82+ emits by default for
+# wasm32-unknown-unknown — including inside the PRECOMPILED rust-std it links.
+#
+# Watched, in this order (D-091):
+#   1. Rust 1.85 + no flags      → store-code proposal FAILED on execution:
+#                                  "reference-types not enabled ... at offset 0x6ff"
+#   2. Rust 1.85 + `-C target-feature=-reference-types` → STILL FAILED, at
+#                                  offset 0x1c94d — the flag governs THIS crate's
+#                                  codegen, not the std blob it links against
+#   3. Rust 1.81.0 (this pin)    → accepted by the VM
+#
+# So the toolchain pin is the ONLY mechanism (the rustflag was tried and dropped
+# — on 1.81 it is merely an unstable-feature warning). Rebuilding on a newer Rust
+# without this file produces a contract the pinned node cannot store. rustup
+# installs this toolchain automatically on first build.
+#
+# 1.81's Cargo predates edition2024, so four transitive deps are held below their
+# latest releases in Cargo.lock (zeroize, zeroize_derive, rmp-serde, rmp). The
+# lock is COMMITTED: that is what makes this build reproducible rather than
+# dependent on resolution date.
+[toolchain]
+channel = "1.81.0"
+targets = ["wasm32-unknown-unknown"]

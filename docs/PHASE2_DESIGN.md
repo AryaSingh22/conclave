@@ -54,7 +54,9 @@ load-bearing and recorded (§4).
 | 2.9 | Receipt condition-outcome integrity (`CONDITION_OUTCOME_PENDING` + escrow write-back) | **open** | D-087 |
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
-| Exit | x402 → ZK-delivery → IBC-verified receipt demo | **UNBLOCKED** — all four legs green | §6 |
+| 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **open** (NEW in §6a) | D-091 |
+| §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13) | D-091 · artifact: `docs/EXIT_DEMO.md` |
+| §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **open — the exit criterion is asserted here** | D-091, D-082 |
 
 **Exit-demo leg readiness (§6): all four legs are now DONE.** ZK_DELIVERY
 escrow leg (end-to-end conditioned ZK CONCLUDE proven: both parties signing
@@ -815,16 +817,23 @@ IBC."* One integration, four tasks:
 
 | Leg | Task | Status |
 |---|---|---|
-| x402 agent pays in; gateway fronts gas, submits intent | 2.3 | ✅ **DONE** (D-083; auth model proven at app level, swept live incl. uusdc gas fronting through §6.2 abstraction) |
-| ZK_DELIVERY escrow: groth16 proof releases payment ("ZK-verified" is literal) | 2.1 | ✅ **DONE** (`TestConcludeConditioned_Zk` end-to-end; both-party consent enforced) |
-| CVM contract drives the escrow/CONCLUDE path via bindings | 2.2 | ✅ **DONE in-process** (D-079; the LIVE-localnet slice is the demo's own, needing a CVM-schema contract binary) |
-| Settlement in real IBC USDC; Receipt ICS-23-verified on a second chain | 2.5 | ✅ **DONE** (D-082; two-chain ICS-20 e2e — the live relayer slice is the demo's own) |
+| x402 agent pays in; gateway fronts gas, submits intent | 2.3 | ✅ **DONE** → **LIVE in §6a** (D-091; the mandate-bound hot key's gas fronted in the settlement denom, asserted by the pool delta) |
+| ZK_DELIVERY escrow: groth16 proof releases payment ("ZK-verified" is literal) | 2.1 | ✅ **DONE** → **LIVE in §6a** (D-091; the first conditioned escrow ever opened on a running network) |
+| CVM contract drives the escrow/CONCLUDE path via bindings | 2.2 | ✅ **DONE in-process** → **LIVE in §6a; D-079 DISCHARGED** (D-091) |
+| Settlement in real IBC USDC; Receipt ICS-23-verified on a second chain | 2.5 | ✅ in-process (D-082) — **the live-relayer slice is §6b, still open** |
 
-**All four legs are green, so the demo is UNBLOCKED and is the only remaining
-phase-closing item.** It is also the sole owner of two obligations deferred
-into it: the **D-079 localnet contract-release smoke** (needs the purpose-built
-CVM-schema contract binary — a Rust-toolchain dependency, so this session is
-larger than its leg count suggests) and the **D-082 live relayer USDC demo**.
+**The demo was SPLIT at its plan-stop (D-091): §6a is DONE and §6b remains.**
+Only the build is split — **the exit criterion is asserted at §6b**, which owns
+**D-082's live relayer USDC demo** and second-chain verification. §6a discharged
+the other deferred obligation, the **D-079 localnet contract-release smoke**, in
+full. The acceptance record for both parts is `docs/EXIT_DEMO.md`.
+
+**§6a's headline finding, carried forward as task 2.13:** conditioned escrows had
+**no live-network writer at all** — the in-consensus fallback never attaches a
+condition, non-test `solver/` never does, and escrows are created only by
+CONCLUDE — so the entire escrow condition system had been exercised solely by
+keeper-level hand-built Matches. §6a's driver is now the only live writer, and it
+is **demo tooling**: "the demo can do it now" is not "the network can do it now".
 
 **Hard condition at the demo's plan-stop (D-090).** The x402 leg is the
 conditioned ZK buy, so its receipt reads `condition_outcome = NONE` for a

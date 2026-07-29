@@ -555,21 +555,63 @@ the time (D-088).
       per class; the solver payout stays solvent-by-construction; vector in isolation.
       Off the exit path.
 
-- [ ] **§6 EXIT DEMO — the next task.** The §1.3 demo extended: an external x402
-      agent buys ZK-verified data from a Conclave agent; receipt IBC-verified on a
-      second chain (spans 2.1+2.2+2.3+2.5; 2.4 is the parallel inbound rail, off the
-      exit path). **UNBLOCKED at Rev 3 — all four legs are DONE**, and every one of
-      2.7–2.12 is explicitly off the exit path, so this is the only remaining
-      phase-closing item. It is also the sole owner of two obligations deferred into
-      it: the **D-079 localnet contract-release smoke** (needs a purpose-built
-      CVM-schema contract binary — a Rust-toolchain dependency, so the session is
-      larger than its leg count suggests) and the **D-082 live relayer USDC demo**.
-      **HARD CONDITION at its plan-stop (D-090):** the x402 leg is the conditioned ZK
-      buy, so its receipt reads `condition_outcome = NONE` for a conditioned
-      settlement (D-087). That is acceptable for an **internal acceptance run** —
-      both edge contracts disclose the true semantics, so no consumer is misled — but
-      **if the demo output is ever repurposed as EXTERNAL-FACING evidence, task 2.9
-      becomes a prerequisite.** Decide and record which it is before building.
+- [ ] 2.13 Solver-side condition attachment + the F-1 error-code loss (NEW in §6a,
+      D-091) — two items, one owner, both surfaced by the exit demo. **(a) The
+      escrow condition system has no PRODUCTION writer.** `SettleLeg.Condition` is
+      set by nothing in the tree except `cmd/conclave-demo` (added by §6a): the
+      in-consensus fallback never attaches a condition, non-test `solver/` never
+      does, and escrows are created only by CONCLUDE. Decide and RECORD whether that
+      is intended (solver-attached by design — third-party solvers attach, and the
+      chain verifies consent, which §6a proved live) or a gap (no reference
+      implementation shows a solver how); if the latter, ship it — the reference
+      solver is the natural home, but it is imported by `x/session/simulation`, so
+      any change there runs the determinism vector in ISOLATION. **(b) F-1:**
+      `ProposeSolution` returns `errors.Join(ErrInvalidSolution, ruleErr)` and
+      `cosmossdk.io/errors` cannot walk a multi-error `Unwrap() []error`, so the tx
+      surfaces internal code **1** instead of session **1412** — every invalid
+      solution looks like an internal error to an off-chain solver (the reason text
+      does survive). Tx result codes are consensus data (`LastResultsHash`), so the
+      fix is state-machine-visible: plan-stop first, determinism vector in
+      isolation. Acceptance: an unsigned-condition solution returns `1412` with the
+      rule error still readable, and §6a's stage-7 boundary pin is retired in the
+      same task. Off the exit path.
+
+- [x] **§6a EXIT DEMO part A — x402 ingress + ZK escrow + CVM release, LIVE** —
+      D-091. Split from the exit demo at the approved plan-stop (D1); the exit
+      *criterion* is asserted at §6b, only the build is split. **D-079 DISCHARGED:**
+      a purpose-built CVM-schema CosmWasm contract (`demo/cvm-contract`, committed
+      artifact, Rust pinned 1.81.0), uploaded through a passing GOV proposal after a
+      direct `MsgStoreCode` is rejected `ErrUnauthorized`, released a real ZK escrow
+      with a real groth16 proof — seller paid, escrow `RELEASED` — with three
+      contract-driven negatives first (wrong-instance proof → `ErrInvalidProof`,
+      preimage-on-ZK → `ErrWrongClass`, contract-emitted `conclude` → allowlist
+      reject). **The finding that opened the task and SURVIVES it:** conditioned
+      escrows had no live-network writer at all, so the whole escrow condition
+      system had only ever been exercised by keeper-level hand-built Matches — and
+      after §6a the only live writer is DEMO tooling (→ 2.13). Stage 7 proves that
+      writer cannot IMPOSE a condition (buyer signs nothing → solution rejected
+      "did not sign this ZK condition", solver slashed 5%) — D-076 reached from the
+      live path for the first time. **INTERNAL acceptance run** (D6/D-090), printed
+      in the demo's own banner; stage 6 DEMONSTRATES the D-087 boundary rather than
+      avoiding it (receipt reads `condition_outcome=NONE`, §6.3 check 3 correctly
+      REJECTS the conditioned leg as delivery evidence, delivery proven instead by
+      the escrow's terminal state). Record: `docs/EXIT_DEMO.md`. `make lint test`
+      green; determinism vector byte-identical to the D-082 baseline (covering gate
+      named separately: the vector covers nothing here — `scripts/exit_demo.sh` is
+      the gate). Findings F-2 (Rust ≥1.82 `reference-types` vs wasmvm 2.2.8) and F-3
+      (a check of mine that passed for the wrong reason) recorded in D-091.
+
+- [ ] **§6b EXIT DEMO part B — the IBC leg; the exit criterion is asserted HERE.**
+      The remaining half of the §6 exit demo: a REAL ICS-20 USDC transfer over a
+      LIVE RELAYER between two chains (**D-082's sole-owned obligation** — not the
+      in-process ibctesting harness), the receipt verified against the root held by
+      a **second chain's on-chain light client** of Conclave, and §6a's whole flow
+      re-run on the resulting `ibc/<hash>` voucher as the settlement denom. Approved
+      plan-stop decisions carried in: chain B is a second `conclaved`
+      (`conclave-dev-2`), chain A stays single-node with the epoch-0 plaintext-Veil
+      boundary NAMED (the encrypted reveal is D-070's, on its own 4-validator
+      harness), and the run stays **INTERNAL** unless task 2.9 lands first. Extends
+      `docs/EXIT_DEMO.md` rather than replacing it.
 
 ## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
 

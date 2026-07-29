@@ -4401,3 +4401,170 @@ worth finding before spending a session on receipt semantics.
   task number**, now noted so the commit maps to something.
 - **No code defect was found**, so no new numbered task was created by this
   audit. Every correction above is a docs, tooling, or comment change.
+
+## D-091 — Phase-2 §6 EXIT DEMO part A (§6a): the CVM demo contract + the first LIVE conditioned ZK settlement; D-079 discharged; the condition-attaching writer is DEMO tooling; NEW task 2.13
+
+- **Date:** 2026-07-29 (§6a build, after the approved plan-stop; §6b — the IBC
+  leg — is a separate session by that same approved split).
+- **SPEC:** §6.2 (fee abstraction), §6.4 (solutions/CONCLUDE), §6.5 (escrow
+  classes), §6.6 (receipts), §9 (edges), §10 (Phase-2 exit); PHASE2_DESIGN §6;
+  builds on **D-075/D-076** (the consent gates), **D-079** (CVM bindings + the
+  deferred localnet smoke), **D-083** (x402 surface), **D-086/D-087** (evidence
+  contract + the condition_outcome disclosure), **D-090** (the internal-run
+  condition); METHODOLOGY Rules 1/2/3/4/5/7/8/9.
+- **Plan-stop decisions (approved, recorded before building):** D1 SPLIT into
+  §6a/§6b — the exit criterion is asserted at §6b, only the build is split;
+  D2 chain B = a second `conclaved` (`conclave-dev-2`), not gaiad; D3 chain A =
+  single-node, with the epoch-0 plaintext-Veil boundary NAMED rather than
+  implied; D4 the condition-attaching path lives in `cmd/conclave-demo`, NOT in
+  `solver/` (which `x/session/simulation` imports — Rule 7); D5 the built wasm
+  artifact is COMMITTED (the committed-VK precedent); D6 **INTERNAL acceptance
+  run** (D-090's hard condition; task 2.9 is a prerequisite for any
+  external-facing use, and the demo prints this in its own banner).
+
+### The finding the task opened with, which SURVIVES the task
+
+`SettleLeg.Condition` had **no live-network writer**. Verified by grep before any
+code was written: `x/session/keeper/fallback.go` never sets it, non-test
+`solver/` never sets it, and escrows are created ONLY by CONCLUDE (there is no
+`MsgCreateEscrow`). Consequence: **every conditioned-escrow proof in the tree was
+a keeper-level hand-built `Match`** — the entire escrow condition system had
+never been exercised by a path a real network could take. That is precisely what
+this demo existed to discover, and it surfaced at hour zero.
+
+`cmd/conclave-demo` is now that writer — **and it is dev tooling**, so the
+statement is still true of production paths. This is recorded loudly in three
+places (the demo's package comment, EXIT_DEMO.md, here) because "the demo can do
+it now" must not be read as "the network can do it now". Whether the gap is
+INTENDED (conditions are solver-attached by design, third-party solvers attach
+them, and the chain's job is to verify consent — which §6a proves it does, live)
+or a REAL GAP (no reference implementation shows a solver how) is the open
+question given to **task 2.13**.
+
+### What shipped
+
+- **`demo/cvm-contract/`** — a purpose-built CosmWasm contract in the CVM schema
+  (Rust, `cosmwasm-std` EXACT-pinned `=2.2.8` to match the node's `wasmvm
+  v2.2.8`; a caret range floats to 2.3.x, a different VM line). It is a
+  transparent conduit: each `ExecuteMsg` emits exactly one CVM custom message and
+  the contract holds no state, so everything the demo observes is attributable to
+  the BINDINGS, not to contract logic. Its `conclude` branch is deliberately
+  present and deliberately not allowlisted. An in-crate test pins the exact JSON
+  the Go encoder must accept, so a rename on either side fails at `cargo test`.
+  **The built artifact is committed** (~204 KB) so the demo runs without Rust;
+  `make demo-contract` rebuilds it.
+- **`cmd/conclave-demo/exit_demo.go` + the `exit-demo` subcommand** — seven
+  stages (see docs/EXIT_DEMO.md), including the condition-attaching proposer.
+- **`scripts/exit_demo.sh`** + two default-OFF genesis knobs in `localnet.sh`
+  (`SESSION_LENGTH_BLOCKS` / `SOLUTION_WINDOW_BLOCKS`). The SPEC §6.4 dev
+  defaults are 3/2 blocks; on a 1s-block node that is an auction window the
+  driver can LOSE to the fallback matcher, which would clear the pair
+  UNCONDITIONED and open no escrow. Demo timing only — no code path changes, and
+  every existing script keeps the defaults.
+- **`docs/EXIT_DEMO.md`** — the acceptance record, its boundaries, and findings.
+
+### D-079 DISCHARGED — the live contract-release smoke
+
+A real contract, uploaded through a **passing governance proposal** (a direct
+`MsgStoreCode` is rejected `ErrUnauthorized` first — the permissioned posture
+proven live, not assumed), released a **real ZK escrow** with a **real groth16
+proof** on a live node: escrow `ACTIVE → RELEASED`, seller paid `250000000uusdc`.
+Three negatives ran first, from the same contract: a proof bound to ANOTHER
+escrow is rejected `ErrInvalidProof` (D-076 instance binding, live), a preimage
+release on a ZK escrow is `ErrWrongClass` (the binding reaches the real keeper
+gate), and a contract-emitted `conclude` is rejected by the CVM encoder (layer 1,
+from a contract that genuinely emitted it — which `reflect` could never do, and
+which is exactly why D-079 deferred this). Ordering is load-bearing: the
+wrong-instance proof runs BEFORE the release, because afterwards the escrow is
+terminal and the same attempt would fail as `ErrTerminalState`, proving nothing.
+
+### The zktest proving-key constraint — VERIFIED, not restated
+
+`crypto/zkdelivery/zktest` says "imported only by tests, so the proving key never
+enters the consensus binary"; the demo driver now imports it, so the constraint
+was RE-VERIFIED rather than re-asserted, at two levels:
+
+- **import graph:** `go list -deps ./cmd/conclaved | grep -c zkdelivery/zktest`
+  → **0** (the verifier `crypto/zkdelivery` + `circuit` are present, as they must
+  be); the same grep on `./cmd/conclave-demo` → present.
+- **byte level:** the first 64 bytes of `delivery_v1.pk` appear in the built
+  `conclave-demo` binary and are **absent** from the built `conclaved`.
+
+Both checks are one command each and should be re-run at any boundary that moves
+this import. The load-bearing property is "never in `conclaved`", and that is now
+measured rather than asserted; the package doc's "imported only by tests" is
+widened in fact to "tests and dev tooling".
+
+### FINDINGS
+
+- **F-1 (NEW TASK 2.13) — the registered error code is lost on the wire.**
+  `ProposeSolution` returns `errors.Join(types.ErrInvalidSolution, ruleErr)`;
+  `cosmossdk.io/errors` cannot walk a multi-error `Unwrap() []error`, so ABCI
+  code extraction falls back to internal code **1** instead of session **1412**.
+  The reason text survives, so the gate is diagnosable by string but not by code:
+  every invalid solution looks like an internal error to an off-chain solver, and
+  no client can dispatch on the documented codespace. **NOT fixed here** — tx
+  result codes are consensus data (they enter `LastResultsHash`), so changing one
+  is a state-machine-visible change that must run the determinism gate in
+  isolation under its own plan-stop. Found by the live consent negative; pinned
+  BY NAME in the demo (the `TestSpendIntentF2BoundaryPin` pattern) so 2.13's fix
+  turns it red deliberately rather than drifting.
+- **F-2 — Rust ≥1.82 emits wasm `reference-types`, wasmvm v2.2.8 rejects it.**
+  Watched in this order: (1) Rust 1.85, no flags → the gov proposal PASSED its
+  vote and then FAILED on execution, `"reference-types not enabled ... at offset
+  0x6ff"`; (2) `-C target-feature=-reference-types` → **still failed**, at offset
+  `0x1c94d`, because the flag governs this crate's codegen and not the
+  precompiled `rust-std` it links; (3) **Rust 1.81.0 → accepted**. So the
+  toolchain pin (`rust-toolchain.toml`) is the mechanism and the rustflag was
+  tried and REMOVED rather than left in as cargo-cult. 1.81's Cargo predates
+  `edition2024`, so four transitive deps are held below latest in the COMMITTED
+  `Cargo.lock` (zeroize 1.8.1, zeroize_derive 1.4.2, rmp-serde 1.3.0, rmp
+  0.8.14) — the lock is what makes the build reproducible rather than
+  resolution-date dependent. Contained entirely in dev tooling: no Go dependency
+  moved, the §4 two-pin ceiling is untouched.
+- **F-3 (self-correction, Rule 8) — my own check passed for the wrong reason.**
+  Stage 4's permissioned-upload assertion originally required only `code != 0`,
+  and the first run "passed" it on code **11 — out of gas on tx size**, which
+  says nothing about upload permission. Tightened to require `ErrUnauthorized`
+  specifically, at which point it became a real posture proof. Recorded because
+  this is exactly the vacuous-green failure Rule 4 exists to catch, caught in the
+  session's own new code.
+
+### Load-bearing negatives (Rule 3), all watched on a live node
+
+The demo's stage 5 negatives (a)(b)(c) and stage 7 are the guards. **Stage 7 is
+the one that matters most for what this task ADDS:** since `cmd/conclave-demo` is
+now the first live writer of `SettleLeg.Condition`, the question is whether that
+writer can IMPOSE a condition. It cannot — with the seller signing the ZK
+condition and the buyer signing nothing, the solution is rejected specifically
+for *"buyer … did not sign this ZK condition"* (D-076) and the solver is slashed
+5%. That is the D-076 gate proven reached from the LIVE path, where previously
+only keeper tests reached it. Stage 7 runs LAST because the 5% slash takes
+solver1's bond below `solver_min_bond`.
+
+### Gates
+
+`make lint` + `make test` green; determinism vector **byte-identical to the
+D-082 baseline** across two independent processes, run before and after with the
+tree fingerprinted both times (Rule 9). **Named covering gate (Rule 7):** the
+vector covers NOTHING in this task — no consensus code changed, and the sim's
+generator reaches neither escrow conditions nor wasm (x/wasm is sim-excluded,
+D-079). The covering gate is `scripts/exit_demo.sh` itself, whose every stage is
+an assertion, plus the pre-existing `TestConcludeConditioned_Zk` and
+`app/cvm_bindings_test.go` suites at the in-process level.
+
+### Forward items
+
+- **NEW task 2.13 — solver-side condition attachment + the F-1 error-code loss.**
+  Two items, one owner, both surfaced by this demo: (a) decide and record whether
+  a PRODUCTION path should be able to attach delivery conditions, and if so ship
+  it (the reference solver is the natural home; note it is imported by
+  `x/session/simulation`, so any change there runs the determinism vector in
+  isolation); (b) fix F-1 so `ErrInvalidSolution`'s registered code survives to
+  the wire, with the determinism gate run in isolation because tx result codes
+  are consensus data. Acceptance: a solution rejected for an unsigned condition
+  returns session `1412` with the rule error still readable, and §6a's stage-7
+  pin is retired in the same task.
+- **§6b (the remaining exit work)** owns D-082's live relayer USDC demo, the
+  second-chain light-client verification, and re-running §6a's flow on the
+  `ibc/<hash>` voucher. The exit criterion is asserted there, not here.

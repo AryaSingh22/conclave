@@ -38,6 +38,17 @@ lint-fix:
 localnet:
 	./scripts/localnet.sh
 
+# demo-contract rebuilds the §6 exit demo's CVM-schema CosmWasm contract and
+# refreshes the COMMITTED artifact. Needs a Rust toolchain with the wasm32
+# target (`rustup target add wasm32-unknown-unknown`). Deliberately NOT a
+# prerequisite of build/test/install: the artifact is committed so the demo runs
+# without Rust, and nothing this builds enters conclaved (dev tooling).
+demo-contract:
+	cd demo/cvm-contract && cargo build --release --target wasm32-unknown-unknown
+	cp demo/cvm-contract/target/wasm32-unknown-unknown/release/conclave_demo_escrow.wasm \
+		demo/cvm-contract/artifacts/conclave_demo_escrow.wasm
+	@echo "artifact: demo/cvm-contract/artifacts/conclave_demo_escrow.wasm"
+
 # proto-gen regenerates Go code from proto/ (idempotent — SPEC §10 row 0.2)
 proto-gen:
 	./scripts/protocgen.sh
@@ -45,4 +56,4 @@ proto-gen:
 proto-lint:
 	cd proto && buf lint
 
-.PHONY: all install build test sim-determinism lint lint-fix localnet proto-gen proto-lint
+.PHONY: all install build test sim-determinism lint lint-fix localnet demo-contract proto-gen proto-lint

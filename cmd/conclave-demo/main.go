@@ -66,11 +66,14 @@ const (
 	usdc         = 1_000_000 // 1 USDC = 1e6 uusdc
 	settleTTL    = 1_000     // blocks ahead; far enough not to expire mid-demo
 	waitTimeout  = 90 * time.Second
+	// defaultDemoGas covers every msg the demo sends except the exit demo's
+	// contract upload, which passes its own limit (see signTxFeeGas).
+	defaultDemoGas = 2_000_000
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check|7683-check> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: conclave-demo <setup|cycle-and-assert|fallback|x402-check|7683-check|exit-demo> [flags]")
 		os.Exit(2)
 	}
 	sub := os.Args[1]
@@ -104,6 +107,8 @@ func main() {
 		err = c.x402Check()
 	case "7683-check":
 		err = c.erc7683Check()
+	case "exit-demo":
+		err = c.exitDemo()
 	case "veil-e2e":
 		err = c.veilE2E()
 	case "veil-f4-adversary":
@@ -441,6 +446,10 @@ func (c *cli) fallback() error {
 type txSpec struct {
 	priv cryptotypes.PrivKey
 	msg  sdk.Msg
+	// fee is optional; empty means "no explicit fee" exactly as before. The §6
+	// exit demo needs ONE leg of a concurrently-submitted pair to carry a
+	// uusdc fee (the x402 gas-fronting claim) while the other pays natively.
+	fee sdk.Coins
 }
 
 func (c *cli) buildIntent(sender sdk.AccAddress, sigil string, give, want []veiltypes.IntentLeg, ttl uint64) *veiltypes.MsgSubmitIntent {
@@ -549,7 +558,7 @@ func (c *cli) submitConcurrent(specs []txSpec) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		bz, err := c.signTx(s.priv, acc.GetAccountNumber(), acc.GetSequence(), s.msg)
+		bz, err := c.signTxFee(s.priv, acc.GetAccountNumber(), acc.GetSequence(), s.fee, s.msg)
 		if err != nil {
 			return nil, err
 		}
@@ -846,12 +855,19 @@ func (c *cli) signTx(priv cryptotypes.PrivKey, accNum, seq uint64, msgs ...sdk.M
 // signTxFee is signTx with an explicit fee — the x402-check §4 case needs a
 // real uusdc fee on the wire for the FeeAbstractionDecorator to convert.
 func (c *cli) signTxFee(priv cryptotypes.PrivKey, accNum, seq uint64, fee sdk.Coins, msgs ...sdk.Msg) ([]byte, error) {
+	return c.signTxFeeGas(priv, accNum, seq, fee, defaultDemoGas, msgs...)
+}
+
+// signTxFeeGas is signTxFee with an explicit gas limit. The §6 exit demo needs
+// it: a MsgStoreCode carrying a ~212 KB contract exceeds defaultDemoGas on
+// txSize alone.
+func (c *cli) signTxFeeGas(priv cryptotypes.PrivKey, accNum, seq uint64, fee sdk.Coins, gas uint64, msgs ...sdk.Msg) ([]byte, error) {
 	txConfig := c.conclave.TxConfig()
 	builder := txConfig.NewTxBuilder()
 	if err := builder.SetMsgs(msgs...); err != nil {
 		return nil, err
 	}
-	builder.SetGasLimit(2_000_000)
+	builder.SetGasLimit(gas)
 	if !fee.IsZero() {
 		builder.SetFeeAmount(fee)
 	}
