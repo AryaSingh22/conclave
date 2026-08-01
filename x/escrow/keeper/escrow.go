@@ -169,9 +169,16 @@ func (k Keeper) CreateEscrow(ctx sdk.Context, esc types.Escrow, payerAddr, payee
 		esc.TimeoutHeight = esc.CreatedHeight + window
 	}
 
+	// The amounts come from types.FundingRequirement, which is the SINGLE
+	// definition of what this escrow costs each side (task 2.7): the fallback
+	// matcher's candidate-time affordability pre-check reads the same function,
+	// so a candidate can never be admitted on a different notion of the bill
+	// than the one charged here.
+	fromPayer, fromPayee := types.FundingRequirement(esc)
+
 	// Fund the escrow with the buyer's payment.
-	if !esc.Amount.Empty() {
-		if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, payerAddr, types.ModuleName, esc.Amount); err != nil {
+	if !fromPayer.Empty() {
+		if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, payerAddr, types.ModuleName, fromPayer); err != nil {
 			return err
 		}
 	}
@@ -179,9 +186,8 @@ func (k Keeper) CreateEscrow(ctx sdk.Context, esc types.Escrow, payerAddr, payee
 	// OPTIMISTIC: the seller posts the dispute bond and we persist the
 	// buyer-agreed committed content hash for the dispute-reveal check.
 	if class == classOptimistic {
-		bond := types.SellerBondCoins(esc.Amount)
-		if !bond.IsZero() {
-			if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, payeeAddr, types.ModuleName, bond); err != nil {
+		if !fromPayee.IsZero() {
+			if err := k.bankKeeper.SendCoinsFromAccountToModule(ctx, payeeAddr, types.ModuleName, fromPayee); err != nil {
 				return errorsmod.Wrap(types.ErrInsufficientBond, err.Error())
 			}
 		}

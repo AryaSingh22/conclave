@@ -67,20 +67,37 @@ Every gateway-submitted transaction passes, in order:
    those bindings are enforced against each party's own signed payload at
    solution validation and at the settlement boundary.
 
-   ⚠️ **A signed condition is NOT a guarantee it will be ATTACHED** (D-093).
-   Those gates run in one direction only: they stop a condition being imposed
-   on you. Nothing requires a condition you signed to be honored — a solver
-   may settle your intent with no condition at all, and the in-consensus
-   fallback matcher (the default path whenever no solver wins the auction)
-   **always** does, because it never attaches conditions. Today nothing on a
-   live network attaches one: the only writer in the tree is the
-   `conclave-demo` exit-demo driver. For a gateway this means setting
-   `IntentPayload.condition` bounds what may be imposed on your principal but
-   **must not be treated as escrowed-delivery protection** — if the settlement
-   clears unconditioned, the payment leg settles straight to the seller and the
-   `x/escrow` record that opens is the record-only NONE kind (zero amount, no
-   release gate). Enforcement is task 2.7; a reference attachment path is task
-   2.14.
+   **A signed condition IS a guarantee it will be attached — since task 2.7
+   (D-094).** This paragraph previously warned the opposite, and the warning was
+   accurate for the tree it described: the gates ran in ONE direction (they
+   stopped a condition being imposed on you) and nothing required a condition you
+   signed to be honored, so a solver could settle your intent unconditioned and
+   the in-consensus fallback always did. **That is no longer true, and the
+   correction is stated rather than the old text quietly deleted** (D-093 → D-094).
+   What holds now:
+   - `signed ⇒ attached` is enforced at solution validation AND at the settlement
+     boundary. A settlement that drops a condition your principal signed is an
+     invalid solution — **`ErrConditionNotHonored`, codespace `session` code
+     `1429`** — and the solver is slashed 5%.
+   - The in-consensus fallback matcher **attaches** your signed condition rather
+     than dropping it. If the counterparty has not consented, the pair is left
+     UNMATCHED — never downgraded to an unconditioned clearing.
+   - **Consequence a gateway must plan for:** setting `IntentPayload.condition`
+     now bounds what may be imposed on your principal AND obliges the protocol to
+     deliver it, so a condition your counterparty will not accept means **no fill**
+     (the intent rolls to TTL and its bond is refunded) rather than a silent
+     unconditioned settlement. That is the intended trade.
+   - **The buyer's side is a per-class RELATION, not equality**, because a buyer
+     cannot pre-commit a HASHLOCK `payload_hash`. Sign the bound you actually
+     want: HASHLOCK `timeout_blocks` is a **MAXIMUM** you accept (a longer one
+     keeps your payment locked longer before auto-refund); OPTIMISTIC
+     `dispute_window_blocks` is a **MINIMUM** (the window is your time to inspect
+     and dispute before funds release); ZK_DELIVERY is **exact** on
+     `schema_commitment` + `vk_id`. A `payload_hash` you leave empty is
+     unconstrained; one you set must match exactly.
+   - **Still true:** nothing but the fallback attaches conditions on a live
+     network today — no third-party solver reference exists yet (task **2.14**),
+     so conditioned trades currently clear via the fallback path.
 
 **Binding stability (D-084).** A grantee key's sigil binding cannot be
 changed by any third party: re-issuing a mandate to an already-bound grantee

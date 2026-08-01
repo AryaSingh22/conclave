@@ -51,13 +51,14 @@ load-bearing and recorded (§4).
 | 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | **DONE** — surface complete after ONE gap the conformance test found (fallback clearings now persist their winning Solution); G1(2.4) `condition_outcome` disclosed + neutralized | `c830e55`, D-086/087 · artifact: `docs/edge/7683_SURFACE.md` |
 | 2.11 | Store-iterator range-end correctness (x/mandate, x/sigil) | **DONE** — split out of 2.6 at a STOP and landed FIRST; 8 sites, 2 LIVE-broken (one on the §6.4 rule-5 consensus path); vector byte-identical | `d34ede0`, D-088 |
 | 2.6 | Matcher-richness hardening (3 of the 5 matcher TODOs closed; 2 split out) | **DONE** — §5.1 limit RATE honored (closes D-049/F-7), partial-fill cycles + alternate anchoring, 2-party partial-fill fallback; all three strictly ADDITIVE, vector byte-identical three times | `aa21274`, D-089 |
-| 2.7 | Escrow consent completeness (FW-1 + FW-2, incl. the items re-pointed here by D-089) **+ the DOWNGRADE row written in by 2.13** — `signed ⇒ attached` is enforced nowhere, incl. the ZK case its own narrowed FW-1 had orphaned | **open** | D-078, D-089, **D-093** |
+| 2.7 | Escrow consent completeness (FW-1 + FW-2 + the D-089 re-points + the DOWNGRADE row) | **DONE** — a signed condition is now a **REQUIREMENT**: `signed ⇒ attached` enforced at both chokepoints (the fix is the LOOP BOUND, proven by reverting each bound alone), the in-consensus **fallback made an ATTACHER** so the rule ships with a live path that meets it, FW-1(a)+(b) landed as ONE per-class relation (HASHLOCK ceiling vs OPTIMISTIC floor — opposite directions, disjoint watched reds), FW-2's `IntentLeg.condition` landed with a real reader, D-074 kept (collision dissolved as orthogonal), both D-089 re-points explicitly re-deferred to NEW **2.15**; vector byte-identical twice, exit demo green unedited | `D-094`, D-078, D-089, D-093 |
 | 2.8 | Submit-charge STRUCTURAL fork (design question only — the G2 security hole is CLOSED in 2.3) + the timeouts→params promotion | **open** | D-085 |
 | 2.9 | Receipt condition-outcome integrity (`CONDITION_OUTCOME_PENDING` + escrow write-back) | **open** | D-087 |
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
 | 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | D-093 |
-| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **open** (NEW in 2.13) | D-093 |
+| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **open** (NEW in 2.13) — 2.7 has now fixed WHAT it demonstrates, and handed it a live consequence to close: the in-tree reference solver will propose a slashable solution against a condition-signing intent until it learns to attach or skip | D-093, **D-094** |
+| 2.15 | §6.4 rule-3 per-leg attribution — TODO 9's `SettleLeg` intent tag + the `ErrLimitRateUnsupported` 1428 counter-asset designator | **open** (NEW in 2.7) — both re-deferred from 2.7 with explicit verdicts; D-074 recorded as orthogonal, not colliding | D-089, **D-094** |
 | §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13) | D-091 · artifact: `docs/EXIT_DEMO.md` |
 | §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED** | D-092 · artifact: `docs/EXIT_DEMO.md` |
 
@@ -640,7 +641,37 @@ harness (1.0) green over the new surface; the flake fix in. **As executed
 (Rev 3):** three implemented, two split to numbered tasks at the plan-stop
 (2.10, 2.12), one re-pointed to 2.7/FW-2; the flake item became task 2.11.
 
-### 2.7 — Escrow consent completeness (NEW in Rev 2; owns the D-075/076 FW seams + the D-089 re-points)
+### 2.7 — Escrow consent completeness — ✅ COMPLETE (D-094)
+
+**As built.** A signed delivery condition is a **REQUIREMENT, not a permission
+ceiling**. The decision, its alternatives, and the per-class relation are
+recorded in **D-094**; the acceptance shape below was met in full, so only the
+deltas from what this section planned are called out here:
+
+- **The fallback ATTACHES** (the third of the three answers this section's
+  DOWNGRADE question permitted). That was not a scope addition but the thing
+  that removes the option's liveness cost: the fallback is the default clearing
+  path, so a rule it could not satisfy would mean condition-signing intents
+  never clear. It is now the tree's first real attacher.
+- **FW-1(a) and FW-1(b) landed in ONE mechanism** — a single predicate under two
+  quantifiers — with the class/window-level buyer form this section anticipated,
+  sharpened into a per-class *direction*: HASHLOCK's timeout is a MAXIMUM (it is
+  when the buyer's locked payment refunds) and OPTIMISTIC's window is a MINIMUM
+  (it IS the buyer's inspect-and-dispute protection). Opposite directions, each
+  the monotone-safe one for the party at risk.
+- **FW-2's plan-stop question answered: D-074 is KEPT**, and the collision this
+  section called "FW-2's own plan-stop question" **dissolves** — the two concerns
+  are orthogonal (D-074 is match SHAPE; per-leg tagging is WHICH condition
+  governs which leg). Nothing was relaxed.
+- **Both D-089 re-points returned explicit verdicts, as this section required:**
+  multi-intent-per-sigil re-deferred on SCOPE (not on D-074) and the
+  `ErrLimitRateUnsupported` lift declared **NOT enabled by FW-2** — a
+  `DeliveryCondition` names no counter-asset, which is exactly the outcome this
+  section pre-authorized ("if FW-2's plan-stop concludes the per-leg field does
+  not give a well-defined counter-asset either, the rejection stays and that
+  outcome is recorded"). Both are written into **new task 2.15**.
+
+*The Rev-2/Rev-3 planning text below is kept for the record.*
 
 **Ownership correction (Rev 3, D-090).** Two items were re-pointed *into* this
 task by D-089 but were never written into its acceptance criteria — a one-way

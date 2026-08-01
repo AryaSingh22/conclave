@@ -5060,3 +5060,333 @@ saying nothing would be worse, because "the gate ran on the shipping tree" is
 the single most load-bearing claim in the checklist (Rule 9 step 4) and it is
 now true modulo two Markdown files, which is what this sentence exists to make
 checkable.
+
+---
+
+## D-094 — Task 2.7: a signed delivery condition is a REQUIREMENT, not a permission ceiling — `signed ⇒ attached` ENFORCED, the in-consensus fallback made an ATTACHER, and FW-1/FW-2 landed
+
+- **Date:** 2026-07-30 (task 2.7, after two approved stops: the semantic in
+  isolation, then the build plan).
+- **SPEC:** §5.1 (`IntentPayload.condition`, `IntentLeg`), §6.4 (solution
+  validation, the atomic Conclude, the in-consensus fallback), §6.5 (condition
+  classes), §11.6 (determinism), §13 (stable codespaces); **UPDATES D-075**
+  (its FW-1 and FW-3 forward items) and **D-076** (extends the buyer gate from
+  ZK to all three classes); closes the DOWNGRADE row **D-093** wrote into this
+  task; builds on **D-073/D-074** (escrow funding + the bilateral shape),
+  **D-085** (the one-source-of-truth lesson), **D-089** (the two re-points),
+  **D-090** (the ownership discipline); METHODOLOGY Rules 1/2/3/4/6/7/8/9.
+
+### The decision, and the argument that actually carried it
+
+**A signed delivery condition is now a REQUIREMENT.** A settlement that drops
+one is invalid; the fallback attaches or leaves the pair unmatched.
+
+Three options were weighed at STOP #1 — (i) enforce, (ii) an explicit
+documented permission-ceiling posture, (iii) an opt-in `require_condition`
+flag. The decisive argument was **not** the severity of the exposure, which is
+the argument the ledger led with. It was **internal inconsistency in a single
+signed message**:
+
+| signed field of `IntentPayload` | enforced as | where |
+|---|---|---|
+| `give`/`want` quantities | REQUIREMENT | `checkLimits` |
+| `IntentLeg.limit` rate | REQUIREMENT (since 2.6) | `checkLimitRate` |
+| `counterparty_class` | REQUIREMENT | rule 5 |
+| `condition` | **permission ceiling only** | both chokepoints `continue`d |
+
+Every other field of the same object is a requirement; `condition` alone was a
+permission, and nothing in the tree or the SPEC said so. That basis is stronger
+than severity because it does not depend on how bad the exposure is. And
+**D-049/F-7 is this exact shape one task ago for the neighbouring field** —
+`limit` was "SIGNED by the agent and read by nobody, the worst of both worlds"
+— so deciding the smaller case (rate) one way and the larger case (principal,
+no recourse) the other way was indefensible.
+
+**Option (ii) died on its mitigation not surviving contact with the tree.** Its
+safety half was "do not create the record-only zero-amount shell, so nothing can
+be mistaken for protection". That shell is **SPEC-MANDATED** (§6.4: "DataGrant
+legs instantiate `x/escrow` entries instead of transferring", implemented at
+`conclude.go` `applyLeg`) and is the ONLY on-chain trace that an unconditioned
+data grant happened — data carries no ledger balance. Removing it needs a
+SPEC-deviation ADR and deletes the delivery record; MARKING it is a proto change
+to `Escrow`, which is task 2.9's territory. What remained of (ii) was "document
+it", already nearly shipped in both edge docs by D-093 — 2.7 would have closed
+as a docs task over a live economic exposure.
+
+**Option (iii) died on Rule 4 step 4.** An agent that signs a condition and
+forgets the flag gets buyer-pays-first-with-no-recourse: the unsafe reading as
+the default, silently and totally. Two artifacts to express one intention is
+also a consent-surface smell — the signature IS the intent, and a second field
+asserting "I meant it" makes the first one's meaning-without-it the question,
+whose honest answer is (ii).
+
+**The liveness objection, re-priced.** Nothing on a live network attaches
+conditions (task 2.14 is the reference), so enforcement means a condition-signing
+intent stops clearing. But the cost is **NO FILL, not stuck funds**: the intent
+rolls to TTL, reaches `INTENT_STATE_EXPIRED`, and its bond is refunded. Against
+that, what "clearing" meant for the same intent before 2.7 was clearing WRONGLY
+and irreversibly. Not clearing beats clearing wrongly when the wrong clearing
+cannot be undone — and fail-closed is this project's posture at every
+neighbouring boundary (D-075, D-076, `counterpartySatisfied`'s Decision A,
+`parseSignedLimit`'s "a garbage rate is never read as no rate").
+
+### R2 — the fallback ATTACHES (the decision that removes the liveness cost)
+
+The ledger permitted 2.7 to answer reject / attach / documented-posture for the
+fallback. Reject-only would have converted a correctness fix into a liveness
+cliff on the DEFAULT clearing path, so `buildFallbackMatch` now carries each
+giver's signed condition onto its own DataGrant leg. It was cheap because the
+matcher already loads the full payload and discarded everything but
+`give[0]`/`want[0]`, and because the pair it builds is already exactly D-074's
+conditioned shape — `pickNumeraire` rejects data-for-data and data-for-svc, so a
+conditioned fallback match is always data-for-coin, across two distinct sigils.
+
+The counterparty's consent is deliberately NOT consulted at attach time: the
+candidate faces the unchanged `validateSolution` bar, which runs the same
+predicate as every other clearing path. Keeping that decision in one place is
+what stops the fallback becoming a second, weaker definition of consent.
+
+**Consequence worth stating: the in-consensus fallback is now the FIRST REAL
+ATTACHER in the tree.** The rule ships with a live path that satisfies it rather
+than a rule nothing can meet.
+
+### R3 — the per-class buyer relation (the substantive design work)
+
+Buyer consent could not be equality: a buyer cannot pre-commit a HASHLOCK
+`payload_hash`, the post-delivery receipt token D-075 recorded as FW-1's whole
+reason for existing. The relation is derived from **what each timer protects**,
+not by analogy:
+
+| role / class | relation | derivation |
+|---|---|---|
+| seller, any class | EXACT (`conditionEqual`) | it generates the deliverable and knows the schema; D-075 unchanged |
+| buyer, ZK_DELIVERY | EXACT | `schema_commitment`/`vk_id` are advance-known and release is seller-driven against them; D-076 unchanged |
+| buyer, HASHLOCK | attached `timeout_blocks` **≤** signed | the timeout is when the buyer's LOCKED payment auto-refunds, so longer is worse: signed value is a **MAXIMUM** |
+| buyer, OPTIMISTIC | attached `dispute_window_blocks` **≥** signed | the window IS the buyer's protection — time to inspect and dispute before funds release — so shorter is worse: signed value is a **MINIMUM** |
+
+**The HASHLOCK and OPTIMISTIC bounds run in OPPOSITE directions, and that is the
+substance rather than an accident.** A single "the window must match" rule would
+be wrong for both; a single "at least as large" rule would be wrong for HASHLOCK.
+Each bound is the direction that is monotone-SAFE for the party carrying the
+risk. `payload_hash`: empty = UNCONSTRAINED, non-empty = exact — a buyer that
+knows it out of band may pin it, and pinning can only TIGHTEN.
+
+This lands **FW-1(a) and FW-1(b) in one mechanism**: requiring the buyer's
+consent to ATTACH (previously ZK-only, so a solver could impose a HASHLOCK or
+OPTIMISTIC timeline on a non-signing buyer) and forbidding the DROP.
+
+### One predicate, two quantifiers — and the loop bound is the actual fix
+
+Both directions are the same question — "does the attached condition satisfy
+what this party signed?" — differing only in quantifier: the attach direction
+asks it of the attached condition, the requirement direction asks whether SOME
+such condition was attached. `conditionSatisfies` is that one function, so the
+rule cannot be implemented for one direction, one role, or one class and not the
+others.
+
+**But the predicate alone would have closed nothing.** Before 2.7 both
+chokepoints iterated only legs that ALREADY carried a condition, so the single
+case they could never observe was the case that mattered. **Widening the loop to
+every DataGrant leg is the fix**; the predicate is what it then asks. That
+distinction is load-bearing and was proven as such (below).
+
+Error split, chosen so the two directions stay distinguishable by a test that
+can only fail one way: **`ErrConditionNotHonored` (session `1429`, NEW) fires for
+EXACTLY ONE case — attached is NONE while signed is not.** Every other rejection
+stays `ErrConditionNotConsented` (`1427`), whose registered text was corrected
+here (it said "the seller" and now covers both parties). No existing negative
+changed its error identity, including the live demo's stage-7 assertion.
+
+### FW-2 — the per-leg `IntentLeg.condition` field, with a reader
+
+`IntentLeg.condition = 5`. It REFINES the payload-level field: a matching signed
+leg that sets one is governed by it, one that leaves it unset falls back — so an
+intent written before the field existed resolves exactly as it did pre-2.7.
+
+**Its reader is `effectiveCondition`**, which resolves the condition governing
+one settlement leg for one party and feeds the predicate at BOTH chokepoints and
+in the fallback attacher. Rule 4 satisfied at landing: removing the per-leg
+branch turns named tests red (watched, below), so the field is load-bearing and
+not decoration.
+
+**No migration.** `IntentPayload` lives inside `SealedIntent.ciphertext` as
+marshaled bytes, not as its own store entry; a proto3 field addition does not
+change the encoding of existing payloads. No store migration, no genesis change.
+(The enforcement RULE is consensus-behaviour-changing and would need a
+coordinated upgrade on a live network — recorded, moot pre-testnet.)
+
+**Spec-unpinned choice, decided here and fail-CLOSED:** a per-leg field that is
+PRESENT but EMPTY does not exempt a leg from a payload-level condition; it falls
+back like an absent one. proto3 can distinguish the two, so per-leg exemption
+stays expressible later — but reading "empty submessage" as "this leg needs no
+protection" is a fail-OPEN default a client emitting empty messages could trip
+into silently. Refinement may only ADD a condition, never remove one.
+
+**D-074 VERDICT — kept, not relaxed.** FW-2's plan-stop question was whether the
+per-leg field relaxes the two-distinct-sigil bilateral constraint. It does not,
+and the feared head-on collision **dissolves**: the two are orthogonal. D-074
+constrains the SHAPE of a conditioned match (escrow funding needs one
+unambiguous coin payment against one deliverable); per-leg tagging is about
+WHICH signed condition governs which leg. Richer conditioned-settlement funding
+is what lifts D-074, and 2.7 does not build it.
+
+### The two D-089 re-points — EXPLICIT VERDICTS (neither left silently open)
+
+- **TODO 9 (multi-intent-per-sigil) — RE-DEFERRED to new task 2.15, collision
+  RESOLVED.** It is blocked by SCOPE, not by D-074: it needs a `SettleLeg`
+  intent-tag field plus a rewrite of flow attribution in
+  `CheckConservation`/`checkLimits` from per-SIGIL to per-INTENT — 2.10-scale
+  consensus surface, which Rule 7 step 2 forbids stacking on a task already
+  carrying a semantic change and a proto change.
+- **`ErrLimitRateUnsupported` (session `1428`) — NOT LIFTED; the rejection
+  STANDS.** PHASE2_DESIGN §2.7 anticipated this outcome and required it be
+  recorded rather than left greppable-and-unowned. The reason is concrete: FW-2's
+  field is a `DeliveryCondition`, and 1428 needs a **counter-asset designator** —
+  nothing about a delivery condition tells `checkLimitRate` which asset a give
+  leg's rate is denominated against. Different field, different question. → also
+  **2.15**.
+
+Both are written INTO 2.15's acceptance criteria, not pointed at it.
+
+### `solver/` — left wholly to 2.14, with the consequence recorded
+
+`solver/` is import-linked into `x/session/simulation`, so touching it would make
+2.7 carry a second vector-attribution cause for code the sim provably cannot
+exercise (zero `Condition` occurrences in `solver/` or `x/session/simulation`,
+test or non-test). **Consequence, stated rather than hidden: until 2.14 lands,
+the in-tree reference solver will propose a slashable solution the first time it
+meets a condition-signing intent.** Pre-testnet, no production solvers,
+acceptable — and written INTO 2.14's row.
+
+### Load-bearing tests (Rule 3) — PREDICTED, watched, and one prediction WRONG
+
+**The loop-bound sabotage, run because the predicate could otherwise be proven
+on legs the loop happens to visit.** Reverting ONLY the loop bound (predicate
+untouched), one chokepoint at a time:
+
+- validation bound only → all 7 `TestDowngradeRejected_EveryClassEverySigner`
+  cases red at the VALIDATION assertion (line 82) plus
+  `TestSignedConditionIsRequirement_Enforced`; the settlement-only tests
+  (`TestPerLegEmptyConditionDoesNotExemptALeg`, `TestConcludeConditioned*`)
+  stayed **green**.
+- settlement bound only → the mirror image: the same cases red at the SETTLEMENT
+  assertion (line 88, so line 82 had passed), plus the settlement-only test.
+
+That pair is the proof the WIDENING is what closed the hole, and that the two
+chokepoints are independently load-bearing.
+
+**A PREDICTION THAT WAS WRONG, kept visible (Rule 8).** Flipping HASHLOCK's bound
+direction was predicted to red the two ceiling subtests "and nothing else". It
+red **four** tests: `TestConcludeConditioned_Hashlock` and
+`TestPerLegConditionOverridesPayloadLevel` also carry attached-under-ceiling
+shapes. The mechanism was right and the inventory of consumers was not — the
+guard has more consumers than I named, which is a stronger position than
+predicted, not a weaker one.
+
+**The two flips red DISJOINT test sets** — HASHLOCK's flip touched no OPTIMISTIC
+test and vice versa. That disjointness is the evidence the opposite directions
+are independently load-bearing, which is the claim R3 rests on.
+
+Other watched reds, each predicted then observed: attacher removed → the
+`_Enforced` fallback half + the affordability test; `fallbackCanFund` bypassed →
+only the affordability test; `effectiveCondition`'s per-leg branch removed → only
+the two FW-2 subtests.
+
+**DOSED at `-count=25`** (D-089's lesson — the fallback's seller/buyer roles
+follow content-derived intent-id ordering, so a one-shot result exercises one
+side by accident): the suite green **25/25**, and the two fallback sabotages red
+**25/25**. The red is the rule, not a draw.
+
+**A fixture migration that is a semantic change, not plumbing.**
+`TestConcludeConditioned_Hashlock`/`_Optimistic` used to pass with the buyer
+signing NONE; under FW-1(a) that exact shape is now a 1427 rejection. Both moved
+to `setupBilateralBoth` with EVERY assertion preserved, and the behaviour that
+changed is pinned by two NEW mirror negatives
+(`..._Hashlock_BuyerNotConsented`, `..._Optimistic_BuyerNotConsented`), so the
+migration deletes no coverage.
+
+`TestUnconditionedPairStillClears` guards the other direction — a requirement
+rule that rejected everything would pass every downgrade test — by proving a
+pair who signed nothing settles exactly as before.
+
+### The boundary pin, REPLACED
+
+`TestSignedConditionIsPermissionNotRequirement_BoundaryPin` (D-093) instructed
+its owner to replace it with the enforcement assertions rather than relax it.
+`TestSignedConditionIsRequirement_Enforced` is that replacement: the same two
+clearing paths, the same observable facts, every assertion inverted — the solver
+omission now REJECTED (1429) and SLASHED with no escrow and no payment to the
+seller, and the fallback now ATTACHING and settling into a funded escrow that
+HOLDS the payment.
+
+### Gates
+
+Sequenced so drift is attributable (Rule 7 step 2), each run in ISOLATION with
+the tree fingerprinted before and after (Rule 9 step 4):
+
+- **Baseline** at `0d7f167`, clean tree: `make lint test` EXIT=0.
+- **Cause A — proto + regen ALONE:** 5 seeds × 3 runs, **byte-identical to the
+  D-082 baseline** (seed 1 `245EF177…`, seed 2 `B48BDA6D…`, seed 7 `FA562B1D…`,
+  seed 12 `E491FB48…`, seed 42 `6596CCA1…`), EXIT=0, fingerprint `049cf647…`
+  identical before and after. **No re-baseline.**
+- **Cause B — the semantic + fallback wiring:** same 5 hashes, EXIT=0,
+  fingerprint `84e17012…` identical before and after. **No re-baseline.**
+- `make lint` + `make test` green on the shipping source.
+- **`scripts/exit_demo.sh` on a live node: `EXIT_RC=0`, PASSED, with ZERO edits
+  to the demo.** Its staying green was recorded as a PREDICTION before the run
+  (both parties sign at `exit_demo.go:313-316`; stage 7's negative keeps its 1427
+  identity because attaching to a NONE-signing buyer is still the attach
+  direction) — a red there would have been a finding about the semantic's reach,
+  not a fixture to adjust. Stage 7 printed its consent-gate and wire-identity
+  assertions unchanged.
+
+**Named covering gate (Rule 7 step 5) — the vector covers NOTHING here.** This is
+a **Category-1 (GENERATOR)** shadow throughout: the sim's intent generator never
+sets `IntentPayload.condition` or the new `IntentLeg.condition` (zero occurrences
+in `x/session/simulation` or `solver/`, test or non-test), so every path this
+task adds is structurally unreachable by the vector under any seed count. More
+seeds buy nothing; only a wider generator would (PHASE3_PLAN 3.5). Byte-identical
+across both causes is therefore evidence of **ADDITIVITY, never of correctness**.
+The primary gates are the hand-built fixtures in
+`x/session/keeper/condition_binding_test.go` plus the replaced boundary pin, with
+`scripts/exit_demo.sh` covering the live attach path and the vector demoted to
+regression backstop.
+
+### Forward items, written INTO their receiving tasks (Rule 6 sub-rule 6)
+
+- **2.15 (NEW)** — §6.4 rule-3 per-leg attribution: the TODO-9 intent tag and the
+  1428 counter-asset designator, with D-074 recorded as unaffected.
+- **2.14** — the reference-solver row now carries the slashable-reference-solver
+  consequence above.
+- **2.9** — now carries the consequence that enforcement makes conditioned
+  settlements MORE common, so its unconditional `condition_outcome = NONE` stamp
+  is wrong more often. Accepted there, not pointed at it.
+
+### Deviation surfaced (Rule 8)
+
+`docs/`, `CLAUDE.md` and `docs/METHODOLOGY.md` were edited AFTER the isolated
+cause-B vector run, by the approved sequencing (source + gate first, so
+attribution is clean by construction). The shipping fingerprint is therefore
+`f6bb6692…` while the gate ran at `84e17012…`.
+
+**That difference is PROVEN Markdown-only, not asserted to be** — which is what
+Rule 9 step 4 exists for, and which D-093 could only state in prose:
+
+```
+$ git diff -- ':(exclude)*.md' | sha256sum
+84e170121a45f112d7ff8af66f84d7f37fcfbb8b32d0e2187490623d221d9499
+```
+
+The shipping tree's source-only diff hashes to **exactly** the full-diff
+fingerprint recorded at the gate, so not one source or test byte changed after
+the vector ran. "The gate ran on the shipping tree" is the single most
+load-bearing claim in the checklist; here it is re-checkable with one command.
+
+**This is now the close-out standard, not a one-off.** Promoted at review into
+METHODOLOGY Rule 9 step 4 as a TWO-fingerprint discipline — full-tree DURING the
+run (it has caught real process errors twice), source-only at CLOSE-OUT to
+justify the post-gate documentation edit that honest sequencing makes
+inevitable. The amendment is also the first in METHODOLOGY's history that came
+from a rule being FOLLOWED rather than failing: D-093 obeyed Rule 9 and still had
+to end in a sentence asking the reader to trust it, which is the signal a rule
+has one more step in it.

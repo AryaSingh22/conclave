@@ -158,17 +158,22 @@ Field contract as X402_SURFACE.md §3.1; the 7683-specific rules:
   escrow after CONCLUDE and may later refund, so its receipt is not
   delivery evidence (§6.4), and the mandated bridge check rejects it
   (§6.3 check 3).
-  ⚠️ **And note the reason this recommendation costs you nothing: a signed
-  condition is not a guarantee it will be ATTACHED** (D-093). The D-075/D-076
-  gates are one-directional — they stop a condition being imposed on you, but
-  nothing requires one you signed to be honored. A solver may settle your
-  intent unconditioned, and the in-consensus fallback matcher (the default path
-  whenever no solver wins the auction) **always** does, because it never
-  attaches conditions; today nothing on a live network attaches one at all. So
-  a resolver that signs a condition must not treat it as escrowed-delivery
-  protection: it may simply be dropped, and the settlement then clears with the
-  payment going straight to the seller. Enforcement is task 2.7; a reference
-  attachment path is task 2.14.
+  ⚠️ **The reason this recommendation costs you nothing has CHANGED; the
+  recommendation has not** (D-093 → D-094, task 2.7). This paragraph used to say
+  a signed condition was not a guarantee it would be attached — accurate for the
+  tree it described, and **no longer true**. Since 2.7, `signed ⇒ attached` is
+  enforced at solution validation AND at the settlement boundary
+  (`ErrConditionNotHonored`, codespace `session` code `1429`, solver slashed 5%),
+  and the in-consensus fallback matcher ATTACHES a signed condition instead of
+  dropping it. **The correction changes the cost, and a resolver should read it
+  that way: signing a condition now costs you FILLS, not protection.** A
+  condition the counterparty has not consented to leaves the pair UNMATCHED — the
+  intent rolls to TTL and its bond is refunded — rather than clearing
+  unconditioned with the payment going straight to the seller. So "submit
+  unconditioned for the v1 fill-back rail" still stands: now because a
+  conditioned intent may simply not clear, and still because a conditioned leg's
+  funds sit in escrow after CONCLUDE and its receipt is not delivery evidence.
+  A reference solver-side attachment path remains task **2.14**.
 - **Bond sizing, lifecycle states, cancel:** X402_SURFACE.md §3.1/§3.3.
 
 ### 3.2 Matcher behavior that became resolver-visible in task 2.6 (D-089)

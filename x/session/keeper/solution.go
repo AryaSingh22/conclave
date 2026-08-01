@@ -1,7 +1,6 @@
 package keeper
 
 import (
-	"bytes"
 	"encoding/hex"
 	"sort"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/session/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
@@ -216,14 +214,16 @@ func (k Keeper) validateSolution(ctx sdk.Context, session types.Session, matches
 		if err := validateConditionedMatch(m); err != nil {
 			return errorsmod.Wrapf(err, "match %d", mi)
 		}
-		// CONSENT (D-075): the condition lives only on the solver-built
-		// SettleLeg, which no party signs. A solver is UNTRUSTED, so it must not
-		// be able to bind a seller to a delivery obligation + bond/slash the
-		// seller never signed. Enforce that every conditioned leg's condition
-		// EQUALS the seller (FromSigil) intent's signed IntentPayload.condition
-		// (carried in the signed ciphertext). A seller's default NONE rejects
-		// any imposed condition → the conditioned match fails → fallback.
-		if err := validateConditionConsent(m, byID); err != nil {
+		// CONSENT, BOTH DIRECTIONS (D-075/D-076 + task 2.7's D-094). The
+		// condition lives only on the solver-built SettleLeg, which no party
+		// signs, so an UNTRUSTED solver must not be able to bind a party to an
+		// obligation, a bond/slash machine, or a payment timeline it never
+		// signed — and, since 2.7, must equally not be able to DROP a condition
+		// a party did sign, which converted a signed escrowed-delivery trade
+		// into buyer-pays-first with no recourse (D-093). Both directions are
+		// the one predicate in condition_binding.go; a failure fails CLOSED, so
+		// the match is rejected → fallback.
+		if err := validateConditionBinding(m, byID); err != nil {
 			return errorsmod.Wrapf(err, "match %d", mi)
 		}
 
@@ -675,49 +675,46 @@ func validateConditionedMatch(m types.Match) error {
 	return nil
 }
 
-// validateConditionConsent enforces SPEC §6.5 / D-075: a delivery condition is
-// solver-attached (it lives only on the unsigned SettleLeg — IntentLeg has no
-// condition field), so a solver — an untrusted party (SPEC §1.1) — must not be
-// able to bind a seller to a delivery obligation and the OPTIMISTIC bond/slash
-// state machine the seller never signed. Every conditioned leg's condition must
-// EQUAL the seller (FromSigil) intent's signed IntentPayload.condition (carried
-// in the signed ciphertext); for ZK_DELIVERY the BUYER (ToSigil) must sign it
-// too (D-076 — see the inline note). The default NONE rejects any imposed
-// condition, so the conditioned match fails closed → fallback. The signed
-// per-leg consent field (an IntentLeg.condition proto addition) is the longer-
-// term refinement (D-075-FW-2); this binds to the existing signed payload-level
-// field with no proto change.
-func validateConditionConsent(m types.Match, byID map[string]matchIntent) error {
+// validateConditionBinding enforces the SPEC §6.5 consent binding in BOTH
+// directions over a match, at solution-validation time (task 2.7, D-094). The
+// rule itself lives in condition_binding.go; this walks the match and loads what
+// each party signed.
+//
+// THE LOOP BOUND IS THE FIX, and it is worth stating plainly because the
+// predicate alone would not have closed anything. Before 2.7 this function
+// walked only legs that ALREADY carried a condition and `continue`d past every
+// other one — so the single case it could never observe was the case that
+// mattered: a leg whose signed condition had been DROPPED. It now walks every
+// DataGrant leg (the legs that CAN carry a condition) and asks the predicate
+// about each, which is what makes the requirement direction reachable at all.
+// A test that proves the predicate works but not that this loop reaches the
+// right legs has proven nothing about the downgrade.
+func validateConditionBinding(m types.Match, byID map[string]matchIntent) error {
 	for li := range m.Legs {
 		leg := m.Legs[li]
-		if leg.Condition == nil || leg.Condition.Condition == nil {
-			continue // NONE leg — nothing to consent to
+		key, applies := legConditionKey(leg)
+		if !applies {
+			// Not a DataGrant: it may carry no condition at all, and no signed
+			// condition governs it (validateConditionedMatch rejects a conditioned
+			// non-DataGrant leg; this is the same bar, reached independently).
+			if leg.Condition != nil && leg.Condition.Condition != nil {
+				return errorsmod.Wrapf(types.ErrConditionUnsupportedMatch, "leg %d: conditioned leg is not a DataGrant", li)
+			}
+			continue
 		}
 		seller, ok := intentBySigil(byID, leg.FromSigil)
 		if !ok {
 			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no seller intent for sigil %s", li, leg.FromSigil)
 		}
-		if !conditionEqual(seller.payload.Condition, leg.Condition) {
-			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: seller %s did not sign this condition", li, leg.FromSigil)
+		buyer, ok := intentBySigil(byID, leg.ToSigil)
+		if !ok {
+			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no buyer intent for sigil %s", li, leg.ToSigil)
 		}
-		// ZK_DELIVERY (D-076): the BUYER (ToSigil) must ALSO have signed the
-		// exact condition. ZK release is seller-driven (the seller submits the
-		// proof) on an advance-"committed schema/hash" (SPEC §6.5) the buyer can
-		// know at intent time, and it is NOT tied to the buyer's want-key — so
-		// without buyer consent an untrusted solver could route a non-consenting
-		// buyer's payment into a seller-chosen release gate (the buyer-side
-		// mirror of the D-075 seller hole). Exact-param consent also ties release
-		// to the schema the buyer agreed to. HASHLOCK/OPTIMISTIC buyer consent
-		// stays D-075-FW-1 (post-delivery receipt token / ContentHash-tied — the
-		// buyer cannot pre-commit those).
-		if leg.Condition.GetZkDelivery() != nil {
-			buyer, ok := intentBySigil(byID, leg.ToSigil)
-			if !ok {
-				return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no buyer intent for sigil %s", li, leg.ToSigil)
-			}
-			if !conditionEqual(buyer.payload.Condition, leg.Condition) {
-				return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: buyer %s did not sign this ZK condition", li, leg.ToSigil)
-			}
+		if err := checkLegConditionBinding(leg,
+			effectiveCondition(seller.payload, key, roleSeller),
+			effectiveCondition(buyer.payload, key, roleBuyer),
+		); err != nil {
+			return errorsmod.Wrapf(err, "leg %d", li)
 		}
 	}
 	return nil
@@ -733,36 +730,6 @@ func intentBySigil(byID map[string]matchIntent, sigil string) (matchIntent, bool
 		}
 	}
 	return matchIntent{}, false
-}
-
-// conditionEqual reports whether two delivery conditions are byte-for-byte the
-// same (including class and all parameters), treating nil / empty-oneof as the
-// same NONE. It is the consent-equality check, so it compares the FULL params
-// the seller signed (a solver may not alter the timeout, payload hash, or
-// dispute window).
-func conditionEqual(a, b *escrowtypes.DeliveryCondition) bool {
-	aNone := a == nil || a.Condition == nil
-	bNone := b == nil || b.Condition == nil
-	if aNone || bNone {
-		return aNone && bNone
-	}
-	switch at := a.Condition.(type) {
-	case *escrowtypes.DeliveryCondition_Hashlock:
-		bt, ok := b.Condition.(*escrowtypes.DeliveryCondition_Hashlock)
-		return ok &&
-			bytes.Equal(at.Hashlock.PayloadHash, bt.Hashlock.PayloadHash) &&
-			at.Hashlock.TimeoutBlocks == bt.Hashlock.TimeoutBlocks
-	case *escrowtypes.DeliveryCondition_Optimistic:
-		bt, ok := b.Condition.(*escrowtypes.DeliveryCondition_Optimistic)
-		return ok && at.Optimistic.DisputeWindowBlocks == bt.Optimistic.DisputeWindowBlocks
-	case *escrowtypes.DeliveryCondition_ZkDelivery:
-		bt, ok := b.Condition.(*escrowtypes.DeliveryCondition_ZkDelivery)
-		return ok &&
-			bytes.Equal(at.ZkDelivery.SchemaCommitment, bt.ZkDelivery.SchemaCommitment) &&
-			at.ZkDelivery.VkId == bt.ZkDelivery.VkId
-	default:
-		return false
-	}
 }
 
 // intentLegKeyAmount returns the conservation asset key and Phase-0 quantity of

@@ -87,6 +87,19 @@ message IntentLeg {
   }
   // limit is max-give / min-want as a decimal string.
   string limit = 4;
+  // condition is this leg's delivery condition (D-075-FW-2, task 2.7). It
+  // REFINES the payload-level IntentPayload.condition, which governs every
+  // data/service leg of the intent at once: a leg that sets this field is
+  // governed by it, and a leg that leaves it unset falls back to the
+  // payload-level field. Unset therefore reproduces the pre-2.7 behaviour
+  // exactly, and no stored payload needs migrating (proto3 field addition;
+  // IntentPayload lives inside SealedIntent.ciphertext as marshaled bytes).
+  //
+  // It is READ by effectiveCondition (x/session/keeper/solution.go), which
+  // resolves the condition governing one settlement leg for one party before
+  // the §6.5 binding predicate compares it to what was attached — so the field
+  // is load-bearing, not decorative (METHODOLOGY Rule 4).
+  conclave.escrow.v1.DeliveryCondition condition = 5;
 }
 
 // DataGrant commits to a dataset: content hash plus an access-URI

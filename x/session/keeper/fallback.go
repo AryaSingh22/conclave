@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/session/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
@@ -15,13 +16,15 @@ import (
 // fbIntent is an OPEN intent reduced to its single give/want legs for the
 // fallback matcher (Phase-0 intents express one give and one want; richer
 // shapes are left to solvers), plus the signed allow_partial flag the 2.6
-// floor-fill candidate needs.
+// floor-fill candidate needs and the full signed payload the 2.7 condition
+// resolver reads.
 type fbIntent struct {
 	id           string
 	sigil        string
 	give         veiltypes.IntentLeg
 	want         veiltypes.IntentLeg
 	allowPartial bool
+	payload      veiltypes.IntentPayload
 }
 
 // buildFallbackMatches is the SPEC §6.4 in-consensus naive matcher: greedy
@@ -35,6 +38,16 @@ type fbIntent struct {
 //
 // Task 2.6 adds PARTIAL FILLS for 2-party swaps (see tryFallbackPair); the
 // cycle-aware fallback remains out of consensus and is task 2.10.
+//
+// Task 2.7 makes it an ATTACHER of delivery conditions — the first real one in
+// the tree. That is not an enrichment but a consequence of enforcing
+// `signed ⇒ attached`: this matcher is the DEFAULT clearing path for every
+// session no solver wins, so a fallback that could not attach would mean a
+// condition-signing intent could never clear at all. It attaches the giver's
+// signed condition to a DataGrant leg and then faces the unchanged
+// validateSolution bar, so a candidate the counterparty has not consented to is
+// left unmatched rather than downgraded. Neither branch settles a silent
+// downgrade, which is the whole point.
 func (k Keeper) buildFallbackMatches(ctx sdk.Context, session types.Session, params types.Params) ([]types.Match, error) {
 	intents := make([]fbIntent, 0, len(session.IntentIds))
 	for _, id := range session.IntentIds {
@@ -49,6 +62,7 @@ func (k Keeper) buildFallbackMatches(ctx sdk.Context, session types.Session, par
 			id: id, sigil: rec.Intent.SenderSigil,
 			give: payload.Give[0], want: payload.Want[0],
 			allowPartial: intentAllowsPartial(rec),
+			payload:      payload,
 		})
 	}
 	// deterministic order: by intent id (the ids are content-derived, D-009).
@@ -139,11 +153,74 @@ func (k Keeper) tryFallbackPair(ctx sdk.Context, session types.Session, a, b fbI
 		if !built {
 			continue
 		}
-		if err := k.validateSolution(ctx, session, []types.Match{m}, params); err == nil {
-			return m, true
+		if err := k.validateSolution(ctx, session, []types.Match{m}, params); err != nil {
+			continue
 		}
+		if !k.fallbackCanFund(ctx, m) {
+			continue
+		}
+		return m, true
 	}
 	return types.Match{}, false
+}
+
+// fallbackCanFund is the candidate-time AFFORDABILITY pre-check the 2.7
+// attacher needs. concludeInner wraps EVERY fallback match of a session in ONE
+// cache context, so a conditioned match whose seller cannot post its OPTIMISTIC
+// dispute bond — or whose buyer cannot cover the payment being escrowed — would
+// void every OTHER pair's clearing in that session. That blast radius is a cost
+// the fallback takes on by attaching conditions at all, so it is paid down here
+// rather than discovered in production.
+//
+// It sizes the bill from escrowtypes.FundingRequirement over the payment
+// conditionedLegPayment derives — the same two functions the settlement
+// boundary and CreateEscrow use — so a candidate can never be admitted on a
+// different notion of what is owed than the one later charged. That shared
+// definition is the point: an independent second computation here would be the
+// ante-vs-msg-server divergence (D-085) rebuilt in a new place.
+//
+// It is a NECESSARY condition and NOT a sufficient one, stated plainly rather
+// than glossed: GetBalance cannot see vesting locks or blocked-address rules, so
+// CreateEscrow's bank sends remain the authoritative guard. A false positive
+// here degrades to exactly the pre-2.7 behaviour — the batch's cache is
+// discarded and the session closes with its intents rolling (runFallback never
+// stalls the chain) — never to a funded escrow that should not exist. An
+// unconditioned match reaches no escrow funding at all and returns true
+// immediately, so nothing that cleared before 2.7 acquires a new way to fail.
+func (k Keeper) fallbackCanFund(ctx sdk.Context, m types.Match) bool {
+	for li := range m.Legs {
+		leg := m.Legs[li]
+		if leg.Condition == nil || leg.Condition.Condition == nil {
+			continue
+		}
+		esc := escrowtypes.Escrow{Amount: conditionedLegPayment(m, li), Condition: *leg.Condition}
+		fromPayer, fromPayee := escrowtypes.FundingRequirement(esc)
+		if !k.sigilCanPay(ctx, leg.ToSigil, fromPayer) || !k.sigilCanPay(ctx, leg.FromSigil, fromPayee) {
+			return false
+		}
+	}
+	return true
+}
+
+// sigilCanPay reports whether a sigil's controller currently holds `amount`.
+// Balances are read per denom over sorted sdk.Coins, so the verdict is
+// deterministic on every node (§11.6); an unresolvable sigil fails CLOSED (the
+// candidate is skipped, the pair left unmatched) rather than being assumed
+// solvent.
+func (k Keeper) sigilCanPay(ctx sdk.Context, sigil string, amount sdk.Coins) bool {
+	if amount.IsZero() {
+		return true
+	}
+	addr, err := k.sigilKeeper.ControllerAddress(ctx, phase0Chamber, sigil)
+	if err != nil {
+		return false
+	}
+	for _, c := range amount {
+		if k.bankKeeper.GetBalance(ctx, addr, c.Denom).Amount.LT(c.Amount) {
+			return false
+		}
+	}
+	return true
 }
 
 // fallbackTerms lists the candidate (a-gives, b-gives) quantities for a pair in
@@ -179,6 +256,18 @@ func fallbackTerms(a fbIntent, aGiveAmt, aWantAmt math.Int, b fbIntent, bGiveAmt
 // buildFallbackMatch assembles the two-leg swap for one candidate's quantities,
 // pricing the non-numeraire asset so each party's value nets EXACTLY zero at the
 // stated prices.
+//
+// Since task 2.7 it ATTACHES each giver's signed delivery condition to its own
+// DataGrant leg. The pair it builds is already exactly the D-074 conditioned
+// shape — two distinct sigils, one DataGrant seller→buyer, one coin payment
+// buyer→seller (pickNumeraire has already rejected data-for-data and
+// data-for-svc, so a conditioned fallback match is always data-for-coin) — so
+// attaching needs no new shape reasoning. What the counterparty signed is NOT
+// consulted here: the candidate goes to the unchanged validateSolution bar,
+// which runs the same binding predicate as every other clearing path and drops
+// the candidate if the buyer never consented. Keeping the decision there rather
+// than duplicating it is what stops the fallback from becoming a second, weaker
+// definition of consent.
 func buildFallbackMatch(a, b fbIntent, aGiveKey, bGiveKey, numeraire string, terms [2]math.Int) (types.Match, bool) {
 	x, y := terms[0], terms[1]
 	if !x.IsPositive() || !y.IsPositive() {
@@ -192,6 +281,8 @@ func buildFallbackMatch(a, b fbIntent, aGiveKey, bGiveKey, numeraire string, ter
 	if !ok {
 		return types.Match{}, false
 	}
+	attachFallbackCondition(&aLeg, a, aGiveKey)
+	attachFallbackCondition(&bLeg, b, bGiveKey)
 
 	prices := []types.PricePoint{{Base: numeraire, Quote: numeraire, Price: math.LegacyOneDec()}}
 	if aGiveKey == numeraire {
@@ -211,6 +302,25 @@ func buildFallbackMatch(a, b fbIntent, aGiveKey, bGiveKey, numeraire string, ter
 		Legs:           []types.SettleLeg{aLeg, bLeg},
 		ClearingPrices: prices,
 	}, true
+}
+
+// attachFallbackCondition carries the giver's signed delivery condition onto its
+// own settlement leg (task 2.7). Only a DataGrant leg can bear one (SPEC §6.5),
+// and the giver is that leg's seller, so the condition resolved is the seller's
+// — through the same effectiveCondition resolver the two consent chokepoints
+// use, which means the per-leg IntentLeg.condition refinement (FW-2) is honored
+// on the fallback path from the moment it exists rather than only on the solver
+// path.
+//
+// A giver that signed nothing attaches nothing, so an unconditioned pair builds
+// the byte-identical match it built before 2.7.
+func attachFallbackCondition(leg *types.SettleLeg, giver fbIntent, giveKey string) {
+	if leg.GetData() == nil {
+		return
+	}
+	if cond := effectiveCondition(giver.payload, giveKey, roleSeller); cond != nil && cond.Condition != nil {
+		leg.Condition = cond
+	}
 }
 
 // pickNumeraire returns the coin denom to price a swap in: the plain-coin side

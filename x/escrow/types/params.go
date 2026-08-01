@@ -54,3 +54,31 @@ func SellerBondCoins(payment sdk.Coins) sdk.Coins {
 	}
 	return bond
 }
+
+// FundingRequirement returns the coins CreateEscrow will move into the escrow
+// module account when it instantiates this escrow: the payer's (buyer's)
+// escrowed payment, and the payee's (seller's) OPTIMISTIC dispute bond. Only
+// OPTIMISTIC carries a bond — HASHLOCK and ZK_DELIVERY release are preimage- /
+// proof-gated rather than bond-gated (D-073/D-076) — and a NONE record-only
+// grant requires nothing from either side.
+//
+// It is the SINGLE DEFINITION of those amounts, and that is its purpose (task
+// 2.7). CreateEscrow moves exactly what this returns, and the in-consensus
+// fallback's candidate-time affordability pre-check compares exactly this
+// against live balances, so the two cannot come to disagree about WHAT is owed
+// the way an ante decorator and a msg server once did (D-085).
+//
+// The pre-check that reads this is a NECESSARY condition, never a sufficient
+// one, and the distinction is deliberate rather than glossed: a balance read
+// cannot see vesting locks or blocked-address rules, so CreateEscrow's bank
+// sends remain the authoritative guard. A pre-check false positive degrades to
+// the pre-2.7 behaviour — the fallback batch's cache is discarded and the
+// session closes with its intents rolling — and never to a funded escrow that
+// should not exist.
+func FundingRequirement(esc Escrow) (fromPayer, fromPayee sdk.Coins) {
+	fromPayer = esc.Amount
+	if esc.Condition.GetOptimistic() != nil {
+		fromPayee = SellerBondCoins(esc.Amount)
+	}
+	return fromPayer, fromPayee
+}

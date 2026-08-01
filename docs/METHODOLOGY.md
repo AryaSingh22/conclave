@@ -451,6 +451,28 @@ reviewers AWAY from the newest (riskiest) surface.
    no post-gate edit slipped in between green and commit. It costs one command
    and it converts the single most load-bearing claim in the whole checklist
    from trust into evidence.
+
+   **TWO fingerprints, and they answer different questions — use both.**
+   - **FULL-TREE, during the run** (`git diff | sha256sum` before and after):
+     the gate ran on exactly this tree. Non-negotiable, and it has caught real
+     process errors twice.
+   - **SOURCE-ONLY, at close-out** (`git diff -- ':(exclude)*.md' | sha256sum`,
+     or the project's equivalent exclusion): **this is how a post-gate
+     documentation edit is JUSTIFIED rather than merely confessed.** Long-form
+     gates are expensive, and the honest sequencing — source and gate first,
+     docs after, so drift stays attributable — guarantees the shipping tree
+     differs from the gated one. If the source-only hash of the SHIPPING tree
+     equals the FULL-diff fingerprint recorded at the gate, then not one source
+     or test byte moved after the gate, and that is a proof rather than a
+     promise. Re-running a multi-minute consensus gate to bless a prose edit is
+     theatre; saying nothing is worse. One command replaces both.
+
+   **Instance.** The pattern's predecessor is the honest version of the same
+   thing done in prose: a task recorded that its shipping fingerprint "differs
+   by exactly two Markdown files" and asked the reader to trust the sentence.
+   The next task to hit the identical situation printed the source-only hash
+   instead and it matched the gate-time fingerprint byte for byte — same
+   discipline, now falsifiable by a reader who has only the repository.
 5. **Re-derive the security-surface inventory at every boundary — and schedule
    it, do not merely intend it.** A hand-maintained inventory decays silently
    between boundaries; the greps in step 1 are the source of truth, the
@@ -539,6 +561,8 @@ calibrations), which is the gate doing its job.
 - [ ] Invariant gate run; any re-baseline recorded as an ADR (Rule 7).
 - [ ] Tree fingerprinted AFTER the gate run and compared — identical, or the
       difference explained (Rule 9).
+- [ ] Docs edited after the gate? → SOURCE-ONLY fingerprint of the shipping tree
+      printed and shown to equal the gate-time fingerprint (Rule 9 step 4).
 - [ ] The gate came back clean? → name the test that ACTUALLY covers this
       change. "None" means no coverage, not a pass (Rule 7).
 - [ ] Every decision from the running list → an ADR in this task (Rule 6).
@@ -565,7 +589,12 @@ through D-079); amended 2026-07-28 by the D-090 reconciliation audit, which
 added the Rule-3 flake-oracle corollary and predict/dose procedure, Rule 4's
 path-enumeration sharpening, Rule 6's findings-list and one-way-pointer
 sub-rules, Rule 7's coverage-shadow property, and Rule 9's tree-fingerprint and
-scheduled-inventory steps (D-001 through D-090). The instances cite that
-history; the rules do not depend on it. **Every amendment above came from a rule
-failing in practice — which is the meta-rule: if a rule fails you, the failure
-is itself an instance. Record it and amend the rule.***
+scheduled-inventory steps (D-001 through D-090); amended again 2026-07-30 by
+task 2.7 (D-094), which promoted the **two-fingerprint close-out standard** into
+Rule 9 step 4. That last amendment is the one exception to the pattern below: it
+came not from a rule failing but from a rule being *followed* and found to end
+in prose where it could end in evidence. **Every other amendment came from a rule
+failing in practice — which is the meta-rule: if a rule fails you, the failure is
+itself an instance. Record it and amend the rule.** The 2.7 case adds its
+converse: if following a rule leaves you asking the reader to trust a sentence,
+the rule has one more step in it.*

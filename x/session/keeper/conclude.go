@@ -9,6 +9,7 @@ import (
 
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	"github.com/AryaSingh22/conclave/x/session/types"
+	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
 
 // Conclude is the SPEC §6.4 atomic settlement: it applies an entire transfer
@@ -215,79 +216,89 @@ func (k Keeper) openEscrow(ctx sdk.Context, sessionID uint64, leg types.SettleLe
 	return k.escrowKeeper.CreateEscrow(ctx, esc, payerAddr, payeeAddr, contentHash)
 }
 
-// intentConditionForSigil loads the signed IntentPayload.condition of the
-// match intent submitted by a sigil (the consent the seller actually signed,
-// D-075). Returns ok=false if no intent in the match was submitted by that
-// sigil.
-func (k Keeper) intentConditionForSigil(ctx sdk.Context, m types.Match, sigil string) (*escrowtypes.DeliveryCondition, bool, error) {
+// matchPayloadsBySigil loads the signed IntentPayload of every intent in a
+// match, keyed by the submitting sigil — the consent each party actually signed
+// (D-075/D-076, and since task 2.7 the payloads the FW-2 per-leg resolver reads
+// too). Rule 1 guarantees a distinct sigil per intent within a match, so the
+// mapping is unambiguous; the map is only ever READ by key and never iterated,
+// so it drives no state write and no ordering (§11.6).
+func (k Keeper) matchPayloadsBySigil(ctx sdk.Context, m types.Match) (map[string]veiltypes.IntentPayload, error) {
+	out := make(map[string]veiltypes.IntentPayload, len(m.IntentIds))
 	for _, id := range m.IntentIds {
 		rec, payload, err := k.veil().GetOpenIntent(ctx, phase0Chamber, id)
 		if err != nil {
-			return nil, false, errorsmod.Wrapf(err, "loading intent %s", id)
+			return nil, errorsmod.Wrapf(err, "loading intent %s", id)
 		}
-		if rec.Intent.SenderSigil == sigil {
-			return payload.Condition, true, nil
-		}
+		out[rec.Intent.SenderSigil] = payload
 	}
-	return nil, false, nil
+	return out, nil
 }
 
-// openConditionedEscrows routes each HASHLOCK/OPTIMISTIC DataGrant leg in a
-// match (and its paired coin payment) into x/escrow, returning the set of leg
-// indexes consumed so applyMatches skips them. validateSolution has already
-// proven the conditioned-match shape (one DataGrant seller→buyer plus coin
-// payment legs buyer→seller, two sigils — D-073/ErrConditionUnsupportedMatch);
-// this re-derives the payment defensively. The buyer's payment is escrowed
-// (released to the seller on a valid release, refunded to the buyer on timeout/
-// lost dispute); the seller bond is posted inside CreateEscrow.
+// openConditionedEscrows routes each conditioned DataGrant leg in a match (and
+// its paired coin payment) into x/escrow, returning the set of leg indexes
+// consumed so applyMatches skips them. validateSolution has already proven the
+// conditioned-match shape (one DataGrant seller→buyer plus coin payment legs
+// buyer→seller, two sigils — D-073/ErrConditionUnsupportedMatch); this
+// re-derives the payment defensively. The buyer's payment is escrowed (released
+// to the seller on a valid release, refunded to the buyer on timeout/lost
+// dispute); the seller bond is posted inside CreateEscrow.
+//
+// This is the AUTHORITATIVE consent chokepoint (D-075): Conclude does not re-run
+// validateSolution, so no path to escrow creation may skip the check — including
+// the gov-authority MsgConclude.
+//
+// THE LOOP WALKS EVERY DataGrant LEG, not only conditioned ones (task 2.7). The
+// pre-2.7 loop `continue`d on a NONE leg before comparing anything, which is
+// precisely why `signed ⇒ attached` could not be enforced here: the dropped
+// condition is invisible to a loop that only visits attached ones. Widening the
+// bound is the fix; the predicate is shared with the validation chokepoint so
+// the two cannot say different things.
 func (k Keeper) openConditionedEscrows(ctx sdk.Context, sessionID uint64, m types.Match, resolve func(string) (sdk.AccAddress, error)) (map[int]bool, error) {
 	handled := make(map[int]bool)
+	signedBy, err := k.matchPayloadsBySigil(ctx, m)
+	if err != nil {
+		return nil, err
+	}
 	for li := range m.Legs {
 		leg := m.Legs[li]
-		if leg.Condition == nil || leg.Condition.Condition == nil {
+		key, applies := legConditionKey(leg)
+		if !applies {
+			if leg.Condition != nil && leg.Condition.Condition != nil {
+				return nil, errorsmod.Wrapf(types.ErrConditionUnsupportedMatch, "match leg %d: conditioned leg is not a DataGrant", li)
+			}
 			continue
-		}
-		if leg.GetData() == nil {
-			return nil, errorsmod.Wrapf(types.ErrConditionUnsupportedMatch, "match leg %d: conditioned leg is not a DataGrant", li)
 		}
 		seller, buyer := leg.FromSigil, leg.ToSigil
 
-		// CONSENT (D-075), enforced again at the settlement boundary so no path
-		// to escrow creation can bind a seller to a condition it did not sign,
-		// even one that skips solution validation: the seller's signed
-		// IntentPayload.condition must equal the (unsigned, solver-built)
-		// SettleLeg.condition.
-		signed, ok, err := k.intentConditionForSigil(ctx, m, seller)
-		if err != nil {
-			return nil, err
+		sellerPayload, ok := signedBy[seller]
+		if !ok {
+			return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: no seller intent for sigil %s", li, seller)
 		}
-		if !ok || !conditionEqual(signed, leg.Condition) {
-			return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: seller %s did not sign this condition", li, seller)
+		buyerPayload, ok := signedBy[buyer]
+		if !ok {
+			return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: no buyer intent for sigil %s", li, buyer)
 		}
-		// ZK_DELIVERY (D-076): the BUYER must ALSO have signed the exact
-		// condition — the authoritative buyer-side mirror of the seller guard,
-		// since ZK release is seller-driven on a schema not otherwise tied to the
-		// buyer's want (see validateConditionConsent). HASHLOCK/OPTIMISTIC buyer
-		// consent stays D-075-FW-1.
-		if leg.Condition.GetZkDelivery() != nil {
-			bsigned, bok, err := k.intentConditionForSigil(ctx, m, buyer)
-			if err != nil {
-				return nil, err
-			}
-			if !bok || !conditionEqual(bsigned, leg.Condition) {
-				return nil, errorsmod.Wrapf(types.ErrConditionNotConsented, "match leg %d: buyer %s did not sign this ZK condition", li, buyer)
-			}
+		if err := checkLegConditionBinding(leg,
+			effectiveCondition(sellerPayload, key, roleSeller),
+			effectiveCondition(buyerPayload, key, roleBuyer),
+		); err != nil {
+			return nil, errorsmod.Wrapf(err, "match leg %d", li)
 		}
 
-		// Collect the payment: every coin leg buyer→seller in this match.
-		payment := sdk.NewCoins()
+		if leg.Condition == nil || leg.Condition.Condition == nil {
+			// A consented UNCONDITIONED DataGrant: both parties signed NONE for
+			// it, so it settles as the SPEC §6.4 record-only x/escrow entry
+			// through applyLeg, exactly as before.
+			continue
+		}
+
+		payment := conditionedLegPayment(m, li)
 		for pj := range m.Legs {
 			if pj == li {
 				continue
 			}
 			p := m.Legs[pj]
 			if p.GetCoin() != nil && p.FromSigil == buyer && p.ToSigil == seller {
-				payment = payment.Add(*p.GetCoin())
 				handled[pj] = true
 			}
 		}
@@ -298,6 +309,29 @@ func (k Keeper) openConditionedEscrows(ctx sdk.Context, sessionID uint64, m type
 		handled[li] = true
 	}
 	return handled, nil
+}
+
+// conditionedLegPayment collects the coin payment funding one conditioned
+// DataGrant leg: every coin leg in the match running buyer→seller. It is the
+// SINGLE definition of that amount — the settlement boundary escrows exactly
+// this, and the fallback matcher's candidate-time affordability pre-check sizes
+// the bill from exactly this — so the two cannot disagree about what a
+// conditioned candidate would cost. Pure (no ctx/store) and order-stable:
+// sdk.Coins.Add keeps the sorted-denom invariant, so every node computes the
+// identical amount (§11.6).
+func conditionedLegPayment(m types.Match, condIdx int) sdk.Coins {
+	buyer, seller := m.Legs[condIdx].ToSigil, m.Legs[condIdx].FromSigil
+	payment := sdk.NewCoins()
+	for pj := range m.Legs {
+		if pj == condIdx {
+			continue
+		}
+		p := m.Legs[pj]
+		if p.GetCoin() != nil && p.FromSigil == buyer && p.ToSigil == seller {
+			payment = payment.Add(*p.GetCoin())
+		}
+	}
+	return payment
 }
 
 // concludeSolution drives the SPEC §6.4 CONCLUDING phase for a chosen solution.

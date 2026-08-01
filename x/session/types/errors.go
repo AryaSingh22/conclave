@@ -35,8 +35,9 @@ var (
 	ErrInvalidLeg                = errorsmod.Register(ModuleName, 1423, "invalid settlement leg")
 	ErrSkimViolation             = errorsmod.Register(ModuleName, 1425, "surplus skim violates the residual==-skim binding (would touch principal or mis-route)")
 	ErrConditionUnsupportedMatch = errorsmod.Register(ModuleName, 1426, "conditioned (HASHLOCK/OPTIMISTIC) leg requires an unambiguous bilateral match: one DataGrant leg seller→buyer plus coin payment legs buyer→seller, exactly two sigils")
-	ErrConditionNotConsented     = errorsmod.Register(ModuleName, 1427, "settlement leg carries a delivery condition the seller did not sign (SettleLeg.condition must equal the seller intent's signed IntentPayload.condition — a solver cannot impose a condition)")
+	ErrConditionNotConsented     = errorsmod.Register(ModuleName, 1427, "settlement leg carries a delivery condition a party did not consent to: the seller must have signed it exactly, and the buyer must have signed one it satisfies — a solver cannot impose a condition, an obligation, or a payment timeline no signature covers")
 	ErrLimitRateUnsupported      = errorsmod.Register(ModuleName, 1428, "a leg's signed §5.1 limit RATE cannot be evaluated for this match shape (no single counter-asset, a malformed/negative limit, or operands beyond exact comparison) — the match is rejected rather than settled against an unhonored limit")
+	ErrConditionNotHonored       = errorsmod.Register(ModuleName, 1429, "settlement DROPS a delivery condition a party signed: a signed condition is a REQUIREMENT, not a permission ceiling — the DataGrant leg must carry one satisfying it, or the match must not clear")
 )
 
 // InvalidSolution composes the registered ErrInvalidSolution sentinel with the
