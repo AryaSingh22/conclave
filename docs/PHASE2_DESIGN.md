@@ -1,9 +1,23 @@
 # Conclave Phase 2 — Provable Commerce + Edges (Design Document)
 
-**Status:** Approved design (D-072), **Rev 3 — reconciliation audit**
-(2026-07-28, D-090). Rev 1 was authored at the Phase-1→Phase-2 boundary
-(baseline `39cb207`) before any Phase-2 build work; Rev 2 (2026-07-02, D-078)
-reconciled it to as-built state after 2.1a/2.1b with 2.2 in flight.
+**Status:** Approved design (D-072), **Rev 4 — Phase-2 boundary record
+reconciliation** (2026-08-02, task 2.16, D-095). Rev 1 was authored at the
+Phase-1→Phase-2 boundary (baseline `39cb207`) before any Phase-2 build work;
+Rev 2 (2026-07-02, D-078) reconciled it to as-built state after 2.1a/2.1b with
+2.2 in flight; Rev 3 (2026-07-28, D-090) was the state-reconciliation audit.
+
+**Why Rev 4.** Task 2.7 (`7283b11`, D-094) inverted a security semantic — a
+signed delivery condition became a REQUIREMENT rather than a permission
+ceiling — and propagated the correction into CLAUDE.md, both edge contracts,
+and this document's §0 row and §2.7 section. It stopped there. A boundary audit
+found **nineteen present-tense statements across five files still asserting the
+pre-2.7 world**, including this document's §5 row 9, §6 and FLAG 7, and
+`PHASE3_PLAN.md`'s auditor-facing §3.1.1. Every one of them under-claims — they
+describe a protection as absent that is present — which is harmless to a user
+and **actively harmful to an auditor**, since §3.1.1 steered a reviewer away
+from `condition_binding.go`, the newest and least-reviewed consent code in the
+tree. Rev 4 is that correction, plus the Phase-2 exit declaration and the
+tail rule (§0).
 
 **Why Rev 3.** Between Rev 2 and `aa21274`, five more tasks landed (2.2, 2.5,
 2.3, 2.4, 2.11, 2.6) and five new numbered tasks were created (2.8–2.12) — but
@@ -24,12 +38,13 @@ CosmWasm/CVM integration with CONCLUDE + escrow bindings (2.2), the x402 gateway
 fee (2.5) — **all five DONE** — plus seven numbered follow-on tasks: the
 matcher-richness hardening pass (2.6, **done**), the store-iterator fix (2.11,
 **done**), the condition-attachment verdict + error-code fix (2.13, **done**),
-and the six open ones (2.7 escrow consent completeness — now including the
-`signed ⇒ attached` downgrade, 2.8 submit-charge structural fork, 2.9 receipt
-condition-outcome integrity, 2.10 in-consensus cycle-aware fallback, 2.12
-multi-asset in-kind skim, 2.14 reference condition attachment). Exit: the
-§1.3 demo extended end-to-end across chains (§6 below) — **now unblocked: all
-four exit legs are green.**
+escrow consent completeness (2.7, **done**), this boundary reconciliation
+(2.16, **done**), and the **six-task Phase-2 tail** that remains open (2.8
+submit-charge structural fork, 2.9 receipt condition-outcome integrity, 2.10
+in-consensus cycle-aware fallback, 2.12 multi-asset in-kind skim, 2.14
+reference condition attachment, 2.15 §6.4 rule-3 per-leg attribution). Exit:
+the §1.3 demo extended end-to-end across chains (§6 below) — **ASSERTED at §6b
+and re-verified at HEAD by 2.16.**
 **Working method:** unchanged — one task per session with a stop-and-review and
 its own plan-stop decisions, each recorded in DECISIONS.md in the task that
 makes it. Where this doc names a version, the binding instruction remains
@@ -51,27 +66,55 @@ load-bearing and recorded (§4).
 | 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | **DONE** — surface complete after ONE gap the conformance test found (fallback clearings now persist their winning Solution); G1(2.4) `condition_outcome` disclosed + neutralized | `c830e55`, D-086/087 · artifact: `docs/edge/7683_SURFACE.md` |
 | 2.11 | Store-iterator range-end correctness (x/mandate, x/sigil) | **DONE** — split out of 2.6 at a STOP and landed FIRST; 8 sites, 2 LIVE-broken (one on the §6.4 rule-5 consensus path); vector byte-identical | `d34ede0`, D-088 |
 | 2.6 | Matcher-richness hardening (3 of the 5 matcher TODOs closed; 2 split out) | **DONE** — §5.1 limit RATE honored (closes D-049/F-7), partial-fill cycles + alternate anchoring, 2-party partial-fill fallback; all three strictly ADDITIVE, vector byte-identical three times | `aa21274`, D-089 |
-| 2.7 | Escrow consent completeness (FW-1 + FW-2 + the D-089 re-points + the DOWNGRADE row) | **DONE** — a signed condition is now a **REQUIREMENT**: `signed ⇒ attached` enforced at both chokepoints (the fix is the LOOP BOUND, proven by reverting each bound alone), the in-consensus **fallback made an ATTACHER** so the rule ships with a live path that meets it, FW-1(a)+(b) landed as ONE per-class relation (HASHLOCK ceiling vs OPTIMISTIC floor — opposite directions, disjoint watched reds), FW-2's `IntentLeg.condition` landed with a real reader, D-074 kept (collision dissolved as orthogonal), both D-089 re-points explicitly re-deferred to NEW **2.15**; vector byte-identical twice, exit demo green unedited | `D-094`, D-078, D-089, D-093 |
+| 2.7 | Escrow consent completeness (FW-1 + FW-2 + the D-089 re-points + the DOWNGRADE row) | **DONE** — a signed condition is now a **REQUIREMENT**: `signed ⇒ attached` enforced at both chokepoints (the fix is the LOOP BOUND, proven by reverting each bound alone), the in-consensus **fallback made an ATTACHER** so the rule ships with a live path that meets it, FW-1(a)+(b) landed as ONE per-class relation (HASHLOCK ceiling vs OPTIMISTIC floor — opposite directions, disjoint watched reds), FW-2's `IntentLeg.condition` landed with a real reader, D-074 kept (collision dissolved as orthogonal), both D-089 re-points explicitly re-deferred to NEW **2.15**; vector byte-identical twice, exit demo green unedited | `7283b11`, D-094 (updating D-078, D-089, D-093) |
 | 2.8 | Submit-charge STRUCTURAL fork (design question only — the G2 security hole is CLOSED in 2.3) + the timeouts→params promotion | **open** | D-085 |
 | 2.9 | Receipt condition-outcome integrity (`CONDITION_OUTCOME_PENDING` + escrow write-back) | **open** | D-087 |
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
-| 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | D-093 |
+| 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | `0d7f167`, D-093 |
 | 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **open** (NEW in 2.13) — 2.7 has now fixed WHAT it demonstrates, and handed it a live consequence to close: the in-tree reference solver will propose a slashable solution against a condition-signing intent until it learns to attach or skip | D-093, **D-094** |
 | 2.15 | §6.4 rule-3 per-leg attribution — TODO 9's `SettleLeg` intent tag + the `ErrLimitRateUnsupported` 1428 counter-asset designator | **open** (NEW in 2.7) — both re-deferred from 2.7 with explicit verdicts; D-074 recorded as orthogonal, not colliding | D-089, **D-094** |
-| §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13) | D-091 · artifact: `docs/EXIT_DEMO.md` |
-| §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED** | D-092 · artifact: `docs/EXIT_DEMO.md` |
+| §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13; CLOSED by 2.7 — the fallback is now a live writer) | `65376ab`, D-091 · artifact: `docs/EXIT_DEMO.md` |
+| §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED.** Re-run green at HEAD by 2.16 | `1aecfbf`, D-092 · artifact: `docs/EXIT_DEMO.md` |
+| 2.16 | Phase-2 boundary record reconciliation (this Rev) | **DONE** — 19 post-2.7 stale statements corrected under a recorded load-bearingness rule; stale marker retargeted to 2.15; deleted-test citation removed from 3 sites; 5 missing §5.1 rows written; hash traceability restored; §3.1.1 corrected as PROSE + §3.1.2 grep re-keyed to `errorsmod.Register` + citation sweep added; **§6b re-run green at HEAD**; **Phase 2 declared EXITED** | D-095 |
 
-> ## PHASE-2 EXIT CRITERION: **MET** (§6b, D-092)
+> ## PHASE 2 IS **EXITED** (declared at task 2.16, D-095)
 >
-> Every task on the exit path is complete. The remaining open tasks
-> (2.7–2.10, 2.12, 2.14) are each recorded as off the exit path, so
-> **PHASE3_PLAN task 3.0 — the Phase-2 boundary re-validation — is now
-> TRIGGERED.** Its stated trigger was this demo. 3.0 owns the Rule-9
-> authored-surface re-derivation and the §5.1 disposition re-verification.
+> **The criterion (§6b, D-092) is MET, and re-verified at HEAD by 2.16** —
+> `scripts/exit_demo_ibc.sh` was re-run after 2.7's semantic inversion, which
+> converts the assertion from inference to evidence. All five SPEC §10 tasks
+> are complete against their own acceptance criteria.
 >
-> The run is **INTERNAL** (D-090): task 2.9 remains a prerequisite before any
-> external-facing use of this evidence.
+> **The exit test, stated so it can be re-applied rather than re-argued
+> (D-095).** A task is EXIT-BLOCKING iff SPEC §10's Phase-2 paragraph — the
+> five named tasks plus its one-sentence exit criterion — cannot be truthfully
+> asserted without it. Importance drives SEQUENCE; only the SPEC's text drives
+> the GATE. Applied to every open task, the test CONFIRMS each "off the exit
+> path" row rather than inheriting it.
+>
+> **The Phase-2 tail — a uniform rule, not six exceptions.** Six tasks remain
+> open and none is exit-blocking: **2.8, 2.9, 2.10, 2.12, 2.14, 2.15**. They
+> keep their `2.x` numbers, which are IDENTIFIERS, not a schedule —
+> renumbering would break roughly fifteen cross-references in `DECISIONS.md`
+> and the in-tree markers. Each has a `PHASE3_PLAN.md` §5.1 row written at
+> 2.16 (**before** 3.0's row-by-row pass, which structurally cannot surface a
+> row that is missing — that is AUDIT F-8's mechanism reproduced in the
+> receiving document). **No tail task is specially cased**; a special case is
+> how a ledger acquires exceptions nobody can re-derive.
+>
+> **PHASE3_PLAN task 3.0 is TRIGGERED** and now plans from a settled boundary.
+> It owns the Rule-9 authored-surface re-derivation and the §5.1
+> re-verification; both obligations are written INTO 3.0's criteria, not
+> pointed at it.
+>
+> **Two live consequences the tail carries, recorded here so they are not
+> discovered later.** (a) **2.14** — `solver/` never reads
+> `IntentPayload.condition`, so the in-tree reference solver would propose a
+> **slashable (5%)** solution the first time it meets a condition-signing
+> intent. This is the only remaining item with a live functional defect.
+> (b) **2.9** — the run is **INTERNAL**; 2.9 remains a hard prerequisite
+> before any external-facing use of this evidence, and 2.7 made conditioned
+> settlements strictly more common, widening it.
 
 **Exit-demo leg readiness (§6): all four legs are now DONE.** ZK_DELIVERY
 escrow leg (end-to-end conditioned ZK CONCLUDE proven: both parties signing
@@ -81,10 +124,12 @@ escrow through the bindings under wasmvm; the LIVE-localnet slice moved to the
 demo itself, which owns the purpose-built CVM-schema demo contract); x402
 ingress (2.3, D-083 — the auth model proven at app level and swept live); IBC
 settlement/receipt (2.5, D-082 — two-chain ICS-20 e2e; the live relayer slice
-moved to the demo). **2.4 and every one of 2.7–2.12 are off the exit path** —
-each says so in its own row — so the demo is the only remaining phase-closing
-item. It carries two deferred obligations that have no other home: the D-079
-localnet contract-release smoke and the D-082 live relayer USDC demo.
+moved to the demo). **2.4 and every one of the tail tasks (2.8, 2.9, 2.10,
+2.12, 2.14, 2.15) are off the exit path** — each says so in its own row, and
+2.16 re-derived that from the SPEC's text rather than inheriting it (§0). The
+demo carried two deferred obligations that had no other home — the D-079
+localnet contract-release smoke (discharged §6a) and the D-082 live relayer
+USDC demo (discharged §6b) — and **both are now discharged.**
 
 **Condition on the demo (D-090, decided at this Rev, not a note):** the demo's
 x402 leg is precisely the conditioned ZK buy that hits **D-087** — its receipt
@@ -240,10 +285,14 @@ recover→INVALID, never panics on adversarial proof bytes).
 **Two consent invariants Rev 1 did not plan (found during build — protect them
 in 2.2's bindings and 2.6's matcher work):**
 - **D-075 — seller-signed condition.** A delivery condition is solver-attached
-  (`IntentLeg` has no condition field), so it is bound to the seller's SIGNED
-  `IntentPayload.condition` at BOTH solution-validation and the settlement
-  boundary (`ErrConditionNotConsented`, fail-closed). An untrusted solver
-  cannot impose a delivery obligation/bond the seller never signed.
+  (at 2.1 `IntentLeg` had no condition field), so it is bound to the seller's
+  SIGNED `IntentPayload.condition` at BOTH solution-validation and the
+  settlement boundary (`ErrConditionNotConsented`, fail-closed). An untrusted
+  solver cannot impose a delivery obligation/bond the seller never signed.
+  **Both clauses moved at 2.7 (D-094) and this bullet is 2.1-historical:**
+  `IntentLeg.condition = 5` now exists (FW-2) and REFINES the payload-level
+  condition, and the binding is no longer one-directional — see §2.7 and
+  `x/session/keeper/condition_binding.go`.
 - **D-076 — buyer-side consent for ZK.** ZK release is seller-driven on an
   advance-committed schema untethered to the buyer's want, so for ZK the BUYER
   must ALSO sign the exact condition (both chokepoints, fail-closed →
@@ -825,8 +874,20 @@ Current per-task consequences (D-077 spike snapshot, 2026-06-26):
 | 6 | partial-fill + cycle-aware fallback | ~~`x/session/keeper/fallback.go:35`~~ | SPLIT by 2.6's plan-stop | 🟡 **6a CLOSED** (D-089, 2-party partial fill); **6b → NEW task 2.10** (in-consensus cycle-aware) |
 | 7 | partial-fill cycles + alt numeraire | ~~`solver/cycles/cycles.go:89`~~ | FOLD → 2.6 | ✅ **CLOSED** (D-089; anchor GROUPS judged by the chain gate, D-055 arbiter unchanged) |
 | 8 | honor §5.1 limit rate | ~~`x/session/keeper/solution.go:349`~~ | FOLD → 2.6 | ✅ **CLOSED** (D-089, closes D-049; flows-only rate, no D-044 price source) |
-| 9 | multi-intent-per-sigil | `x/session/keeper/solution.go:143` | **RE-POINTED by D-089** → 2.7/FW-2 — **now accepted into §2.7's criteria (Rev 3)** | open (needs a SettleLeg intent tag; collides with D-074) |
+| 9 | multi-intent-per-sigil | `x/session/keeper/solution.go:143` | **RE-POINTED AGAIN at Rev 4** → **task 2.15(a)** (D-094 re-deferred it from 2.7 on SCOPE alone). ~~D-089 → 2.7/FW-2, accepted into §2.7's criteria at Rev 3~~ — superseded: 2.7 CLOSED without implementing it | open (needs a `SettleLeg` intent tag + per-intent attribution). **D-074 does NOT collide** — D-074 is match SHAPE, intent-tagging is which-condition-governs; orthogonal, and D-094 records this must not be re-litigated |
 | 10 | multi-asset in-kind skim + payout | `x/session/keeper/skim.go:37` | **RE-POINTED by D-089** → NEW task 2.12 | open (a fee-model question, D-050/D-051 — not a matcher enrichment) |
+
+**Marker hygiene (Rev 4, task 2.16).** Re-derived from the tree at `7283b11`:
+**15** `CONCLAVE-TODO` markers (2 `phase-2` = rows 9 and 10 above; 13
+`phase-3`, owned 3.3 ×2, 3.4 ×4, 3.5 ×1, 3.11 ×6). Rev 3's phase-3 sweep held —
+every one still names a live owner. **One was unowned: row 9's marker named
+task 2.7, which had CLOSED**, and its text asserted a D-074 collision D-094 had
+already ruled non-existent. That is METHODOLOGY Rule 6 sub-rule 3's explicitly
+named worst case — *"a marker whose named task has COMPLETED… reads as pending
+while being unowned, and it is invisible to 'is anything unowned?' checks"* —
+reproduced **one task after the rule was written**, which is why the census is
+now run from the tree at every boundary rather than trusted from this table.
+Retargeted to 2.15(a) in-task. *(Rev 3's own note follows.)*
 
 **Marker hygiene (Rev 3).** A repo-wide sweep at `aa21274` found **22**
 `CONCLAVE-TODO` markers. The three `phase-2`/`phase-2+` ones are rows 5, 9 and
@@ -865,34 +926,65 @@ IBC."* One integration, four tasks:
 | x402 agent pays in; gateway fronts gas, submits intent | 2.3 | ✅ **DONE** → **LIVE in §6a** (D-091; the mandate-bound hot key's gas fronted in the settlement denom, asserted by the pool delta) |
 | ZK_DELIVERY escrow: groth16 proof releases payment ("ZK-verified" is literal) | 2.1 | ✅ **DONE** → **LIVE in §6a** (D-091; the first conditioned escrow ever opened on a running network) |
 | CVM contract drives the escrow/CONCLUDE path via bindings | 2.2 | ✅ **DONE in-process** → **LIVE in §6a; D-079 DISCHARGED** (D-091) |
-| Settlement in real IBC USDC; Receipt ICS-23-verified on a second chain | 2.5 | ✅ in-process (D-082) — **the live-relayer slice is §6b, still open** |
+| Settlement in real IBC USDC; Receipt ICS-23-verified on a second chain | 2.5 | ✅ **DONE** → **LIVE in §6b** (D-092; live `cosmos/relayer` v2.6.0, second-chain light-client root; **D-082 DISCHARGED**) |
 
-**The demo was SPLIT at its plan-stop (D-091): §6a is DONE and §6b remains.**
-Only the build is split — **the exit criterion is asserted at §6b**, which owns
-**D-082's live relayer USDC demo** and second-chain verification. §6a discharged
-the other deferred obligation, the **D-079 localnet contract-release smoke**, in
-full. The acceptance record for both parts is `docs/EXIT_DEMO.md`.
+**The demo was SPLIT at its plan-stop (D-091); BOTH parts are now DONE.** Only
+the build was split — **the exit criterion is asserted at §6b** (D-092), which
+owned **D-082's live relayer USDC demo** and second-chain verification. §6a
+discharged the other deferred obligation, the **D-079 localnet
+contract-release smoke**, in full. The acceptance record for both parts is
+`docs/EXIT_DEMO.md`.
 
-**§6a's headline finding, carried forward as task 2.13:** conditioned escrows had
-**no live-network writer at all** — the in-consensus fallback never attaches a
-condition, non-test `solver/` never does, and escrows are created only by
-CONCLUDE — so the entire escrow condition system had been exercised solely by
-keeper-level hand-built Matches. §6a's driver is now the only live writer, and it
-is **demo tooling**: "the demo can do it now" is not "the network can do it now".
+**Re-verified at HEAD by task 2.16 (D-095).** §6b's last recorded run was at
+`1aecfbf`; two commits then landed — `0d7f167` edited the §6b driver and
+`7283b11` inverted the consent semantic — and neither re-ran it, so the
+criterion rested on §6a-green-at-HEAD plus an additivity argument. 2.16 re-ran
+`scripts/exit_demo_ibc.sh` at HEAD, which converts the assertion from
+inference to evidence.
 
-**ANSWERED by task 2.13 (D-093): the verdict is GAP, and it is a protocol
-property.** Consent is enforced in one direction only — `attached ⇒ signed` is
-guarded at both chokepoints, `signed ⇒ attached` is guarded nowhere (both loops
-skip a NONE leg before comparing). So **a signed delivery condition is a
-permission ceiling, never a requirement**: a party can bound what may be imposed
-on it and cannot obtain what it asked for. Crucially the downgrade is not a
-solver-behaviour question — `buildFallbackMatch` emits no condition at all and
-the fallback is the DEFAULT clearing path for every session no solver wins, so
-two parties who both signed the same ZK condition are cleared unconditioned **by
-the state machine itself**. The closure is split and both halves are owned:
-enforcement is the new DOWNGRADE row inside **2.7**'s criteria, the reference
-implementation is new task **2.14**, and the boundary is pinned in executable
-form by `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`.
+**§6a's headline finding — RESOLVED by 2.7 (D-094).** §6a found that conditioned
+escrows had no live-network writer at all, and 2.13 (D-093) diagnosed the cause
+as a one-directional consent gate. **Task 2.7 closed it:** `signed ⇒ attached`
+is now enforced at both chokepoints
+(`x/session/keeper/condition_binding.go`), and the in-consensus fallback
+**ATTACHES** the giver's signed condition (`attachFallbackCondition`,
+`x/session/keeper/fallback.go`) rather than dropping it — so **the network now
+has a live writer, and it is consensus itself.** A signed delivery condition is
+a **REQUIREMENT, not a permission ceiling**; dropping one is
+`ErrConditionNotHonored` (session `1429`). The buyer's relation is per-class:
+seller and ZK buyer EXACT, HASHLOCK buyer `timeout ≤ signed` (a MAXIMUM),
+OPTIMISTIC buyer `window ≥ signed` (a MINIMUM). Executable form:
+`TestSignedConditionIsRequirement_Enforced`.
+
+**One half of 2.13's verdict is still open, and it is task 2.14:** non-test
+`solver/` still never reads `IntentPayload.condition`, so the in-tree reference
+solver would propose a **slashable (5%)** solution the first time it meets a
+condition-signing intent. "The chain now requires it" is not "the reference
+client now does it."
+
+> **SUPERSEDED — kept for the record (D-093, closed by D-094; the forward
+> pointer is the two paragraphs directly above, `condition_binding.go`, and
+> §2.7):**
+>
+> *"ANSWERED by task 2.13 (D-093): the verdict is GAP, and it is a protocol
+> property. Consent is enforced in one direction only — `attached ⇒ signed` is
+> guarded at both chokepoints, `signed ⇒ attached` is guarded nowhere (both
+> loops skip a NONE leg before comparing). So a signed delivery condition is a
+> permission ceiling, never a requirement: a party can bound what may be
+> imposed on it and cannot obtain what it asked for. Crucially the downgrade is
+> not a solver-behaviour question — `buildFallbackMatch` emits no condition at
+> all and the fallback is the DEFAULT clearing path for every session no solver
+> wins, so two parties who both signed the same ZK condition are cleared
+> unconditioned by the state machine itself. Enforcement is the new DOWNGRADE
+> row inside 2.7's criteria, the reference implementation is new task 2.14, and
+> the boundary is pinned by
+> `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`."*
+>
+> That pin was **REPLACED, not relaxed** — it instructed its own owner to do
+> exactly that. This block is retained because the GAP finding is one of the
+> project's most instructive results and D-094's design rests on it; it is
+> marked because a struck block without a forward pointer still reads as
+> current to a skimmer.
 
 **Hard condition at the demo's plan-stop (D-090).** The x402 leg is the
 conditioned ZK buy, so its receipt reads `condition_outcome = NONE` for a
@@ -902,11 +994,24 @@ the demo output is ever repurposed as EXTERNAL-FACING evidence, task 2.9 is a
 prerequisite.** This is a condition, not a note.
 
 **2.4 stays deliberately off this exit path** (the parallel inbound rail,
-proven by its own repo's integration). 2.6/2.7 and 2.8–2.12 harden beneath it
-but are not part of the exit assertion. **Distinct from phase exit — the mainnet
-gates:** the external cryptographic audit (1.8 scope), the VK trusted-setup MPC
-ceremony, and the circuit-soundness audit. The demo can run on the dev VK;
-mainnet cannot.
+proven by its own repo's integration). 2.6/2.7/2.11/2.13 and the six-task tail
+harden beneath it but are not part of the exit assertion. **Distinct from phase
+exit — the mainnet gates:** the external cryptographic audit (1.8 scope), the VK
+trusted-setup MPC ceremony, and the circuit-soundness audit. The demo can run on
+the dev VK; mainnet cannot.
+
+**Two scope facts the checkboxes do not show (recorded at 2.16, D-095).**
+(a) **Neither edge service exists in any repo** — there is no
+`conclave-x402-gateway` and no `conclave-7683-resolver`. SPEC §10 rows 2.3 and
+2.4 are satisfied by their *in-repo deliverable* (surface contract +
+conformance test + live sweep), which is the recorded FLAG-C narrowing grounded
+in SPEC §9, not drift. But 2.3's acceptance clause *"is the interface the
+separate repo builds against"* is **unverifiable today**, and that is a forward
+property no document previously stated. (b) Consequently the "external x402
+agent" of the exit criterion is `cmd/conclave-demo` in the Model-A gateway
+shape `X402_SURFACE.md` §1.2 defines — the criterion's word "external" is
+carried by an emulation of the node-side auth model a gateway would use, not by
+an x402 HTTP conversation.
 
 ---
 
@@ -931,18 +1036,28 @@ mainnet cannot.
 6. **Escrow record ownership** — CLOSED: writer-going-forward; x/receipt was
    never a constraint (D-073, correcting Rev 1). **Re-verified at Rev 3:**
    non-test `x/receipt` code contains zero escrow references.
-7. **Consent invariants** — load-bearing and proven reached from every direction
-   **in the ATTACH direction only** (corrected at 2.13, D-093): D-075
-   seller-signed condition + D-076 buyer-signed ZK condition, enforced
-   fail-closed at validation *and* settlement; 2.2 proved them structurally
-   unreachable from CVM (D-079) and 2.6 proved partial fills cannot arise on a
-   conditioned leg (a DataGrant is exact-fill only in both new matchers), so
-   D-074's bilateral shape is reached exactly as before. **The REQUIREMENT
-   direction is not enforced at all:** `signed ⇒ attached` is guarded nowhere,
-   so a signed condition is a permission ceiling and the in-consensus fallback
-   downgrades every condition-signing pair it clears (D-093). Completeness
-   (FW-1/FW-2 **+ the downgrade**) owned by **2.7**; the reference attachment
-   path by **2.14**.
+7. **Consent invariants — COMPLETE IN BOTH DIRECTIONS since 2.7 (D-094).**
+   `attached ⇒ signed` AND `signed ⇒ attached` are each enforced fail-closed at
+   BOTH chokepoints (`x/session/keeper/condition_binding.go`), and the
+   in-consensus fallback is an ATTACHER (`attachFallbackCondition`), so the rule
+   ships with a live path that satisfies it. D-075 seller-signed + D-076
+   buyer-signed ZK are unchanged; FW-1(a)+(b) landed as one per-class relation
+   (HASHLOCK ceiling vs OPTIMISTIC floor — opposite directions, disjoint watched
+   reds); FW-2's `IntentLeg.condition` ships with a real reader
+   (`effectiveCondition`). 2.2 proved the gates structurally unreachable from
+   CVM (D-079) and 2.6 proved partial fills cannot arise on a conditioned leg,
+   so D-074's bilateral shape is reached exactly as before — and D-074 was
+   **KEPT**, the feared FW-2 collision dissolving as orthogonal. New error
+   `ErrConditionNotHonored` (session `1429`). **Still open: the reference
+   attachment path (2.14)** — the chain requires attachment; `solver/` does not
+   yet do it.
+   > **SUPERSEDED — kept for the record (D-093, closed by D-094; forward
+   > pointer: the paragraph above and `condition_binding.go`):** *"…load-bearing
+   > and proven reached from every direction in the ATTACH direction only. The
+   > REQUIREMENT direction is not enforced at all: `signed ⇒ attached` is
+   > guarded nowhere, so a signed condition is a permission ceiling and the
+   > in-consensus fallback downgrades every condition-signing pair it clears.
+   > Completeness (FW-1/FW-2 + the downgrade) owned by 2.7."*
 8. **The determinism vector's coverage shadow is a STRUCTURAL PROPERTY, not an
    observation** (promoted at D-089 on its fourth instance; supersedes the old
    "five matcher TODOs owned by 2.6" entry, whose scope is now split across
@@ -991,4 +1106,11 @@ ceiling named. **Rev 3 (D-090) reconciled at `aa21274` after a full
 state-reconciliation audit:** all five SPEC §10 tasks plus 2.6 and 2.11 are
 DONE, five tasks (2.8–2.12) gained rows, FLAG C discharged, the ownership
 collisions resolved, and the exit demo unblocked with its 2.9 condition
-recorded. **Next action: the §6 exit demo.** The conclave convenes.*
+recorded (Rev 3 shipped as `ae597fc`). **Rev 4 (D-095, task 2.16) reconciled at
+`7283b11` at the phase boundary:** the nineteen post-2.7 stale statements corrected, the exit criterion
+re-verified live at HEAD, the marker census and citation sweep re-run from the
+tree, hash traceability restored, and **Phase 2 declared EXITED** with the
+six-task tail under one uniform rule.*
+
+***Next action: PHASE3_PLAN task 3.0**, which now plans from a settled
+boundary. The conclave convenes.*

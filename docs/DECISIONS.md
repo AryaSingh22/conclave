@@ -5390,3 +5390,297 @@ inevitable. The amendment is also the first in METHODOLOGY's history that came
 from a rule being FOLLOWED rather than failing: D-093 obeyed Rule 9 and still had
 to end in a sentence asking the reader to trust it, which is the signal a rule
 has one more step in it.
+
+## D-095 — Task 2.16 Phase-2 boundary record reconciliation: 19 post-2.7 stale statements corrected under a recorded load-bearingness rule; the §6 exit criterion re-verified LIVE at HEAD (inference → evidence); PHASE2_DESIGN Rev 4; **PHASE 2 DECLARED EXITED** with a six-task tail under one uniform rule
+
+- **Date:** 2026-08-02 (boundary reconciliation at `7283b11`. Numbered as a
+  ledger task, unlike D-090's unnumbered reconciliation — see "Numbering"
+  below. One banner's string literals are the only behavioural change; the
+  standing rule that a CODE defect found here becomes its own numbered task
+  rather than an inline fix was carried, and **none was found.**)
+- **SPEC:** §10 (the Phase-2 paragraph whose completion is being determined),
+  §9 (edge services off-chain — FLAG C), §13 (the greppable-marker convention);
+  METHODOLOGY Rules 6, 7, 8, 9 + the §11 boundary checklist; PHASE2_DESIGN
+  Rev 3 (D-090); D-091/092/093/094; PHASE3_PLAN §3.0/§3.1.1/§3.1.2/§5.1.
+
+### The determination that opened the task
+
+Phase 2's BUILD was finished; its RECORD was not. All five SPEC §10 tasks are
+complete against their own acceptance criteria (2.5's criterion 5 — the skim
+coherence re-check owed to 2.6 — was individually verified as discharged at
+D-082, not assumed), and the §6 criterion was asserted at §6b. **Nothing open
+was exit-blocking.**
+
+**The exit test, recorded so it is re-applied rather than re-argued:** a task is
+EXIT-BLOCKING iff SPEC §10's Phase-2 paragraph — the five named tasks plus its
+one-sentence exit criterion — cannot be truthfully asserted without it.
+Importance drives SEQUENCE; only the SPEC's text drives the GATE. Applied to
+2.8/2.9/2.10/2.12/2.14/2.15 it **CONFIRMS** each "off the exit path" row rather
+than inheriting it — which is what makes the boundary a determination rather
+than a restatement.
+
+### The finding: a correction that propagated four-fifths of the way
+
+Task 2.7 (`7283b11`, D-094) inverted a security semantic — a signed delivery
+condition became a REQUIREMENT rather than a permission ceiling — and correctly
+propagated the correction into CLAUDE.md, both edge contracts, and
+PHASE2_DESIGN's §0 row and §2.7 section. **It stopped there.** Nineteen
+present-tense statements across five files still asserted the pre-2.7 world:
+
+| File | What it still asserted |
+|---|---|
+| `PHASE2_DESIGN.md` | the §0 callout listing 2.7 as open (and omitting 2.15); §2.1's `IntentLeg` clause; §5 row 9 (owner 2.7, "collides with D-074"); §6's leg table ("§6b still open"), its GAP block, and FLAG 7 ("the REQUIREMENT direction is not enforced at all"); the closing "Next action: the §6 exit demo" |
+| `PHASE3_PLAN.md` | **§3.1.1, the AUDITOR-FACING scope**: "`IntentLeg` has no condition field", plus a one-directional description of the consent model |
+| `EXIT_DEMO.md` | the timing-knob rationale; boundary 3 ("reachable live ONLY through demo tooling"); the whole condition-attaching-proposer section and its GAP verdict |
+| `cmd/conclave-demo/exit_demo.go` | package doc: three false clauses + a citation to a DELETED test |
+| `cmd/conclave-demo/exit_demo_ibc.go` | **a banner the exit-criterion run PRINTS**: "the network still has no such writer. Verdict: GAP; enforcement = task 2.7" |
+
+**Every one of them UNDER-claims** — describing a protection as absent when it
+is present. Harmless to a user; **actively harmful to an auditor**, because
+§3.1.1 steered a reviewer away from `x/session/keeper/condition_binding.go`,
+297 lines of the newest and least-reviewed consent code in the tree. That is
+METHODOLOGY Rule 9's own warning realised: *a stale inventory is worse than no
+inventory.*
+
+### DECISION 1 — the load-bearingness rule (so the next session applies a test, not a taste)
+
+Three options were weighed: correct-in-place everywhere (cheapest, but it would
+destroy the record of the 2.13 GAP finding, one of the project's most
+instructive results and the thing D-094's design rests on); keep-and-mark
+everywhere (faithful, but it puts struck blocks in three documents for
+statements nobody would re-derive a decision from); or **split by
+load-bearingness — ADOPTED**:
+
+> **A false statement someone could re-derive a DECISION from is KEPT, MARKED,
+> and corrected. Incidental description is corrected IN PLACE.**
+>
+> **Every keep-and-mark block must state WHAT SUPERSEDED IT AND WHERE** — not
+> merely "~~pre-2.7~~" but a forward pointer naming the ADR and the code. **A
+> struck block without a forward pointer still reads as CURRENT to a skimmer**,
+> which defeats the purpose of retaining it.
+
+Kept-and-marked (4): PHASE2_DESIGN §6's GAP block and FLAG 7, EXIT_DEMO's
+proposer section, `exit_demo.go`'s package doc. Corrected in place (15).
+
+**An unplanned consequence that turned out to be load-bearing.** The convention
+chosen for keep-and-mark — a Markdown blockquote — is precisely what makes the
+new citation sweep DISCRIMINATING, since a superseded block legitimately quotes
+a deleted test. The Rule-8 formatting convention and the anti-staleness check
+reinforce each other. That was not designed, and it is recorded so it is not
+accidentally undone.
+
+### DECISION 2 — 2.16 writes the §5.1 rows; 3.0 re-verifies them
+
+PHASE3_PLAN §5.1 is headed "The table (nothing floats)" and had **no row** for
+2.8's structural fork, 2.9, 2.13, 2.14 or 2.15 — four of them open. 3.0's
+acceptance is a row-by-row re-verification, which **structurally cannot surface
+a row that is missing.** That is AUDIT F-8's mechanism reproduced inside the
+receiving document. The rows were therefore written at 2.16, BEFORE 3.0 runs,
+and 3.0's criteria now require re-deriving the row SET from CLAUDE.md's ledger
+and the marker census rather than verifying whichever rows it happens to find.
+
+### DECISION 3 — the citation sweep, and the honest tradeoff inside it
+
+METHODOLOGY §11's boundary checklist carries "every cited test name and
+file:line still resolves" as a MANUAL item — so it was reproducible only by
+whoever reinvented the command, and this audit duly found a citation to
+`TestSignedConditionIsPermissionNotRequirement_BoundaryPin`, which 2.7 DELETED,
+live in three places. The sweep is now a documented command in PHASE3_PLAN
+§3.1.2's fenced block. **Markdown only; no `scripts/` artifact** — that is
+deliberately 3.0's call once it has run the block by hand and knows what it
+wants to freeze.
+
+**The check was red-forever in its first form, and that was FIXED rather than
+tolerated** (Rule 7 step 4: a gate whose false-positive rate is not driven to
+zero is one the team learns to ignore). Two mechanisms keep it discriminating: a
+`grep -v '^>'` filter for prose documents, and a **named allowlist** for the
+CLAUDE.md ledger rows, whose keep-and-mark convention is
+strikethrough-plus-forward-pointer because a blockquote cannot nest cleanly in a
+checklist item. **Widening the filter until the check went green would have
+blinded it to real re-citations**; naming the exception — with its four
+legitimate locations and the explicit note that a fifth IS a finding — keeps it
+sharp. The cost is a list that must be maintained, the same cost every findings
+list carries (Rule 6), stated rather than hidden.
+
+### DECISION 4 — 2.16 declares Phase 2 EXITED
+
+Making 3.0 adjudicate whether the phase it is revving has ended is the wrong
+division of labour. 2.16 records the exit, the tail rule and the roster; 3.0
+plans from a settled boundary.
+
+### DECISION 5 — the tail is ONE UNIFORM RULE, not six exceptions
+
+**2.8, 2.9, 2.10, 2.12, 2.14, 2.15** remain open, none exit-blocking. They keep
+their `2.x` numbers: **a number is an identifier, not a schedule**, and
+renumbering would break roughly fifteen `DECISIONS.md` cross-references plus the
+in-tree markers.
+
+**2.12 — a premise corrected on the record (Rule 8).** The task arrived framed
+as *"2.12's ledger row says it is gated on the D6 fee-economics model, and D6 is
+PHASE3_PLAN 3.9, so 2.12 cannot close in Phase 2."* **No document creates that
+gate.** An exhaustive grep for `D6` returns SPEC §14's tokenomics decision
+(→ 3.9) and one occurrence in CLAUDE.md's §6a row where "D6" is that task's
+INTERNAL plan-stop decision label (the same series as its "D1" split decision).
+2.12's row calls it a fee-MODEL question in the sense of **D-050/D-051** —
+Conclave ADRs already decided — and its plan-stop question (*is an authorized
+`svc/{schema}` mint or a quantity-less `data/{hash}` grant skimmable at all*) is
+answerable from **D-048** with no tokenomics model. **2.12 is self-gated and
+could close in Phase 2.**
+
+The requester identified the error's mechanism themselves and asked for it on
+the record: **a plausible cross-reference generated from adjacent context** —
+the third instance in one conversation of a tree-fact asserted that was not in
+the tree, each time by the same mechanism. It is kept here because the mechanism
+generalises well beyond this instance, and because it is exactly what "verify
+against the tree, not against narrative" exists to catch.
+
+**The disposition adopted is neither of the two offered** (exit with 2.12
+OPEN-AND-BLOCKED, or re-home it to Phase 3): both are special cases, and **a
+special case is how a ledger acquires exceptions nobody can re-derive.** 2.12
+takes the uniform tail rule plus an explicit new **SEQUENCING DECISION**:
+*sequenced after 3.9 by decision, because its plan-stop question is an economics
+question 3.9 answers.* That is checkable. **"Blocked on D6" would have been a
+floating phrase asserting a dependency no document creates — precisely the
+failure that produced external audit finding F-3**, on the very table built to
+prevent it.
+
+### The §6 exit criterion: inference → EVIDENCE
+
+§6b's last recorded run was `1aecfbf`. `0d7f167` then edited its driver and
+`7283b11` inverted the consent semantic; **both tasks ran `exit_demo.sh` (§6a)
+only.** So "the criterion holds at HEAD" had come to rest on §6a-green-at-HEAD
+plus an additivity argument — while EXIT_DEMO.md's own closing line claimed
+"both scripts are run at every close."
+
+**The claim was repaired by making it TRUE, not by softening it.**
+`scripts/exit_demo_ibc.sh` was re-run at HEAD: **EXIT_RC=0** — two chains plus a
+live `cosmos/relayer` v2.6.0, the buyer holding `ibc/8E27BA2D…`, the ZK escrow
+holding and paying out the voucher, and §6.3 check 1 verifying the receipt
+against chain B's stored root `895E6F71CA1E84B0…` read from B's on-chain
+`ConsensusState`, with the off-by-one negative failing the root check
+specifically. The corrected banner printed. EXIT_DEMO.md now states both the
+lapse and the rule: `exit_demo.sh` keeps §6a honest; **`exit_demo_ibc.sh` keeps
+the EXIT CRITERION honest**, and any future task touching `cmd/conclave-demo`,
+`x/session/keeper` or `x/escrow` that runs only the former repeats this lapse.
+
+### Marker census — Rule 6 sub-rule 3's worst case, one task after the rule was written
+
+Re-derived from the tree: **15 markers** (2 `phase-2`, 13 `phase-3`). Rev 3's
+phase-3 sweep held — all 13 still name a live owner. **One was unowned:**
+`solution.go:143` named **task 2.7, which had CLOSED**, and its text asserted a
+D-074 collision D-094 had already ruled non-existent and recorded as "must not
+be re-litigated." Retargeted to **2.15(a)**.
+
+METHODOLOGY Rule 6 sub-rule 3 names this exact case — *"a marker whose named
+task has COMPLETED is the worst case: it reads as pending while being unowned,
+and it is invisible to 'is anything unowned?' checks"* — and it reproduced **one
+task after the rule was written.** The lesson taken is not "be more careful":
+the census is now a scheduled sweep in §3.1.2, run from the tree at every
+boundary rather than trusted from a table.
+
+### SCOPE ADDITION, surfaced mid-build (Rule 8)
+
+`solution.go:154` documented §6.4 rule 6 as **"NONE conditions only"** — false
+since **2.1a** (D-073/D-075), older than 2.7 and outside the planned S-list
+fence. Corrected in place rather than left standing four lines from a comment
+being fixed, and surfaced at the moment of deviation rather than at close. Same
+defect class, zero behavioural reach.
+
+### The two scope facts the checkboxes did not show
+
+Recorded in PHASE2_DESIGN §6 because a reader of the ledger would not see them.
+(a) **Neither edge service exists in any repo** — SPEC §10 rows 2.3/2.4 are
+satisfied by their in-repo deliverable, the recorded FLAG-C narrowing grounded
+in SPEC §9, which is legitimate; but 2.3's acceptance clause *"is the interface
+the separate repo builds against"* is **unverifiable today**, and no document
+said so. (b) Consequently the criterion's "external x402 agent" is
+`cmd/conclave-demo` in the Model-A gateway shape — the word "external" is
+carried by an emulation of the node-side auth model, not by an x402 HTTP
+conversation.
+
+### Gates
+
+Sequenced source → gate → docs → live → sweeps, so attribution is free.
+
+- **Baseline** at `7283b11`, clean tree: lint 0 / test 0 / vector 0; five seeds
+  byte-identical to the D-082 baseline.
+- **Source stage in ISOLATION** (`solution.go`, `exit_demo.go`,
+  `exit_demo_ibc.go`): `make lint` **0**, `make test` **0** (0 FAIL),
+  `make sim-determinism` **0** — seeds `245EF177…`, `B48BDA6D…`, `FA562B1D…`,
+  `E491FB48…`, `6596CCA1…`: **byte-identical to the D-082 baseline, no
+  re-baseline.** Fingerprint `206eece7…` identical before and after.
+- **`scripts/exit_demo_ibc.sh` at HEAD: EXIT_RC=0** (detail above).
+- **Five acceptance sweeps, all pass**: marker ownership (15/15 owned by open
+  tasks), citation resolution (0 findings after the named allowlist),
+  forward-item union (6/6 tail tasks have a §5.1 row), hash traceability (14/14
+  Phase-2 commits cited), superseded-claim scan (0 unmarked).
+
+**Rule 3 does not apply, and saying so beats a ceremonial red:** this task adds
+no guard, so there is nothing to sabotage. **The honest analog is that all five
+sweeps were RED at HEAD before the task — that is how the findings were
+produced — and are green after.**
+
+**Named covering gate (Rule 7 step 5) — the vector covers NOTHING here.**
+Comments and demo strings cannot reach consensus state. The vector ran as a
+regression backstop and because Rule 7 step 1 admits no exceptions; the gates
+that actually cover this change are `scripts/exit_demo_ibc.sh` at HEAD and the
+five sweeps.
+
+**Two-fingerprint close-out (Rule 9 step 4).** Docs were edited after the
+isolated source gate, by the approved sequencing. The shipping tree's
+source-only diff:
+
+```
+$ git diff -- ':(exclude)*.md' | sha256sum
+206eece717f2547fdf5f997e29b0384b5f662d4b502162b0a0d20e935a70ba85
+```
+
+equals the full-diff fingerprint recorded at the gate **exactly**, so not one
+source or test byte moved after the vector ran.
+
+*The shipping FULL-diff hash is deliberately not recorded here: writing it into
+this ADR would change it. That self-reference is precisely why the source-only
+hash is the one that carries the proof — it is invariant under any Markdown
+edit, including this one.*
+
+### Numbering: a deliberate divergence from D-090's precedent
+
+D-090 was the same shape — a reconciliation touching docs plus marker re-tags
+across 27 files — and deliberately carried **no** task number. 2.16 diverges and
+takes one. **Declining to number the task that fixes work-gone-missing, when
+"unnumbered work goes missing" is D-090's own headline lesson, would be an
+unforced irony**; and unlike D-090 this task carries a live gate (§6b) and a
+source component that a docs-pass framing would under-weight.
+
+### Forward items, written INTO their receiving tasks (Rule 6 sub-rule 6)
+
+- **3.0** — four obligations accepted into its criteria, not pointed at it: run
+  §3.1.2's re-derivation from the tree; **read §3.1.1 as a CORRECTION TARGET,
+  not only a diff base** (a grep-diff surfaces additions and cannot surface that
+  existing prose went FALSE — exactly how §3.1.1 came to misdescribe the consent
+  model eight days after FW-2 landed); re-verify the §5.1 row **SET**, enumerated
+  from the ledger; and treat a task's NARROWING edits as the trigger to re-check
+  every item pointed at it (D-093's input — the Rule-6 one-way-pointer failure
+  has now recurred a fourth time).
+- **2.15(a)** — receives `solution.go:143`'s marker, with D-074 recorded as
+  orthogonal and not to be re-litigated.
+- **2.14** — carries the only live functional defect in the tail: non-test
+  `solver/` contains **zero** reads of `Condition`, so the reference solver would
+  propose a slashable (5%) solution against a condition-signing intent.
+- **2.9** — remains the hard prerequisite for external-facing use of the §6
+  evidence, widened by 2.7.
+- **§5.2's three advisories** marked SPENT: 2.3/2.4/2.5 have all closed.
+
+### The transferable lesson
+
+**A correction propagates to the documents its author is holding, and stops.**
+2.7 did the hard part — inverting a security semantic with watched reds and a
+replaced pin — and still left the auditor-facing scope telling a reviewer the
+opposite. The failure is not diligence; it is that **nothing enumerated the
+consumers of the claim being corrected.** The remedy is mechanical and now
+scheduled: the citation sweep, the marker census and the row-SET re-derivation
+all run from the TREE at every boundary. **Candidate METHODOLOGY amendment, for
+3.0 to rule on: Rule 8 step 3 ("propagate the correction to any document that
+repeated it") needs the sub-rule Rule 6 already learned — enumerate the
+consumers FIRST, because a correction propagated from memory reaches exactly the
+documents you remember.**

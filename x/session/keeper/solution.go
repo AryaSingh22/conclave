@@ -142,16 +142,25 @@ func (k Keeper) ProposeSolution(ctx sdk.Context, solver sdk.AccAddress, sessionI
 //     — legs name sigils and rule 3 is per-intent, so a sigil must map to one
 //     intent in the match; CONCLAVE-TODO(phase-2): allow multi-intent-per-sigil
 //     via intent-tagged legs so one agent can clear two intents in a batch —
-//     RE-POINTED by D-089 from task 2.6 to **2.7/FW-2**: it needs a SettleLeg
-//     intent-tag proto field and collides with D-074's two-distinct-sigil
-//     bilateral constraint, which is FW-2's own plan-stop question).
+//     owned by **task 2.15(a)** (D-094). It needs a SettleLeg intent-tag proto
+//     field plus a rewrite of CheckConservation/checkLimits attribution from
+//     per-sigil to per-intent. **D-074 is NOT a collision** and must not be
+//     re-litigated (D-094): D-074 constrains the SHAPE of a conditioned match,
+//     intent-tagging governs WHICH signed condition applies to WHICH leg —
+//     orthogonal. Was re-pointed by D-089 to 2.7/FW-2; 2.7 re-deferred it on
+//     SCOPE alone and 2.15 is the receiving task).
 //  2. conservation (CheckConservation) + legs reference only participants.
 //  3. limit satisfaction: quantities (partial only if allow_partial) AND, since
 //     task 2.6, the §5.1 `limit` RATE each party signed (checkLimitRate).
 //  4. uniform price: one price per asset pair within a match.
 //  5. counterparty class: each party's predicate holds against every other
 //     party's Sigil state (resolves the 0.4 CONCLAVE-TODO).
-//  6. graph size ≤ max_graph_legs; NONE conditions only (checked in rule 2).
+//  6. graph size ≤ max_graph_legs. (Delivery conditions are NOT restricted to
+//     NONE — that was the Phase-0/Phase-1 posture and this line outlived it.
+//     Since 2.1a a conditioned DataGrant leg is legal, governed at the rule-2
+//     position by validateConditionedMatch (§6.5 shape, D-073/D-074) and
+//     validateConditionBinding (consent, D-075/D-076); since 2.7 a signed
+//     condition is a REQUIREMENT, not a permission ceiling — D-094.)
 func (k Keeper) validateSolution(ctx sdk.Context, session types.Session, matches []types.Match, params types.Params) error {
 	totalLegs := 0
 	for i := range matches {

@@ -18,6 +18,13 @@ relayer, and receipt verification against a second chain's light client.
 > Cosmos chain's on-chain light client of Conclave**. Every boundary on that
 > sentence is stated below — read *"What §6b does and does not claim"* before
 > quoting it. The run is **INTERNAL** (see the classification directly below).
+>
+> **RE-VERIFIED AT HEAD (task 2.16, D-095).** §6b's last recorded run was at
+> `1aecfbf`; `0d7f167` then edited its driver and `7283b11` inverted the consent
+> semantic, and neither re-ran it — so the assertion had come to rest on
+> §6a-green-at-HEAD plus an additivity argument. 2.16 re-ran
+> `scripts/exit_demo_ibc.sh` at HEAD, which is what makes the criterion
+> **evidence rather than inference**.
 
 ---
 
@@ -64,8 +71,17 @@ what is running.
 `scripts/exit_demo.sh` sets `SESSION_LENGTH_BLOCKS=12` / `SOLUTION_WINDOW_BLOCKS=8`
 (both default-off knobs added to `localnet.sh`). The SPEC §6.4 dev defaults are
 3/2 blocks, which on a 1s-block node is an auction window the driver can lose to
-the in-consensus fallback — and a fallback clearing would settle the pair
-**unconditioned**, opening no escrow. Demo timing only; no code path changes.
+the in-consensus fallback. The knobs keep the demo's *own* solver on the winning
+path so the stages assert what they were written to assert.
+
+> **The original reason for these knobs expired at task 2.7** (D-094), and it is
+> corrected here rather than left standing: this paragraph used to say *"a
+> fallback clearing would settle the pair **unconditioned**, opening no
+> escrow."* Since 2.7 the fallback **ATTACHES** the signed condition
+> (`attachFallbackCondition`), so losing the auction no longer silently
+> downgrades the trade — it would open a funded escrow too. The knobs are now a
+> determinism-of-narrative convenience, not a correctness guard. Demo timing
+> only; no code path changes.
 
 ---
 
@@ -137,42 +153,68 @@ rejected specifically because *"buyer … did not sign this ZK condition"*
    reveal is proven by task 1.7 on its own 4-validator harness (D-070) and is not
    re-proven by this demo. The driver takes `CONCLAVE_GRPC`, so pointing it at
    `localnet4.sh KEEP_RUNNING=1` is a config change if that run is ever wanted.
-3. **Conditioned escrows are reachable live ONLY through demo tooling.** This is
-   the finding the task opened with and it survives the task — see below.
+3. ~~**Conditioned escrows are reachable live ONLY through demo tooling.**~~ —
+   **NO LONGER TRUE; superseded by task 2.7 (D-094).** The in-consensus fallback
+   now ATTACHES a signed condition (`attachFallbackCondition`,
+   `x/session/keeper/fallback.go`), so consensus itself is a live writer of
+   `SettleLeg.Condition`. What survives is narrower and is task **2.14**: the
+   reference solver in `solver/` still never reads `IntentPayload.condition` —
+   see below.
 4. **The bridge checks run in the driver**, which is correct by contract
    (7683_SURFACE §6.3 makes the settler resolver-repo scope), but §6a's root is
    the node's own header. **§6b replaced the ROOT** with one held by a second
    chain's light client; the checks still run in the driver, and that half of
    the boundary is permanent — see *"What §6b does and does not claim"*.
 
-### The condition-attaching proposer is DEMO tooling — read this precisely
+### The condition-attaching proposer — CURRENT STATE (task 2.7, D-094)
 
-A delivery condition is **solver-attached by design** (D-075: `IntentLeg` has no
-condition field, so a solver reads the seller's signed
-`IntentPayload.condition` and puts it on the `SettleLeg`). But **neither the
-in-consensus fallback matcher nor the reference solver ever attaches one**, and
-escrows are created only by CONCLUDE. So before this task, no component in the
-repo could produce a conditioned escrow on a live network, and every
-conditioned-escrow proof in the tree was a keeper-level hand-built `Match`.
+**A signed delivery condition is a REQUIREMENT, not a permission ceiling.**
+`attached ⇒ signed` and `signed ⇒ attached` are both enforced, at both
+chokepoints (`x/session/keeper/condition_binding.go`), and the **in-consensus
+fallback ATTACHES** the giver's signed condition (`attachFallbackCondition`,
+`x/session/keeper/fallback.go`) rather than dropping it. So the escrow condition
+system **is** reachable by a production path, and that path is consensus itself.
+Dropping a signed condition is `ErrConditionNotHonored` (session `1429`).
+Executable form: `TestSignedConditionIsRequirement_Enforced`.
 
-`cmd/conclave-demo` now attaches conditions — and it is dev tooling. **After
-§6a, the escrow condition system is still not reachable by any production
-path.** Whether that is intended (third-party solvers will attach conditions,
-and the chain's job is only to verify consent — which stage 7 proves it does) or
-a gap (no reference implementation shows a solver how) was an open question owned
-by **task 2.13**. Do not read "the demo can do it now" as "the network can do it
-now".
+`cmd/conclave-demo`'s `proposeConditionedSolution` was the **first** live-network
+writer of `SettleLeg.Condition` (§6a's finding) and remains a valid one — it is
+simply no longer the only one. Stage 7 still proves the thing worth proving
+about it: that writer cannot **impose** a condition.
 
-**ANSWERED (task 2.13, D-093): GAP** — and larger than "no reference
-implementation". The consent gates are one-directional: `attached ⇒ signed` is
-enforced at both chokepoints, `signed ⇒ attached` at neither, so **a signed
-condition is a permission ceiling, never a requirement**. The in-consensus
-FALLBACK emits no condition at all and is the default clearing path whenever no
-solver wins the auction, so a pair who BOTH signed the same ZK condition is
-cleared unconditioned by the state machine itself — a protocol property, not a
-tooling gap. Enforcement is owned by task **2.7** (its new DOWNGRADE row), the
-reference attachment path by new task **2.14**, and the boundary is pinned in
-executable form by `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`.
+**What survives, and it is task 2.14:** non-test `solver/` never reads
+`IntentPayload.condition` — re-verified by grep at this boundary, zero hits — so
+the in-tree **reference solver would propose a slashable (5%) solution** the
+first time it meets a condition-signing intent. "The chain now requires it" is
+not "the reference client now does it."
+
+> **SUPERSEDED — kept for the record (§6a/D-091 and 2.13/D-093, both closed by
+> D-094; forward pointer: the three paragraphs above, `condition_binding.go`,
+> and PHASE2_DESIGN §2.7):**
+>
+> *"A delivery condition is **solver-attached by design** (D-075: `IntentLeg`
+> has no condition field). But **neither the in-consensus fallback matcher nor
+> the reference solver ever attaches one**, and escrows are created only by
+> CONCLUDE. So before this task, no component in the repo could produce a
+> conditioned escrow on a live network, and every conditioned-escrow proof in
+> the tree was a keeper-level hand-built `Match`. `cmd/conclave-demo` now
+> attaches conditions — and it is dev tooling. Do not read 'the demo can do it
+> now' as 'the network can do it now'.*
+>
+> *ANSWERED (task 2.13, D-093): **GAP** — and larger than 'no reference
+> implementation'. The consent gates are one-directional: `attached ⇒ signed` is
+> enforced at both chokepoints, `signed ⇒ attached` at neither, so a signed
+> condition is a **permission ceiling, never a requirement**. The in-consensus
+> FALLBACK emits no condition at all and is the default clearing path whenever
+> no solver wins the auction, so a pair who BOTH signed the same ZK condition is
+> cleared unconditioned by the state machine itself — a protocol property, not a
+> tooling gap. Pinned by
+> `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`."*
+>
+> That pin was **REPLACED, not relaxed** — it instructed its own owner to do
+> exactly that (D-094). Retained because the GAP finding is what motivated 2.7
+> and D-094's design rests on it; marked with this pointer because a struck
+> block without one still reads as current to a skimmer.
 
 ---
 
@@ -321,6 +363,16 @@ the tree asserts and which a future ABCI change could quietly break.
 ---
 
 *Authored task §6a (D-091); extended by task §6b (D-092), which added the IBC
-leg and **asserted the Phase-2 §6 exit criterion**. Both halves run from the
-same driver, and both scripts are run at every close — `exit_demo.sh` is the
-regression that keeps §6a honest while §6b evolves.*
+leg and **asserted the Phase-2 §6 exit criterion**; reconciled and re-verified
+at the phase boundary by task 2.16 (D-095), which also declared Phase 2
+**EXITED**.*
+
+***"Both scripts are run at every close" is a RULE, and 2.16 found it had not
+been held.** Tasks 2.13 and 2.7 each ran `exit_demo.sh` only, while the script
+that actually asserts the criterion sat un-run across a driver edit and a
+consent-semantic inversion. The rule was repaired by MAKING IT TRUE — 2.16 ran
+`exit_demo_ibc.sh` at HEAD — not by softening the sentence. Any future task that
+touches `cmd/conclave-demo`, `x/session/keeper`, or `x/escrow` and runs only
+`exit_demo.sh` is repeating the same lapse: `exit_demo.sh` is the regression that
+keeps §6a honest, and `exit_demo_ibc.sh` is the one that keeps the EXIT CRITERION
+honest.*

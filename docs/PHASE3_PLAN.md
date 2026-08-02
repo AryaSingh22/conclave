@@ -279,17 +279,53 @@ External path to mainnet: **3.1 → findings closed** + **3.2** (FLAG P3-F).
 
 ### 3.0 — Phase-3 plan Rev at the Phase-2 boundary *(housekeeping; entry gate)*
 
-**What.** When the Phase-2 ledger closes (2.3–2.7 + §6 exit demo), reconcile
-this plan against as-built state — exactly the PHASE2_DESIGN Rev-2 discipline
-(D-078). Confirm which Phase-2 debts actually closed (FW-1/FW-2, matcher
-TODOs, flake fix, sigverify checkpoint result from 2.5); re-run the §2.2
-version checks that are stale by then; re-affirm or re-cut the task list; the
-Rev is recorded as an ADR.
-**Depends on.** Phase-2 exit.
-**Acceptance.** Rev committed; every disposition-table row (§5) re-verified;
-any Phase-2 leftovers explicitly re-owned (nothing floats).
+**TRIGGERED.** Phase 2 was declared EXITED at task **2.16** (D-095,
+PHASE2_DESIGN Rev 4): all five SPEC §10 tasks complete, the §6 criterion
+asserted at §6b and **re-verified live at HEAD**, and the six-task tail (2.8,
+2.9, 2.10, 2.12, 2.14, 2.15) carried under one uniform rule with §5.1 rows
+already written. 3.0 plans from a settled boundary rather than adjudicating one.
+
+**What.** Reconcile this plan against as-built state — exactly the
+PHASE2_DESIGN Rev-2 discipline (D-078). Confirm which Phase-2 debts actually
+closed (FW-1/FW-2 — both landed at 2.7; matcher TODOs; flake fix; sigverify
+checkpoint result from 2.5); re-run the §2.2 version checks that are stale by
+then; re-affirm or re-cut the task list; the Rev is recorded as an ADR.
+
+**ACCEPTED FROM TASK 2.16 (D-095) — written in, not pointed at.** Four
+obligations 3.0 owns that its original acceptance line did not name:
+
+1. **Run §3.1.2's re-derivation block from the TREE, all seven steps**, and
+   diff against `AUDIT_SCOPE_1.8.md` §2.2 **plus** §3.1.1. 2.16 corrected
+   §3.1.1's factual errors but did NOT re-derive the full inventory — that is
+   3.0's, and it is a precondition of contracting the 3.1 engagement.
+2. **Read §3.1.1 as a CORRECTION TARGET, not only as a diff base.** A grep-diff
+   surfaces *additions*; it cannot surface that existing prose went FALSE. That
+   is exactly how §3.1.1's D-075/D-076 bullet came to tell an auditor that
+   `IntentLeg` has no condition field, eight days after FW-2 added one. For
+   every bullet already in §3.1.1, re-verify the claim against the code before
+   trusting the absence of a diff.
+3. **Re-verify the §5.1 row SET, not only the rows.** 2.16 found four open
+   Phase-2 tasks (2.8's structural fork, 2.9, 2.14, 2.15) with no row at all in
+   a table headed "nothing floats" — and a row-by-row pass is structurally
+   incapable of surfacing a missing row. That is AUDIT F-8's mechanism
+   reproduced in the receiving document. **Enumerate from CLAUDE.md's ledger and
+   from the marker census, then check the table covers the enumeration** — not
+   the reverse.
+4. **Treat a task's NARROWING edits as the trigger to re-check every item
+   pointed at it** (D-093's input, restated because it has now recurred a fourth
+   time): a narrowing edit to a receiving task silently orphans what was pointed
+   at it, and nothing re-checks the pointer.
+
+**Depends on.** Phase-2 exit — **satisfied** (2.16, D-095).
+**Acceptance.** Rev committed; every §5 disposition row re-verified **and the
+row SET re-derived** (obligation 3); the authored-surface inventory re-derived
+from the tree and every addition directly read (obligation 1); §3.1.1's
+existing bullets re-verified against code (obligation 2); any Phase-2 leftovers
+explicitly re-owned (nothing floats).
 **Plan-stop decisions.** Whether 3.3 must be pulled even earlier (ahead of any
-lingering Phase-2 work) given platform-EOL drift since this writing.
+tail work) given platform-EOL drift since this writing; whether §3.1.2's block
+becomes a committed `scripts/` artifact (2.16 deliberately left that to 3.0);
+where the six tail tasks sequence against the Phase-3 critical path.
 
 ### 3.1 — External cryptographic audit: adopt-vs-audit STOP, engagement, triage *[SPEC-MANDATED, NOT PHASE-NUMBERED — §8(d) mainnet gate; FLAGS P3-A, P3-F]*
 
@@ -349,17 +385,51 @@ wrong tree. Each item below is authored, security-bearing, and post-`5f5feb8`:
   binding is sound, that `groth16.Verify` in consensus is randomness-free and
   cannot panic on adversarial proof bytes, and the circuit's soundness/
   completeness (MiMC opening + EscrowID public-input binding).
-- **The D-075 / D-076 consent chokepoints** — arguably the highest-value
-  authored security surface Phase 2 produced, and both were **Rule-4 holes found
-  in review, not by test**. A delivery condition is *solver-attached*
-  (`IntentLeg` has no condition field), so it is bound to the seller's SIGNED
-  `IntentPayload.condition` at **both** solution-validation and the settlement
-  boundary (`ErrConditionNotConsented`, fail-closed) — and for ZK the **buyer
-  must also sign the exact condition**, closing the mirror-image hole. Verify
-  both chokepoints are unbypassable, including from contract-originated flows
-  (D-079 claims they are structurally unreachable from CVM — check it) and
+- **The D-075 / D-076 / D-094 consent chokepoints, and `x/session/keeper/`
+  `condition_binding.go` (297 lines, NEW at task 2.7)** — the highest-value
+  authored security surface Phase 2 produced, and the first two holes were
+  **Rule-4 holes found in review, not by test**. **This bullet was corrected at
+  task 2.16 (D-095) and the correction is the point:** it previously told an
+  auditor that *"`IntentLeg` has no condition field"* and described the binding
+  as one-directional. Both statements went FALSE at 2.7 and the bullet would
+  have steered a reviewer **away from the newest, least-reviewed consent code in
+  the tree**. As built at `7283b11`:
+  - A condition may be carried at the payload level (`IntentPayload.condition`)
+    **or per-leg (`IntentLeg.condition = 5`, FW-2)**, the per-leg field REFINING
+    the payload one; `effectiveCondition` resolves which governs a given leg for
+    a given party. Verify the resolver cannot be made to select a condition the
+    party did not sign, and that present-but-empty does not exempt a leg
+    (D-094 records it fail-closed — check it).
+  - **Both directions are enforced, at both chokepoints:** `attached ⇒ signed`
+    (`ErrConditionNotConsented` 1427) and `signed ⇒ attached`
+    (`ErrConditionNotHonored` 1429). D-094 records that the operative fix was
+    the **loop bound**, not the predicate — both chokepoints previously walked
+    only already-conditioned legs, so a dropped condition was the one case they
+    could never see. **Verify the bounds independently**; a predicate that is
+    correct over the wrong domain is the exact defect that shipped here once.
+  - The buyer's relation is **per-class and directional**: seller and ZK buyer
+    EXACT; HASHLOCK buyer `timeout ≤ signed` (a MAXIMUM — the timer is when the
+    buyer's locked payment refunds); OPTIMISTIC buyer `window ≥ signed` (a
+    MINIMUM — the window IS the inspect-and-dispute protection). Verify each
+    direction is the monotone-SAFE one for the party at risk, and that the two
+    cannot be transposed.
+  - **`attachFallbackCondition`** (`x/session/keeper/fallback.go`) — the
+    in-consensus matcher now WRITES a delivery condition into a settlement leg.
+    This is new consensus-path authority surface: verify a fallback clearing
+    cannot attach a condition no party signed, and that it is deterministic
+    across nodes.
+  - **`FundingRequirement`** (`x/escrow/types/params.go`) — one definition of
+    escrow amounts, read by both `CreateEscrow` and the fallback's affordability
+    pre-check. Verify the two readers cannot diverge (this is D-085's shape, and
+    D-085's lesson is what happens when they do).
+
+  Verify all of the above are unbypassable, including from contract-originated
+  flows (D-079 claims they are structurally unreachable from CVM — check it) and
   across 2.6's new partial-fill paths (D-089 claims a DataGrant is exact-fill
   only in both new matchers, so no partial fill can arise on a conditioned leg).
+  **Still open, and NOT part of the authored surface to audit — task 2.14:**
+  non-test `solver/` never reads `IntentPayload.condition`, so the reference
+  client does not yet meet the rule the chain now enforces.
 - **The escrow `nextState` gate (D-073/D-076)** — one authoritative transition
   gate over three per-class legal sub-graphs, backed by an exhaustive
   transition-table test. Verify the sub-graphs are not a permissive union and
@@ -427,9 +497,18 @@ The mechanical procedure, so it is executable rather than aspirational:
 # 1. crypto surface: what imports a crypto primitive, anywhere
 grep -rln 'drand/kyber\|consensys/gnark\|groth16\|encrypt/ibe\|crypto/aes\|crypto/rand' \
      --include='*.go' . | grep -v '_test.go'
-# 2. authorization chokepoints: every fail-closed authority/consent rejection
-grep -rn 'ErrUnauthorized\|ErrConditionNotConsented\|ErrSigilMismatch\|ErrGranteeConflict\|ErrMandateExceeded\|ErrMsgNotPermitted' \
-     --include='*.go' x/ app/ | grep -v '_test.go'
+# 2. authorization chokepoints: every fail-closed authority/consent rejection.
+#    KEYED ON THE REGISTRATION SITE, NOT ON A NAME LIST (sharpened at task 2.16,
+#    D-095). The original form hardcoded a 2026-07-28 inventory of error names
+#    and therefore went stale by construction — a grep that ages is a poor
+#    anti-staleness mechanism. It missed 1426/1428/1429 entirely, and
+#    condition_binding.go surfaced only because it happens to ALSO use 1427:
+#    the mechanism worked BY LUCK, which is not a mechanism.
+#    Step (a) derives the current inventory from the tree; step (b) uses it.
+grep -rn 'errorsmod\.Register' --include='*.go' x/ app/ | grep -v '_test.go'
+ERRS=$(grep -rhoE '^\s*(Err[A-Za-z0-9_]+)\s*=\s*errorsmod\.Register' \
+       --include='*.go' x/ app/ | grep -oE 'Err[A-Za-z0-9_]+' | sort -u | paste -sd'|')
+grep -rnE "($ERRS)" --include='*.go' x/ app/ | grep -v '_test.go'
 # 3. key material + share custody
 grep -rn 'PrivKey\|SecretShare\|KeyShare\|ShareProvider\|dkg_shares' \
      --include='*.go' . | grep -v '_test.go'
@@ -437,7 +516,64 @@ grep -rn 'PrivKey\|SecretShare\|KeyShare\|ShareProvider\|dkg_shares' \
 grep -rn 'recover()' --include='*.go' x/ app/ crypto/ | grep -v '_test.go'
 # 5. ante-chain composition (order is security-bearing)
 grep -n 'Decorator' app/ante.go
+
+# 6. CITATION RESOLUTION — every Test* name cited by an authority document must
+#    resolve in the tree (METHODOLOGY §11's boundary checklist, made executable
+#    at task 2.16 / D-095). Until then the check existed only as a manual
+#    checklist line, so it was reproducible only by whoever reinvented the
+#    command — and the boundary audit duly found a citation to a test task 2.7
+#    had DELETED, live in three places. Output must be EMPTY.
+DOCS="docs/EXIT_DEMO.md docs/PHASE2_DESIGN.md docs/PHASE3_PLAN.md \
+      docs/edge/X402_SURFACE.md docs/edge/7683_SURFACE.md docs/AUDIT.md \
+      docs/AUDIT_SCOPE_1.8.md CLAUDE.md docs/METHODOLOGY.md"
+# grep -v '^>' DROPS keep-and-mark blocks: a SUPERSEDED block QUOTES the old
+# claim, so it legitimately cites a test that no longer exists. This is why the
+# Rule-8 convention is a Markdown blockquote (and a tab-indented Go comment) —
+# it is not decoration, it is what makes this sweep DISCRIMINATING. Without the
+# filter the check is red forever, and a check that is always red is one the
+# team learns to ignore (Rule 7 step 4).
+comm -23 <(grep -rhE 'Test[A-Za-z0-9_]+' $DOCS | grep -v '^\s*>' \
+           | grep -oE 'Test[A-Za-z0-9_]+' | sort -u) \
+         <(grep -rhoE '^func (Test[A-Za-z0-9_]+)' --include='*_test.go' . \
+           | sed 's/^func //' | sort -u)
+# KNOWN NON-FINDINGS — anything NOT on this list is a finding. Each entry names
+# why, so a future reader does not re-investigate, and adding one is a decision
+# recorded in the task that deletes the test (D-095).
+#   TestKyberRecoverCommit — a doc WRAPS …SelectsLowestIndex across two lines,
+#     so the prefix looks unresolved. Confirm any hit by grepping the prefix.
+#   Testnet — an English word, not a citation.
+#   TestSignedConditionIsPermissionNotRequirement_BoundaryPin — DELETED by task
+#     2.7 (D-094), which REPLACED it with
+#     TestSignedConditionIsRequirement_Enforced (kept on ONE line on purpose:
+#     wrapping a test name is what creates this sweep's false positives).
+#     Its surviving occurrences are QUOTED historical claims inside
+#     marked supersession blocks, retained deliberately. Legitimate in exactly
+#     four places: the retained pre-2.7 problem statement and task 2.13's row in
+#     CLAUDE.md, plus the marked blocks in EXIT_DEMO.md and PHASE2_DESIGN.md.
+#     A FIFTH occurrence, or one outside a marked block, IS a finding.
+#
+# WHY AN ALLOWLIST AND NOT A WIDER FILTER (the honest tradeoff, D-095): the `>`
+# filter handles prose documents, whose keep-and-mark convention is a Markdown
+# blockquote. CLAUDE.md's LEDGER rows mark supersession with strikethrough plus
+# an inline forward pointer instead, because a blockquote cannot nest cleanly in
+# a checklist item — so format-based filtering cannot reach them. Widening the
+# filter until the check goes green would have blinded it to real re-citations;
+# naming the exception keeps it discriminating. The cost is that this list must
+# be maintained, which is the same cost every findings list carries (Rule 6).
+
+# 7. MARKER OWNERSHIP — every CONCLAVE-TODO must name a task that is still OPEN.
+#    A marker naming a COMPLETED task is Rule 6 sub-rule 3's worst case: it
+#    reads as pending while being unowned, and is invisible to "is anything
+#    unowned?" checks. Found once at the Phase-2 boundary (solution.go:143
+#    naming the closed task 2.7 — D-095).
+grep -rn 'CONCLAVE-TODO' --include='*.go' --include='*.rs' --include='*.sh' \
+     --include='*.proto' . | grep -oE 'CONCLAVE-TODO\([a-z0-9+.-]*\)' | sort | uniq -c
 ```
+
+**A real `scripts/` implementation of this block is deliberately NOT created
+here** (decided at 2.16): the block is executable as written, and turning it
+into a committed artifact is 3.0's call once 3.0 has run it once by hand and
+knows what it actually wants to freeze.
 
 Diff the result against §2.2 of `AUDIT_SCOPE_1.8.md` plus §3.1.1 above. **Any
 line the greps surface that neither document names is a finding**, and the
@@ -789,13 +925,27 @@ plan-stop can hard-require it.
 | D7 naming (+ AP2 "Mandate" collision) | SPEC §14, R5 | → gate row (pre-3.8-announcement) |
 | Chambers | SPEC §10 | → **3.11** |
 | Richer typed-schema circuit | D-076 | → **3.12** (default: defer past Phase 3; fixed at 3.2 STOP) |
-| FW-1, FW-2 (+ the two D-089 re-points) | D-075/076/078/089 | **stay Phase 2 (2.7)**; 3.0 verifies closure. *Updated D-090:* `timeouts→params` was owned by BOTH 2.7 and 2.8 — resolved to **2.8**; and D-089's two re-points (multi-intent-per-sigil, the `ErrLimitRateUnsupported` lift) are now written INTO 2.7's acceptance criteria rather than merely pointed at it |
-| 5 matcher TODOs + `randAddr()` flake | D-072/078/088/089 | *Updated D-090 — this row was stale:* **3 closed by 2.6** (limit rate, cycles, 2-party partial fill); **2 split into new Phase-2 tasks** (2.10 in-consensus cycle-aware fallback, 2.12 multi-asset in-kind skim); **1 re-pointed** to 2.7/FW-2 (multi-intent-per-sigil); the "flake" was **not a flaky fixture** — it was a real 1-in-256 store-iterator bug shipped as **task 2.11** (D-088). 3.0 verifies the remaining 2.10/2.12 |
-| Localnet contract smoke | D-079 | **stays Phase 2** (§6 exit demo); 3.0 verifies |
-| **Live relayer USDC demo** *(added D-090)* | D-082 | **stays Phase 2** (§6 exit demo) — decided at 2.5's plan-stop, not a late deviation; 3.0 verifies |
-| **§6 exit demo itself** *(added D-090)* | SPEC §10 | **stays Phase 2 — it is 3.0's trigger.** UNBLOCKED at PHASE2_DESIGN Rev 3: all four legs DONE, and 2.7–2.12 are all off the exit path. Carries a hard condition: if its output is ever used as EXTERNAL-FACING evidence, task **2.9** becomes a prerequisite (D-087's `condition_outcome` reads NONE for the conditioned ZK buy) |
+| FW-1, FW-2 (+ the two D-089 re-points) | D-075/076/078/089 | ✅ **CLOSED by task 2.7** (`7283b11`, D-094). FW-1(a)+(b) landed as ONE per-class relation; FW-2's `IntentLeg.condition = 5` shipped with a real reader (`effectiveCondition`). *Updated D-090:* `timeouts→params` was owned by BOTH 2.7 and 2.8 — resolved to **2.8**. *Updated D-095:* the two D-089 re-points were **explicitly re-deferred by 2.7 to new task 2.15**, each with a written verdict (TODO 9 on SCOPE alone; the 1428 lift NOT enabled by FW-2) — so this row is closed and 2.15's row above owns what remains |
+| 5 matcher TODOs + `randAddr()` flake | D-072/078/088/089 | *Updated D-090 — this row was stale:* **3 closed by 2.6** (limit rate, cycles, 2-party partial fill); **2 split into new Phase-2 tasks** (2.10 in-consensus cycle-aware fallback, 2.12 multi-asset in-kind skim); **1 re-pointed** to 2.7/FW-2 (multi-intent-per-sigil); the "flake" was **not a flaky fixture** — it was a real 1-in-256 store-iterator bug shipped as **task 2.11** (D-088). *Updated D-095:* the sixth item (multi-intent-per-sigil) is now **2.15(a)**, not 2.7 — its in-tree marker was retargeted at 2.16, having named 2.7 after 2.7 closed. 2.10 and 2.12 have their own rows below |
+| **2.10 in-consensus cycle-aware fallback** *(added D-095)* | D-089 | **Phase-2 tail.** The second half of the old `fallback.go:35` TODO. **Stated design input, carried so it is not rediscovered: the determinism vector CANNOT be its primary gate** — hand-built adversarial fixtures (cycle shapes, tie orderings, enumeration bounds, node-identical traversal) are, with the vector as regression backstop only. Enumeration must be bounded by an explicit param and runs in EndBlock where a panic halts the chain. The D-074 bilateral constraint on conditioned legs must be preserved (a conditioned leg must not become reachable through a cycle) |
+| **2.12 multi-asset in-kind skim + in-kind solver payout** *(added D-095)* | D-089 | **Phase-2 tail. SEQUENCED AFTER 3.9 BY DECISION (D-095) — it is NOT blocked, and the distinction is the point.** No document gates 2.12 on anything: its row calls it a fee-MODEL question in the sense of **D-050/D-051** (Conclave ADRs, already decided), and its plan-stop question — *is an authorized `svc/{schema}` mint or a quantity-less `data/{hash}` grant skimmable at all* — is answerable from **D-048**'s asset-class split with no tokenomics model. It is sequenced after **3.9** because that question is an economics question 3.9 ratifies, and this row is where that sequencing decision is written down. **Recording it as "blocked on D6" would be a floating phrase asserting a dependency no document creates** — precisely the failure that produced audit finding F-3, and precisely what this table exists to prevent |
+| Localnet contract smoke | D-079 | ✅ **DISCHARGED in §6a** (`65376ab`, D-091) — a purpose-built CVM-schema contract, uploaded through a passing gov proposal, released a real ZK escrow with a real groth16 proof |
+| **Live relayer USDC demo** *(added D-090)* | D-082 | ✅ **DISCHARGED in §6b** (`1aecfbf`, D-092) — real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; **D-082 DISCHARGED**; re-run green at HEAD by 2.16 |
+| **§6 exit demo itself** *(added D-090)* | SPEC §10 | ✅ **DONE — the trigger FIRED.** §6a (`65376ab`, D-091) + §6b (`1aecfbf`, D-092) asserted the criterion; **re-run green at HEAD by task 2.16** after 2.7's semantic inversion, which converted the assertion from inference to evidence. The hard condition STANDS: if its output is ever used as EXTERNAL-FACING evidence, task **2.9** is a prerequisite (D-087's `condition_outcome` reads NONE for the conditioned ZK buy), and 2.7 widened it by making conditioned settlements more common |
+| **THE PHASE-2 TAIL — six open tasks, one uniform rule** *(added D-095, task 2.16)* | CLAUDE.md ledger | **Phase 2 EXITED with these open; none is exit-blocking**, established by re-deriving the test from SPEC §10's text rather than inheriting each row's claim. They keep their `2.x` numbers (identifiers, not a schedule — renumbering breaks ~15 `DECISIONS.md` cross-references and the in-tree markers). **Rows written at 2.16, BEFORE 3.0's pass, because a row-by-row re-verification structurally cannot surface a MISSING row** — F-8's mechanism in the receiving document. Individually dispositioned below; 3.0 sequences them against the Phase-3 critical path |
+| **2.8 submit-charge structural fork + timeouts→params** *(added D-095)* | D-085, D-090 | **Phase-2 tail.** The G2 SECURITY hole is already CLOSED (2.3's `SubmitIntentPrevalidationDecorator`, verified in the ante chain at `app/ante.go:125`); 2.8 owns only the DESIGN question (keep ante-prevalidation, or a v0.50 mode-split charge) plus the timeouts→params promotion, of which it is the **single** owner (Rev 3 resolved the double-ownership). No blocker; opens with its own plan-stop |
+| **2.9 receipt condition-outcome integrity** *(added D-095)* | D-087, D-094 | **Phase-2 tail, HIGHEST PRIORITY of the six.** Not exit-blocking — SPEC §10 asks the receipt be *verified* on a second chain (ICS-23 check 1 passes); §6.3 check 3 is a 7683-rail admissibility rule, not the SPEC's criterion. **But it is the hard prerequisite for any external-facing use of the §6 evidence**, and 2.7 made conditioned settlements strictly more common, so the unconditional `NONE` stamp is now wrong more often. Proto + cross-module consensus work; vector re-baseline expected |
+| **2.14 reference solver-side condition attachment** *(added D-095)* | D-093, D-094 | **Phase-2 tail — the ONLY remaining item with a LIVE FUNCTIONAL DEFECT.** Verified at the boundary: non-test `solver/` contains **zero** reads of `Condition`, so after 2.7 made attachment mandatory the in-tree reference solver **would propose a slashable (5%) solution** the first time it meets a condition-signing intent. Not exit-blocking (SPEC §10 places the reference solver in Phase 0 row 0.10, gated on `demo_e2e.sh`, which generates no conditions and still passes) — but it is why 2.14 sequences ahead of 2.8/2.10/2.12/2.15. `solver/` is import-linked into `x/session/simulation` ⇒ vector in isolation |
+| **2.15 §6.4 rule-3 per-leg attribution** *(added D-095)* | D-089, D-094 | **Phase-2 tail.** Receives BOTH items 2.7 assessed and explicitly re-deferred: (a) TODO 9 multi-intent-per-sigil (`solution.go:143` — the marker was retargeted here at 2.16, having named the closed 2.7), and (b) the `ErrLimitRateUnsupported` 1428 lift, which needs a **counter-asset designator** — D-094's verdict is that FW-2 does NOT enable it, since a `DeliveryCondition` names no counter-asset. **D-074 is orthogonal, not colliding** (D-094), and must not be re-litigated. The D-044 price source stays 3.4 and must not be reached for |
+| **2.13 condition-attachment verdict + wire-code loss** *(added D-095)* | D-093 | ✅ **CLOSED** (`0d7f167`). Recorded here because it had no row at all: (b) session `1412` now reaches the wire via the typed composite `types.InvalidSolution`; (a) the GAP verdict was closed by 2.7 for enforcement and remains open only as 2.14's reference half |
 
 ### 5.2 Advisories to the remaining Phase-2 tasks (research fallout; not Phase-3 scope)
+
+> **ALL THREE ADVISORIES ARE SPENT (task 2.16, D-095).** Every task they address
+> has closed: 2.3 (`8756575`), 2.4 (`c830e55`), 2.5 (`dccd607`). Each was
+> consumed by its target — 2.5's plan-stop took the v8-EOL advisory and produced
+> D-081's recorded POSTURE, and the v0.53 checkpoint was re-run and CLOSED.
+> Retained as the research record, not as live instructions to anyone.
 
 Recorded here so the Phase-2 sessions inherit them without re-research:
 - **2.3 (x402):** the x402 Foundation targets **spec v1.0 in Q3 2026**;

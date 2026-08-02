@@ -142,9 +142,13 @@ func (c *cli) exitDemoIBC(b *cli) error {
 	fmt.Println("   · INTERNAL run: condition_outcome=NONE stands until task 2.9.")
 	fmt.Println("   · Chain A is single-node, so the Veil is in its epoch-0 plaintext")
 	fmt.Println("     bootstrap window (D-070 owns the encrypted reveal).")
-	fmt.Println("   · Conditioned escrows remain reachable live only through demo")
-	fmt.Println("     tooling — the network still has no such writer. Verdict: GAP")
-	fmt.Println("     (D-093); enforcement = task 2.7, reference path = task 2.14.")
+	fmt.Println("   · A signed delivery condition is a REQUIREMENT, not a permission")
+	fmt.Println("     ceiling (task 2.7, D-094): signed ⇒ attached is enforced at both")
+	fmt.Println("     chokepoints and the in-consensus fallback ATTACHES, so the")
+	fmt.Println("     network has a live writer. D-093's GAP verdict is CLOSED.")
+	fmt.Println("   · Still open: the reference solver in solver/ never reads")
+	fmt.Println("     IntentPayload.condition, so it would propose a slashable")
+	fmt.Println("     solution against a condition-signing intent — task 2.14.")
 	fmt.Println("=================================================================")
 	return nil
 }

@@ -239,9 +239,12 @@ green and the task is reviewed + committed.
 
 One task per session, in order. Mark complete only after `make lint test` is
 green and the task is reviewed + committed. **`docs/PHASE2_DESIGN.md` is the
-approved phase authority** (D-072; **Rev 3** reconciliation audit, D-090 —
-scoreboard current, FLAG C discharged, rows for 2.8–2.12, ownership collisions
-resolved, exit demo unblocked) — each task below bootstraps from it.
+approved phase authority** (D-072; **Rev 4** — the Phase-2 boundary record
+reconciliation, task 2.16 / D-095: 19 post-2.7 stale statements corrected, the
+exit criterion re-verified live at HEAD, marker + citation sweeps re-run from the
+tree, hash traceability restored, and **Phase 2 declared EXITED** with the
+six-task tail under one uniform rule. Rev 3 was D-090's reconciliation audit) —
+each task below bootstraps from it.
 
 **Execution order deviated from ledger order once, recorded here (Rule 8):**
 2.5 (`dccd607`) landed before 2.3 (`8756575`) and 2.4 (`c830e55`). PHASE2_DESIGN
@@ -269,7 +272,9 @@ the time (D-088).
         `PenalizeLostDispute` on lost dispute). OPTIMISTIC dispute = seller-reveal of the
         BUYER-AGREED `DataGrant.ContentHash` (rule-3-enforced, not seller-supplied); narrowed
         scope recorded (D-073). **CONSENT (D-075):** a condition is solver-attached
-        (`IntentLeg` has no condition field), so it is bound to the seller's SIGNED
+        (`IntentLeg` has no condition field **as of 2.1a — BOTH clauses moved at 2.7;
+        see the 2.7 row and `x/session/keeper/condition_binding.go`**), so it is bound
+        to the seller's SIGNED
         `IntentPayload.condition` at both solution-validation and the settlement boundary
         (`ErrConditionNotConsented`, fail-closed) — an untrusted solver cannot impose a
         delivery obligation/bond the seller never signed. `conclude.go:152` handoff closed
@@ -451,7 +456,7 @@ the time (D-088).
       (multi-asset in-kind skim); TODO 9 (multi-intent-per-sigil) folded into 2.7/FW-2.
       The Rev-2 "flake-hardening" item shipped separately as **2.11/D-088** — it was a real
       1-in-256 iterator bug, not a flaky fixture.
-- [x] **2.7 Escrow consent completeness — CLOSED (D-094).** A signed delivery
+- [x] **2.7 Escrow consent completeness — CLOSED — `7283b11`, D-094.** A signed delivery
       condition is now a **REQUIREMENT, not a permission ceiling**: `signed ⇒
       attached` is enforced at BOTH chokepoints and the in-consensus fallback is
       the tree's **first real attacher**. **The argument that carried it was not
@@ -494,7 +499,11 @@ the time (D-088).
       generates no conditions at all), so
       `x/session/keeper/condition_binding_test.go` IS the gate. One prediction was
       WRONG and is kept visible: the HASHLOCK flip red four tests, not two.
-- [ ] ~~2.7 Escrow consent completeness~~ (NEW in Rev 2, D-078; scope corrected at Rev 3,
+- [x] ~~2.7 Escrow consent completeness~~ **← CLOSED; this row is the PRE-2.7 problem
+      statement, retained for the record. The checkbox reads [x] so a mechanical
+      "count the open rows" scan cannot miscount it — at the Phase-2 boundary it
+      still read [ ], and PHASE2_DESIGN's §0 callout duly listed 2.7 as open
+      (D-095).** (NEW in Rev 2, D-078; scope corrected at Rev 3,
       D-090; **scope corrected AGAIN at 2.13, D-093 — see the DOWNGRADE row**) —
       owns the D-075/D-076 FW seams **plus the two items D-089 re-pointed
       here**: FW-1 (HASHLOCK/OPTIMISTIC class/window-level buyer-side consent; ZK's
@@ -638,7 +647,7 @@ the time (D-088).
       Off the exit path.
 
 - [x] 2.13 Solver-side condition attachment + the F-1 error-code loss (NEW in §6a,
-      D-091) — **DONE, D-093.** Both halves, one commit, strictly sequenced.
+      D-091) — **DONE — `0d7f167`, D-093.** Both halves, one commit, strictly sequenced.
       **(b) FIXED — the registered code reaches the wire.** `ProposeSolution`
       returned `errors.Join(ErrInvalidSolution, ruleErr)`; `cosmossdk.io/errors`
       extracts the ABCI code by walking `coder`→`causer` ONLY, and a multi-error
@@ -671,6 +680,12 @@ the time (D-088).
       **A signed condition is a permission ceiling, never a requirement, and no
       document said so.** Pinned by
       `TestSignedConditionIsPermissionNotRequirement_BoundaryPin` (both paths).
+      **← THAT VERDICT IS THE PRE-2.7 STATE. Superseded by D-094: a signed
+      condition is now a REQUIREMENT, `signed ⇒ attached` is enforced at both
+      chokepoints, and the fallback ATTACHES — see the 2.7 row and
+      `x/session/keeper/condition_binding.go`. The pin was REPLACED (not relaxed)
+      by `TestSignedConditionIsRequirement_Enforced`. Only 2.13(a)'s REFERENCE
+      half survives, as task 2.14** (forward pointer added at 2.16, D-095).
       Closure split, both owners written into the RECEIVING task: enforcement → the
       new DOWNGRADE row in **2.7**; reference implementation → new task **2.14**.
       Two record corrections recorded loudly: D-075-FW-3's "subsumed" disposition is
@@ -760,7 +775,7 @@ the time (D-088).
       proto change ⇒ vector run in isolation. Off the exit path.
 
 - [x] **§6a EXIT DEMO part A — x402 ingress + ZK escrow + CVM release, LIVE** —
-      D-091. Split from the exit demo at the approved plan-stop (D1); the exit
+      `65376ab`, D-091. Split from the exit demo at the approved plan-stop (D1); the exit
       *criterion* is asserted at §6b, only the build is split. **D-079 DISCHARGED:**
       a purpose-built CVM-schema CosmWasm contract (`demo/cvm-contract`, committed
       artifact, Rust pinned 1.81.0), uploaded through a passing GOV proposal after a
@@ -785,7 +800,7 @@ the time (D-088).
       (a check of mine that passed for the wrong reason) recorded in D-091.
 
 - [x] **§6b EXIT DEMO part B — the IBC leg; THE §6 EXIT CRITERION IS ASSERTED** —
-      D-092. A REAL ICS-20 USDC transfer over a **LIVE RELAYER** (`cosmos/relayer`
+      `1aecfbf`, D-092. A REAL ICS-20 USDC transfer over a **LIVE RELAYER** (`cosmos/relayer`
       v2.6.0, `go install`ed — a TOOL, not a module dep; `go.mod`/`go.sum` hashed
       unchanged) between `conclave-dev-1` and `conclave-dev-2`: the buyer holds
       `ibc/8E27BA2D…`, its trace resolving to chain B's `uusdc`, with chain B's
@@ -817,14 +832,79 @@ the time (D-088).
       covering gates named separately (`scripts/exit_demo_ibc.sh` +
       `scripts/exit_demo.sh` — the vector covers nothing here).
 
-**Phase-2 EXIT CRITERION MET (§6b, D-092).** Every remaining Phase-2 task
-(2.8–2.10, 2.12, 2.14, 2.15) is off the exit path, so **PHASE3_PLAN task 3.0 — the
-Phase-2 boundary re-validation — is now TRIGGERED**; its trigger was this demo.
-3.0 owns the Rule-9 authored-surface re-derivation and the §5.1 disposition
-re-verification before Phase 3 opens. **3.0 input from D-093:** the Rule-6
-one-way-pointer failure has now recurred a third time, in rows written AFTER
-D-090 closed it — 3.0's row-by-row re-verification should treat a task's
-NARROWING edits as the specific trigger to re-check every item pointed at it.
+- [x] **2.16 Phase-2 boundary record reconciliation — D-095.** The boundary audit
+      that closes the phase. **Not a build task** (one banner's strings are the only
+      behavioural change), but numbered rather than run as an unnumbered
+      reconciliation like D-090 — declining to number the task that fixes
+      work-gone-missing would be an unforced irony, and it carries a live gate.
+      **The finding:** 2.7 inverted a security semantic and propagated the
+      correction into CLAUDE.md, both edge docs and PHASE2_DESIGN's §0/§2.7 — but
+      **19 present-tense statements across 5 files still asserted the pre-2.7
+      world**, every one of them UNDER-claiming (describing a protection as absent
+      that is present). Harmless to a user; **actively harmful to an auditor**,
+      since PHASE3_PLAN §3.1.1 told a reviewer `IntentLeg` has no condition field
+      and steered them away from `condition_binding.go`, the newest consent code in
+      the tree. Corrected under a recorded **load-bearingness rule** (D-095): a
+      false statement someone could re-derive a DECISION from is kept + marked +
+      corrected **with a forward pointer naming what superseded it and where** (a
+      struck block without one still reads as current to a skimmer); incidental
+      description is corrected in place. Also: the stale marker at
+      `solution.go:143` — which named **CLOSED task 2.7**, Rule 6 sub-rule 3's
+      named worst case, one task after the rule was written — retargeted to
+      **2.15(a)**; a citation to the test 2.7 DELETED removed from 3 live sites;
+      **5 missing §5.1 rows** written (a row-by-row pass cannot surface a MISSING
+      row — F-8's mechanism in the receiving document); hash traceability restored
+      for the 5 commits cited nowhere; §3.1.2's grep #2 re-keyed to
+      `errorsmod.Register` (it hardcoded a 2026-07-28 name list, so
+      `condition_binding.go` surfaced only because it happens to ALSO use 1427 —
+      the mechanism worked BY LUCK) and the citation + marker sweeps added to the
+      same block. **SCOPE ADDITION surfaced mid-build (Rule 8):** `solution.go:154`
+      documented rule 6 as "NONE conditions only", false since **2.1a** — older
+      than 2.7 and outside the planned fence; corrected in place rather than left
+      four lines from one being fixed. `make lint test` + determinism vector green
+      in ISOLATION on the source change (byte-identical to the D-082 baseline);
+      **`scripts/exit_demo_ibc.sh` re-run at HEAD** — see the exit declaration
+      below. **PHASE2_DESIGN Rev 4.**
+
+**PHASE 2 IS EXITED (declared at 2.16, D-095).** All five SPEC §10 tasks are
+complete against their own acceptance criteria, and the §6 criterion asserted at
+§6b is **re-verified live at HEAD** — §6b had not been run since `1aecfbf`,
+across a driver edit (`0d7f167`) and a consent-semantic inversion (`7283b11`), so
+the assertion had come to rest on inference; 2.16 converted it to evidence.
+
+**The exit test, recorded so it is re-applied rather than re-argued:** a task is
+EXIT-BLOCKING iff SPEC §10's Phase-2 paragraph — the five named tasks plus its
+one-sentence exit criterion — cannot be truthfully asserted without it.
+Importance drives SEQUENCE; only the SPEC's text drives the GATE. Applied to
+every open task it **CONFIRMS** each "off the exit path" row rather than
+inheriting it.
+
+**The Phase-2 tail — one uniform rule, not six exceptions.** **2.8, 2.9, 2.10,
+2.12, 2.14, 2.15** remain open and none is exit-blocking. They keep their `2.x`
+numbers (identifiers, not a schedule — renumbering breaks ~15 `DECISIONS.md`
+cross-references and the in-tree markers), and each has a PHASE3_PLAN §5.1 row
+written at 2.16, **before** 3.0's pass. A special case for any one of them is how
+a ledger acquires exceptions nobody can re-derive — so **2.12 is "sequenced after
+3.9 BY DECISION", never "blocked on D6"**: no document creates that gate (D6 is
+SPEC §14 tokenomics; 2.12's row cites D-050/D-051, already-decided ADRs), and
+recording a dependency no document creates is the floating phrase that produced
+audit finding F-3.
+
+**Two live consequences the tail carries.** (a) **2.14** — non-test `solver/`
+contains zero reads of `Condition`, so the reference solver would propose a
+**slashable (5%)** solution the first time it meets a condition-signing intent;
+the only remaining item with a live functional defect, and why it sequences
+first. (b) **2.9** — the §6 run stays **INTERNAL**; 2.9 is a hard prerequisite
+for any external-facing use of that evidence, and 2.7 widened it.
+
+**PHASE3_PLAN task 3.0 is TRIGGERED** and now plans from a settled boundary. Four
+obligations are written INTO 3.0's criteria rather than pointed at it (D-095):
+run §3.1.2's re-derivation from the tree; read §3.1.1 as a **correction target**,
+not only a diff base (a grep-diff surfaces additions and cannot surface that
+existing prose went false — exactly how §3.1.1 came to misdescribe the consent
+model); re-verify the §5.1 row **SET**, enumerating from this ledger; and treat a
+task's NARROWING edits as the trigger to re-check every item pointed at it
+(D-093's input — the Rule-6 one-way-pointer failure has now recurred four times).
 
 ## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
 
@@ -836,16 +916,20 @@ maps to something (Rev 3, D-090).
 production-readiness scope with three-class authority labels in every section
 header ([SPEC §10 PHASE 3] / [SPEC-MANDATED, NOT PHASE-NUMBERED] /
 [PROPOSED — BEYOND CURRENT SPEC]). **NOT yet the phase authority** — task 3.0
-(Rev at the Phase-2 boundary) re-validates it once the Phase-2 ledger closes.
-**Rev-3 status of that gate:** 2.3/2.4/2.5/2.6/2.7/2.11/2.13 are DONE; 2.8–2.10, 2.12, 2.14 and 2.15
-are open but all off the exit path, so 3.0's trigger is the **§6 exit demo**,
-after which 3.0 must re-verify every §5.1 disposition row (several were refreshed
-at Rev 3 — see D-090). Headline structure: 3.1 audit = the gating dependency (opens with an
+(Rev at the Phase-2 boundary) re-validates it, and its precondition is now met.
+**Status of that gate (D-095):** the Phase-2 ledger is CLOSED — 2.0–2.7, 2.11,
+2.13, 2.16, §6a and §6b are DONE, **Phase 2 is EXITED**, and the six-task tail
+(2.8, 2.9, 2.10, 2.12, 2.14, 2.15) is off the exit path with a §5.1 row each,
+written at 2.16 so 3.0's row-by-row pass has a complete SET to verify. **3.0 is
+TRIGGERED** and carries four obligations written into its criteria (see the exit
+declaration in the Phase-2 ledger above). Headline structure: 3.1 audit = the gating dependency (opens with an
 adopt-vs-audit STOP); 3.3 platform migration GATES the public testnet (go 1.23
 + SDK v0.50 + ibc-go v8 all EOL, block-sdk archived — D-080 research record);
-3.11 Chambers = the one spec-named task, design-doc-first. Carries §5.2
+3.11 Chambers = the one spec-named task, design-doc-first. ~~Carries §5.2
 advisories for the remaining Phase-2 tasks (x402 v1.0 timing → 2.3; ibc-go v8
-EOL supersedes D-077's "v8 suffices" → 2.5's plan-stop). The transferable
+EOL supersedes D-077's "v8 suffices" → 2.5's plan-stop).~~ **All three §5.2
+advisories are SPENT (D-095): 2.3/2.4/2.5 have closed, and 2.5's plan-stop
+consumed the v8-EOL advisory into D-081's recorded POSTURE.** The transferable
 working discipline is codified in **docs/METHODOLOGY.md** (10 rules + the
 per-task checklist); Phase-3 sessions bootstrap from CLAUDE.md + SPEC +
 DECISIONS + PHASE3_PLAN + METHODOLOGY.

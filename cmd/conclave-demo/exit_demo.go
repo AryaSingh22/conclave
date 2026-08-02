@@ -21,29 +21,48 @@
 // exitState.settleDenom, so the stages below are denom-agnostic and
 // scripts/exit_demo.sh doubles as the regression test for that parametrization.
 //
-// THE CONDITION-ATTACHING PROPOSER — READ THIS BEFORE REUSING IT. A delivery
-// condition is SOLVER-ATTACHED by design (D-075: IntentLeg has no condition
-// field, so a solver reads the seller's signed IntentPayload.condition and puts
-// it on the SettleLeg). But neither the in-consensus fallback matcher nor the
-// reference solver (solver/) ever attaches one — verified by grep at the start
-// of this task — and escrows are created ONLY by CONCLUDE (there is no
-// MsgCreateEscrow). Consequence: before this file, NO component in the repo
-// could produce a conditioned escrow on a live network, and every
-// conditioned-escrow proof in the tree was a keeper-level hand-built Match.
-// proposeConditionedSolution below is the first live-network writer of
-// SettleLeg.Condition — and it is DEMO TOOLING, so that statement is still
-// true of production paths. See D-091.
+// THE CONDITION-ATTACHING PROPOSER — READ THIS BEFORE REUSING IT.
 //
-// VERDICT (task 2.13, D-093): that absence is a GAP, not a design posture, and
-// it is worse than "no reference implementation". The consent gates run in ONE
-// direction — `attached => signed` is enforced at both chokepoints, `signed =>
-// attached` at neither — so a signed condition is a PERMISSION CEILING, never a
-// requirement. The in-consensus fallback emits no condition at all and is the
-// default clearing path whenever no solver wins, so a pair who BOTH signed the
-// same condition is cleared unconditioned by the state machine itself.
-// Enforcement is owned by task 2.7 (its DOWNGRADE row); a reference attachment
-// path is task 2.14; the boundary is pinned by
-// TestSignedConditionIsPermissionNotRequirement_BoundaryPin.
+// CURRENT STATE (task 2.7, D-094). A signed delivery condition is a
+// REQUIREMENT, not a permission ceiling. `attached => signed` AND
+// `signed => attached` are both enforced, at both chokepoints
+// (x/session/keeper/condition_binding.go), and the in-consensus fallback
+// ATTACHES the giver's signed condition rather than dropping it
+// (attachFallbackCondition, x/session/keeper/fallback.go) — so the network
+// HAS a live writer of SettleLeg.Condition, and it is consensus itself.
+// A condition may also be carried per-leg on IntentLeg.condition (FW-2), which
+// REFINES the payload-level IntentPayload.condition; effectiveCondition
+// resolves which one governs a leg for a party. Dropping a signed condition is
+// ErrConditionNotHonored (session 1429).
+//
+// The buyer's relation is per-class, and a reference attacher must honour it:
+// seller and ZK buyer EXACT; HASHLOCK buyer attached timeout <= signed (a
+// MAXIMUM — the timer is when the buyer's locked payment refunds); OPTIMISTIC
+// buyer attached window >= signed (a MINIMUM — the window IS the buyer's
+// inspect-and-dispute protection).
+//
+// STILL TRUE, and it is task 2.14's: the reference solver in solver/ never
+// reads IntentPayload.condition, so it would propose a SLASHABLE (5%) solution
+// the first time it meets a condition-signing intent. 2.14 must make it attach
+// correctly or skip such intents — never propose a downgrade.
+//
+// SUPERSEDED — kept for the record (D-091/D-093, both closed by D-094; the
+// forward pointer is condition_binding.go and D-094, above):
+//
+//	"A delivery condition is SOLVER-ATTACHED by design (D-075: IntentLeg has no
+//	condition field). Neither the in-consensus fallback matcher nor the
+//	reference solver ever attaches one, and escrows are created ONLY by
+//	CONCLUDE, so before this file NO component in the repo could produce a
+//	conditioned escrow on a live network. VERDICT (2.13, D-093): the consent
+//	gates run in ONE direction — `signed => attached` is enforced at neither
+//	chokepoint — so a signed condition is a PERMISSION CEILING, never a
+//	requirement, and the fallback downgrades every condition-signing pair it
+//	clears. Pinned by TestSignedConditionIsPermissionNotRequirement_BoundaryPin."
+//
+// That pin was REPLACED, not relaxed, by
+// TestSignedConditionIsRequirement_Enforced (x/session/keeper) — D-094.
+// proposeConditionedSolution below remains a valid attacher and was the FIRST
+// live-network writer; it is no longer the only one.
 //
 // This proposer lives here and NOT in solver/ deliberately: solver/ is imported
 // by x/session/simulation, so changing it puts the determinism vector on the
