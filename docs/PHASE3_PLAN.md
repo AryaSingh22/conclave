@@ -1,17 +1,32 @@
-# Conclave Phase 3 — Production Readiness + Chambers (Proposed Plan)
+# Conclave Phase 3 — Production Readiness + Chambers (Phase Authority)
 
-**Status:** PROPOSED plan, authored mid-Phase-2 (baseline `9722912`, 2026-07-10,
-tasks 2.3–2.7 + the §6 exit demo still open). This document becomes the phase
-authority only after (a) the Phase-2 ledger closes and (b) a Rev-at-boundary
-reconciliation (task 3.0) re-validates it against as-built state — the same
-discipline PHASE2_DESIGN Rev 2 applied (D-078). Until then it is a plan of
-record, not an execution license.
-**Baseline (verified 2026-07-10):** `make lint` exit 0 · `make test` exit 0
-(all packages ok, 0 FAIL/SKIP) · `make sim-determinism` PASS (5 seeds
-`[1,2,7,12,42]`, byte-identical across two independent processes). Pins:
-go 1.23.2 / toolchain go1.23.12 · cosmos-sdk v0.50.15 · CometBFT v0.38.23 ·
-ibc-go v8.8.0 · wasmd v0.54.9 · block-sdk v2.1.5 · kyber v1.3.1 +
-kyber-bls12381 v0.3.1 · gnark v0.13.0.
+**Status: THE PHASE AUTHORITY — Rev 1, task 3.0, 2026-08-03 (D-096).** Authored
+mid-Phase-2 as a PROPOSED plan (baseline `9722912`, 2026-07-10); Rev 1 is the
+Rev-at-boundary reconciliation task 3.0 owed, run against as-built state at
+`15c2470` after Phase 2 was declared EXITED (2.16, D-095) — the same discipline
+PHASE2_DESIGN Rev 2 applied (D-078). **Both gate conditions are met**, so this
+document is now an execution licence rather than a plan of record.
+
+**Rev 1 is materially different from a refresh.** A toolchain spike run before
+any planning (§2.3) **refuted the load-bearing half of FLAG P3-B at the
+artifact**, and the correction runs in the expensive direction: the platform was
+never trapped. Every sequencing decision below was re-derived from that
+evidence rather than inherited. Rev 1 also discharges 3.0's six written-in
+obligations with evidence (§3.0), rules on the D-095 methodology amendment and
+on the re-evaluation amendment set row by row (§8), and adds six §5.1 rows that
+a row-by-row pass could not have surfaced.
+
+**Baseline (re-verified 2026-08-03 at `15c2470`, clean tree):** `make lint`
+exit 0 · `make test` exit 0 (17/17 packages, 0 FAIL/SKIP) · `make
+sim-determinism` PASS (5 seeds `[1,2,7,12,42]`, byte-identical across two
+independent processes, **hashes equal to the D-082 baseline** — verified against
+`DECISIONS.md:3300-3304`, not asserted). Tree fingerprinted before and after:
+`git diff | sha256sum` = `e3b0c44…b855` (empty) both times.
+Pins UNCHANGED by this Rev: go 1.23.2 / toolchain go1.23.12 · cosmos-sdk
+v0.50.15 · CometBFT v0.38.23 · ibc-go v8.8.0 · wasmd v0.54.9 · block-sdk v2.1.5 ·
+kyber v1.3.1 + kyber-bls12381 v0.3.1 · gnark v0.13.0. **Rev 1 changes no pin and
+no source byte — it is a docs-only Rev** (§9 records the two-fingerprint
+close-out).
 **Working method:** unchanged — one task per session, plan-stop before code,
 every decision an ADR in the task that makes it. The transferable discipline is
 codified separately in **`docs/METHODOLOGY.md`**; every Phase-3 task bootstraps
@@ -57,23 +72,53 @@ a **spec PR proposal**, never silent divergence.
   — the authored-vs-adopted discipline applied to the one authored piece never
   closed. Every other task proceeds under the explicit assumption "O1 will
   hold"; a refutation re-plans the phase from §3.1's fallback branch.
-- **FLAG P3-B — the platform is already unsafe for a public network (research
-  finding, 2026-07-10).** Go 1.23 has been end-of-life since **2025-08-31**
-  (~10 months of unpatched stdlib at plan time); cosmos-sdk v0.50.x is listed
-  **end-of-life** by the Cosmos release-family policy; ibc-go v8 is in **no
-  active release family**; block-sdk was **archived 2025-01-31** ("fork and
-  maintain" is upstream's own recommendation). Consequence (Calibration-2
-  resolution): the platform re-baseline (3.3) is a **blocker on the public
-  testnet (3.8)**, not a schedulable mid-phase task. A private/invite localnet
-  can run on the current pins; nothing public may. CometBFT v0.38 is the one
-  bright spot — upstream discontinued v1/v2 and concentrates on v0.38→v0.39,
-  so the vote-extension surface is NOT stranded. Note the shape of the
-  conflict: the kyber pin (D-066) — the guard protecting the crypto
-  foundation — is itself what holds the project on the EOL toolchain, so
-  3.3's STOP #1 is the knot where the crypto-pin protection meets the
-  toolchain cliff: an ACTIVE conflict, not a future one. The gnark-advisories
-  finding (≤v0.10.0 only) means it is resolved as a support-horizon decision,
-  not an exploit fire.
+- **FLAG P3-B — the platform is EOL and that is now urgent; but it was never
+  TRAPPED.** *(Rev 1: half CONFIRMED and sharpened, half REFUTED AT THE
+  ARTIFACT — read both halves, they move in opposite directions.)*
+
+  **CONFIRMED and worse than written.** Go 1.23 has been end-of-life since
+  **2025-08-31**; cosmos-sdk v0.50.x is **end-of-life**; ibc-go v8 is in **no
+  active release family**; block-sdk was **archived 2025-01-31** and Rev 1
+  confirms empirically that **v2.1.5 is the last tag that will ever exist** (the
+  proxy version list ends there). The re-evaluation's `govulncheck -mode binary`
+  on the built `conclaved` found **16 vulnerabilities with reachable symbols**,
+  10 of them in the `go1.23.12` stdlib — including **GO-2026-5058**
+  (`hashicorp/go-getter` arbitrary file read) sitting on the upgrade-binary
+  download path that **3.6** is about. So the original clause *"a support-horizon
+  decision, not an exploit fire"* is **FALSE stack-wide** and true only of gnark.
+  Consequence unchanged and reinforced: 3.3 **gates the public testnet (3.8)**. A
+  private/invite localnet may run on the current pins; nothing public may.
+
+  > ~~"the kyber pin (D-066) — the guard protecting the crypto foundation — is
+  > itself what holds the project on the EOL toolchain, so 3.3's STOP #1 is the
+  > knot where the crypto-pin protection meets the toolchain cliff: an ACTIVE
+  > conflict, not a future one."~~
+  >
+  > **REFUTED at the artifact by the 3.0 toolchain spike (§2.3, D-096).** A `go`
+  > directive is a **MINIMUM, never a maximum**: `kyber-bls12381 v0.3.1` declares
+  > `go 1.18` and `kilic/bls12-381 v0.1.0` declares `go 1.13`, so **neither
+  > imposes any ceiling at all**. Empirically, bumping only the main module's
+  > directive to `go 1.25.0`/`toolchain go1.25.12` with **every pin untouched**
+  > builds, vets, passes 17/17 packages and 24/24 crypto tests, and returns the
+  > determinism vector **byte-identical to D-082**. There was no knot. D-066's
+  > pin genuinely avoided a **FORCED** bump and was correct in Phase 1 — it never
+  > prevented a **VOLUNTARY** one, and that inference is what was wrong.
+
+  **Why this correction is recorded loudly rather than quietly fixed.** The flag
+  was wrong **in the expensive direction**: it made the phase's central platform
+  problem look intractable when it was testable in an afternoon, and a pessimistic
+  flag is not a safe default — it silently deletes options from every plan that
+  inherits it. The flag had been carried, cited and built on across multiple
+  documents for three weeks **and had never once been tested against the artifact
+  it described.** The transferable rule is now METHODOLOGY's (see §8 ruling A1):
+  **a FLAG is a claim, and flags accumulate authority precisely because nobody
+  re-checks them.**
+
+  CometBFT v0.38 remains the bright spot — upstream discontinued v1/v2 and
+  concentrates on v0.38→v0.39, so the vote-extension surface is NOT stranded.
+  Rev 1 adds: **v0.38.25 is available and declares `go 1.22.11`**, so the
+  security-relevant CometBFT patch bump costs **nothing** on the toolchain axis
+  and must not wait on the family decision (§3.3 STOP #1, item 0).
 - **FLAG P3-C — Chambers is research-grade.** SPEC §10 says "design doc
   required first; do not improvise." 3.11's deliverable is the **design doc**;
   a design-only Phase-3 exit is explicitly permitted (§6). Implementation is a
@@ -119,7 +164,7 @@ hardened and has caught two real bugs (D-063→D-064).
    and became an audit finding) (→ 3.4).
 3. Epoch-0 plaintext window: purely operational mitigation today; no
    protocol-level gate, no detection alarm (→ 3.7, 3.8; FLAG P3-D).
-4. Platform EOL stack-wide (→ 3.3; FLAG P3-B).
+4. Platform EOL stack-wide (→ **3.3a** for the toolchain + the 16 reachable advisories, **3.3b** for the release family; FLAG P3-B).
 5. Determinism-gate coverage shadows: epoch-inert and wasm-inert sim — the
    vector never exercises the real reveal path it exists to guard (→ 3.5).
 6. Zero production infrastructure: no upgrade handlers (UpgradeKeeper wired,
@@ -155,11 +200,20 @@ changed).
   exists (go ≥1.24, per the D-077 spike). [github.com/CosmWasm/wasmd] —
   **CONTEXT** for 3.3's target-family choice.
 
-**R2 — Go toolchain + the two pins.**
+**R2 — Go toolchain + the two pins.** *(Rev 1: §2.3's spike supersedes this
+sub-section's INFERENCES wherever they conflict; the version facts stand.)*
 - Go 1.23 **EOL 2025-08-31**; supported lines at plan time are 1.25/1.26
   (two-release policy). [endoflife.date/go, go.dev/doc/devel/release] —
   **SUGGESTS-REVISION**: the §4 two-pin ceiling escape hatch is no longer
-  optional; it is task 3.3 and it gates 3.8 (FLAG P3-B).
+  optional; it is task **3.3a** and **3.3b** gates 3.8 (FLAG P3-B).
+  **Rev 1 correction:** the "escape hatch" framing implied crossing the ceiling
+  required a coordinated two-pin re-validation *in order to bump Go at all*. It
+  does not. **PHASE2_DESIGN §4's invariant survives, but only in its literal
+  form** — it is a statement about what `kyber-bls12381 **v0.3.4**` and `gnark
+  **v0.14/v0.15**` would cost **if adopted**, and those bumps still require the
+  single recorded re-validation. It was **never a constraint on the `go`
+  directive**, because a `go` directive is a minimum. Bumping Go **without**
+  touching either pin is now empirically green (§2.3(a)) and is what 3.3a does.
 - gnark latest **v0.15.0 (May 2026)**; the two published Groth16 advisories
   (GHSA-9xcg-3q8v-7fq6, GHSA-q3hw-3gm4-w5cr, Sept 2024) affect **≤v0.10.0**,
   fixed in v0.11.0 — the pinned **v0.13.0 is not exposed**, and the
@@ -182,8 +236,12 @@ changed).
   Conclave's alone).
 - **Batched threshold encryption** matured: Choudhuri et al. (USENIX Sec '24
   "Mempool Privacy via Batched Threshold Encryption"), weighted-BTE
-  (eprint 2025/2115), and **Aptos shipping a native encrypted mempool with
-  batched threshold decryption (2026)** — one epoch key, batch decryption at
+  (eprint 2025/2115), and ~~**Aptos shipping a native encrypted mempool with
+  batched threshold decryption (2026)**~~ — **CORRECTED at Rev 1 (D-096): Aptos's
+  encrypted mempool was ANNOUNCED (12 May 2026) and is AWAITING GOVERNANCE, not
+  shipped.** This materially **weakens** option (b)'s "well-trodden design"
+  support at 3.1 STOP #1, which is precisely where the claim would have been
+  load-bearing — one epoch key, batch decryption at
   block finality. [usenix.org, eprint.iacr.org, Aptos announcements] —
   **CONTEXT + fork-enabler**: an externally-fixed **session-scoped identity**
   (Conclave's analog of tlock's round number) is now a well-trodden design that
@@ -244,6 +302,91 @@ changed).
   Least Authority also active in this space. — **CONFIRMS** 3.1's engagement
   shape; selection is a 3.1 plan-stop output.
 
+### 2.3 The task-3.0 TOOLCHAIN SPIKE (empirical, 2026-08-03 — supersedes §2.2's documentary readings on every point it touches)
+
+**Why it exists.** §2.2 R1/R2 are *documentary* readings of release notes and
+`go.mod` files. The re-evaluation proposed that they be settled empirically
+before any Phase-3 sequencing decision was made, on the grounds that the plan
+written before the spike would be the plan the spike invalidated. It was, and it
+would have been.
+
+**Method (recorded so the result is checkable, not trusted).** One throwaway
+branch off `15c2470`; the only tracked edit was `go.mod`'s two directive lines;
+every other experiment ran in `/tmp` copies made by `git archive main | tar -x`
+(no `.git`). Two-fingerprint discipline was carried INSIDE the spike — the
+working-diff hash was recorded before **and** after the determinism-vector run
+(`9ebb6df8…`, identical), which is what makes *"the vector ran on the go-1.25
+tree and nothing drifted"* evidence rather than assertion. Branch destroyed;
+post-teardown fingerprint `e3b0c44…b855` = the pre-spike baseline.
+
+| # | Question | Answer | Evidence |
+|---|---|---|---|
+| **(a)** | Bump only the `go` directive — builds? tests? vector? | **YES / YES / YES** | `go 1.25.0`+`toolchain go1.25.12`, pins untouched: build **0**, vet **0**, `go test ./...` **0** (17/17), crypto **24/24**, vector **PASS 5 seeds byte-identical to D-082** across two processes |
+| **(b)** | Does a 2025.1 stack resolve MVS-clean? Does any **transitive** lift the floor above 1.23.8? | **Resolves clean / NOTHING above 1.23.8** | `go get sdk@v0.53.8 cometbft@v0.38.24 wasmd@v0.60.8 ibc-go/v10@v10.7.0` exit **0**; `go mod tidy` exit **0**; directive settled at exactly **`go 1.23.8`**; census of modules declaring >1.23.8 came back **EMPTY** |
+| **(c)** | What ACTUALLY binds the toolchain? | **At 1.25: nothing. At 1.26: `bytedance/sonic v1.14.0`** | `sonic/internal/rt/stubs.go:33: undefined: GoMapIterator` — a `//go:linkname` into runtime internals removed by Go 1.26's map rework. Reaches us via `conclave/app → cosmossdk.io/log → sonic`, and `sonic/internal/rt` **is in `conclaved`'s own import graph** |
+| **(d)** | Does pinned assembly-bearing `kilic/bls12-381 v0.1.0` compile AND behave identically? | **YES — bit-identical, three toolchains AND against its own pure-Go fallback** | KAT (scalar→G1/G2, BLS sign/verify, 4 Feldman commits) `SHA-256 = 6d98cd34…` under **go1.23.12 ≡ go1.25.12 ≡ go1.26.5**; `-tags generic` (assembly disabled) **also byte-identical**; crypto suite green ×5 per toolchain; **T2 probe `TestKyberRecoverCommitSelectsLowestIndex` 50/50 per toolchain** (dosed per Rule 3 step 7) |
+
+**The recorded block-sdk hypothesis is REFUTED — and it was mine to test, not to
+inherit.** The re-evaluation guessed the real constraint was the archived
+block-sdk v2.1.5 rather than kyber. It is neither: block-sdk **compiles clean
+under both 1.25.12 and 1.26.5** (it declares `go 1.22.4`), and per (g) below it
+**also compiles clean against cosmos-sdk v0.53.8**. Stated precisely, because the
+distinction is the whole point: **compiling is not behaving.** Lane routing,
+`PrepareProposal` semantics and block-sdk's own suites are untested on v0.53 and
+remain 3.3 STOP #2's evidence list. But the inherited framing asserted a
+**compile/MVS impossibility** ("decisive against the SDK bump"), and that
+specific claim is false.
+
+**Two further results that create menu items rather than answer questions.**
+- **(f) go 1.26 is reachable today for four indirect `go.mod` lines.** Bumping
+  *only* `sonic v1.14.0 → v1.15.2` (pulling `sonic/loader v0.5.1`, `base64x
+  v0.1.6`, adding `bytedance/gopkg`; **no direct dependency touched, no `go`
+  directive change**) makes `go build ./...` exit **0 under go1.26.5** — and
+  still exit **0 under go1.25.12**, so it is a forward fix, not a swap.
+- **(g) the 2025.1 family costs ONE compile error in ONE package.** SDK v0.53.8 +
+  CometBFT v0.38.24 + wasmd v0.60.8 + ibc-go v10.7.0 (alongside our still-imported
+  v8), tidied clean, built under 1.25.12: `app/cvm/encoder.go:58` — wasmd's custom
+  `AnyMsg` encoder callback gained a leading `ctx sdk.Context`. That is the entire
+  **source-level** surface of the family jump.
+
+**HONEST LIMITS — binding on every row below that leans on 1.26 or on 2025.1.**
+Full gates (`make test` + the determinism vector) ran on **1.25.12 ONLY**. Under
+**1.26.5** only build/vet + the crypto suite + the KAT + T2 ran, so *"1.26 is
+green"* is **NOT established** — the established claim is exactly *"1.26 compiles
+once sonic moves, and the crypto path is bit-identical."* **(g) was
+compile-only**: no tests, no vector, no CGO/libwasmvm packaging, no lane/VE/reveal
+behaviour. Any §3.3 or §5.1 row citing these results must cite them at this
+strength and no higher.
+
+**Two corrections to the recorded dependency table fall out of (b):**
+- **D-077's spike table never saw the wasmd v0.60 line.** It jumped v0.55.1 →
+  v0.61.0 and concluded the v0.53-SDK wasmd line needs go 1.24. In fact **wasmd
+  v0.60.8 targets SDK v0.53.6 + ibc-go v10.5.0 at floor `go 1.23.8`** — inside the
+  old ceiling. (v0.61.14 → 1.24.0 is true, but of a *different* line.)
+- **CometBFT v0.38.25 exists** (the re-evaluation had .24) and v0.38.23/24/25 all
+  declare `go 1.22.11`.
+
+**One methodological note against the spike's own instrument (Rule 8).** The
+per-dependency compile probe reported `FAIL` for block-sdk, kyber, gnark, wasmd
+and cometbft — **every one a `missing go.sum entry`** for packages outside our
+import graph (testutils, code generators, wasmd's nft app), not a compile error.
+Absolute results from that probe are confounded and nothing here rests on them.
+What *is* load-bearing is the **differential**: the failure sets were **identical
+under 1.25.12 and 1.26.5**, which is the signature of go.sum artifacts rather
+than a toolchain ceiling — and the one genuine compile error stood out precisely
+because it appeared under 1.26 only.
+
+**And one failure that was chased rather than believed (Rule 3's corollary).**
+`TestRevealCostWithinBound` failed under go1.26.5 at **56.3 ms/intent** against a
+50 ms ceiling, with the message *"the share gate / IBE open regressed."* Rule 3
+says reproduce and count before concluding. Pre-compiled and run standalone ×10
+per toolchain: **5.26–5.38 ms (1.23.12), 5.29–5.46 ms (1.25.12), 5.36–5.44 ms
+(1.26.5) — 10/10 PASS each**, and `BenchmarkRevealCombineUnderCap` within **1.1%**
+across all three (341.0 / 341.3 / 344.7 ms/op). There is **no regression**; the
+cause was `go test ./crypto/...` overlapping gnark's cold compile with the timing
+window. The ~9× headroom is a useful byproduct — and the test itself became
+finding **F-9** (§5.1).
+
 ---
 
 ## 3. The task plan
@@ -251,20 +394,31 @@ changed).
 ### Dependency spine
 
 ```
-3.0 Rev-at-boundary (entry gate)
+3.0 Rev-at-boundary (entry gate) ✅ CLOSED — Rev 1, D-096
+ │
+ ├─► 2.14 reference solver condition attachment (LIVE DEFECT — §5.3 order 1)
  │
  ├─► 3.1 AUDIT: adopt-vs-audit STOP ──► engagement ──► findings triage ──┐
  │        │ (external calendar — runs in parallel with everything)       │
  │        └─► 3.2 ZK MPC ceremony (after the STOP confirms the circuit;  │
  │             FLAG P3-G: decides 3.12's fate)                           │
  │                                                                       │
- ├─► 3.3 PLATFORM re-baseline (two-stop) ══ GATES ══► 3.8                │
+ ├─► 3.3a TOOLCHAIN + SECURITY PATCHING (single-stop; no dep churn)      │
+ │     │   go 1.25 · CometBFT v0.38.25 · advisories · golangci-lint      │
+ │     │   · F-5/F-6/EOL-watch CI guards · iavl (vector in isolation)    │
+ │     ▼                                                                 │
+ │   2.9 receipt condition-outcome (proto ⇒ its OWN vector re-baseline)  │
+ │     │                                                                 │
+ ├─► 3.3b SDK-FAMILY MIGRATION (two-stop) ══ GATES ══► 3.8               │
+ │     │   family · block-sdk disposition · both crypto pins · sigverify │
+ │     └─► then 2.8, 2.15, 2.10 (consensus surface — build once)         │
  │                                                                       │
  ├─► 3.4 mandate-bound completeness ─┐                                   │
  ├─► 3.5 gate-coverage expansion ────┤                                   │
  ├─► 3.6 upgrade/migration infra ────┼─► 3.8 GENESIS + PUBLIC TESTNET    │
  ├─► 3.7 observability ──────────────┤    (D7 gate before announcement)  │
- ├─► 3.9 tokenomics (D6, pre-testnet)┘         │                         │
+ ├─► 3.9 tokenomics (D6, pre-testnet)┘ └─► then 2.12 (after 3.9, BY      │
+ │                                          DECISION — nothing blocks it)│
  ├─► 3.10 governance + ops runbooks ───────────┘                         │
  ├─► 3.11 Chambers design doc (independent; design-only exit OK)         │
  └─► 3.12 richer schema circuit (deferrable; fate fixed at 3.2's STOP)   │
@@ -272,8 +426,11 @@ changed).
                               MAINNET GATE CHECKLIST (§7 — beyond Phase 3 exit)
 ```
 
-Critical path to testnet: **3.0 → 3.3 → {3.4, 3.5, 3.6, 3.7, 3.9} → 3.8**.
+Critical path to testnet: **3.0 → 3.3a → 3.3b → {3.4, 3.5, 3.6, 3.7, 3.9} → 3.8**.
 External path to mainnet: **3.1 → findings closed** + **3.2** (FLAG P3-F).
+**3.3a is on the critical path but gates nothing** — it is pulled forward for
+security, not for sequence (§3.3's Rev-1 decision block). **3.3b holds the 3.8
+gate**: a patched toolchain on an EOL SDK is still an EOL SDK.
 
 ---
 
@@ -356,18 +513,56 @@ obligations 3.0 owns that its original acceptance line did not name:
    happened.
 
 **Depends on.** Phase-2 exit — **satisfied** (2.16, D-095).
-**Acceptance.** Rev committed; every §5 disposition row re-verified **and the
-row SET re-derived** (obligation 3); the authored-surface inventory re-derived
-from the tree and every addition directly read (obligation 1); §3.1.1's
-existing bullets re-verified against code (obligation 2); the D-095 amendment
-**ruled on against the runnable-step standard**, with its mechanical form
-carried verbatim if adopted (obligation 5); the `6d6b730` calibration result
-**recorded either way** (obligation 6); any Phase-2 leftovers explicitly
-re-owned (nothing floats).
-**Plan-stop decisions.** Whether 3.3 must be pulled even earlier (ahead of any
-tail work) given platform-EOL drift since this writing; whether §3.1.2's block
-becomes a committed `scripts/` artifact (2.16 deliberately left that to 3.0);
-where the six tail tasks sequence against the Phase-3 critical path.
+
+#### 3.0 — CLOSED at Rev 1 (D-096). The six obligations, each with its evidence.
+
+| # | Obligation | Verdict | Evidence |
+|---|---|---|---|
+| **1** | Run §3.1.2's re-derivation **from the tree**, all seven steps; diff vs `AUDIT_SCOPE_1.8` §2.2 **and** §3.1.1 | **RUN — 4 findings** | Executed at `15c2470`, clean tree. Steps 1/3 surfaced `crypto/reveal/{reveal,stub}.go` and `cmd/conclave-demo/exit_demo.go`; step 4 returned **8** `recover()` sites against §3.1.1's **one**; step 6 returned exactly the 3 allowlisted names; step 7 returned **15/15** markers with both `phase-2` markers naming **OPEN** tasks (`solution.go:143`→2.15(a), `skim.go:37`→2.12). Findings → **F-10…F-13** (§5.1) |
+| **2** | Read §3.1.1 as a **CORRECTION TARGET**, re-verifying existing bullets against code | **RUN — 1 correction, 1 sharpening** | Every bullet re-verified against the tree: vk **396 B** ✓, `IntentLeg.condition = 5` ✓ (`intent.proto:102`), `effectiveCondition` ✓ (`condition_binding.go:250`), file **297 lines** ✓, 1427/1429 both directions ✓, HASHLOCK **MAXIMUM** / OPTIMISTIC **MINIMUM** ✓ (`condition_binding.go:137-149`), `attachFallbackCondition` ✓ (`fallback.go:317`), `FundingRequirement` with **exactly** the two named readers ✓ (`escrow.go:177`, `fallback.go:197`), `nextState` ✓, `ErrGranteeConflict` on **two** write paths ✓, ante one-source-of-truth ✓. **CORRECTION: the `recover()` lives in `rateWithinBound` (`solution.go:617`), NOT in `checkLimitRate`** — an auditor sent to the named function would find no recover there. **SHARPENING: D-088's invariant is now maintained in THREE places** |
+| **3** | Re-verify the §5.1 row **SET**, enumerating from the ledger + marker census | **RUN — complete for TASKS, incomplete for GAPS** | Enumerated the six open ledger tasks (2.8, 2.9, 2.10, 2.12, 2.14, 2.15) — **all six have rows**, confirming 2.16's work; zero blank disposition cells. **But the enumeration surfaced 10 items with no row at all**: G-1…G-4, F-9…F-13, and the uncited-commit hygiene item. All added at this Rev |
+| **4** | Treat a task's **NARROWING** edits as the trigger to re-check every item pointed at it | **RUN — clean, the recurrence did NOT happen** | 2.7 narrowed by re-deferring two items to **2.15**; 2.13 narrowed by splitting into 2.7-enforcement + 2.14-reference. Checked the RECEIVING tasks' own criteria: **2.15 carries (a) and (b) written in, with acceptance**; **2.14 carries (a) and (b) under an explicit "written in, not pointed at."** Rule 6 sub-rule 6 satisfied on both |
+| **5** | **RULE** on the D-095 candidate methodology amendment against a stated standard | **ADOPTED, mechanical form verbatim** | §8 ruling **A1** |
+| **6** | The `6d6b730` **free calibration** — record which happened | **OBLIGATION 3 IS PROVEN TO WORK** | Below |
+
+**Obligation 6 — the calibration result, recorded precisely because its whole
+value is diagnostic.** The seeded item was found, **and the mechanism found more
+than was seeded.**
+
+`6d6b730` (task 2.16's own commit) appears exactly twice in the corpus — **both
+occurrences inside §3.0's own description of the omission.** It remains absent
+from CLAUDE.md's 2.16 row and from PHASE2_DESIGN's §0 scoreboard, exactly as the
+plan said. The omission was live, and **a row-by-row pass over §5.1 could never
+have surfaced it.**
+
+The pass that *did* surface it enumerated from an **independent source** — `git
+log` — and then asked whether the documents covered that enumeration. The same
+pass surfaced something nobody seeded: **`15c2470`, the current HEAD, is cited
+nowhere in any authority document.** That confirms the plan's own prediction that
+a follow-up commit *relocates* the gap rather than closing it — it moved from
+`6d6b730` to `15c2470` precisely as forecast.
+
+**Verdict: obligation 3's mechanism WORKS and needs no sharpening. What needs
+fixing is the hygiene gap it keeps re-finding** — recurring by construction, since
+the newest commit can never cite its own hash. That is now **F-13**, with a
+runnable check, instead of something each boundary rediscovers by hand.
+
+**Plan-stop decisions — all three DECIDED at this Rev.**
+1. **Is 3.3 pulled ahead of the Phase-2 tail?** → **YES, and it SPLITS into 3.3a
+   / 3.3b.** See §3.3's preamble; reasoning at §8 ruling **B1**.
+2. **Does §3.1.2's block become a committed `scripts/` artifact?** → **YES** — the
+   precondition ("once 3.0 has run it once by hand and knows what it wants to
+   freeze") is now met, and the two things worth freezing are known: the
+   known-non-finding lists, and the `git log` citation check obligation 6 proved.
+   Owned by **F-13**; deliberately NOT built inside this docs-only Rev.
+3. **Where do the six tail tasks sequence?** → **§5.3.**
+
+**Acceptance — MET.** Rev authored; every §5 disposition row re-verified **and
+the row SET re-derived** (obl. 3); the authored-surface inventory re-derived from
+the tree with every addition directly read (obl. 1); §3.1.1's existing bullets
+re-verified against code (obl. 2); the D-095 amendment **ruled on against the
+runnable-step standard** with its mechanical form carried verbatim (obl. 5); the
+`6d6b730` calibration **recorded** (obl. 6); nothing floats.
 
 ### 3.1 — External cryptographic audit: adopt-vs-audit STOP, engagement, triage *[SPEC-MANDATED, NOT PHASE-NUMBERED — §8(d) mainnet gate; FLAGS P3-A, P3-F]*
 
@@ -375,13 +570,50 @@ where the six tail tasks sequence against the Phase-3 critical path.
 (`docs/AUDIT_SCOPE_1.8.md`, D-071); the engagement has never run. The task has
 three checkpoints:
 
+**O1 IS RE-SCOPED AT REV 1 — and the re-scoping is a LEAD FOR THE AUDITOR, not a
+result handed to them.** *(D-096, from the re-evaluation's literature pass.)*
+
+`id = H(DST‖C_dem)` is **structurally recognisable as** an instance of the
+**CHK/BCHK "CCA-from-IBE" paradigm** (Boneh–Canetti–Halevi–Katz, *SIAM J.
+Comput.* 36(5), 2007), which binds the IBE identity to the ciphertext **by
+design** — on that reading **tlock's fixed round number is the unusual case**, and
+Conclave's divergence runs *toward* the CCA literature rather than away from it.
+That reframing changes O1's expected cost and calendar, which is why it is
+recorded here.
+
+> **CARRY THIS CAUTION INTO THE ENGAGEMENT LETTER, VERBATIM.** The placement is
+> the auditor's **STARTING POINT**, phrased as a task: *"verify that this
+> placement is legitimate, and that the AEAD tag + IBE FO `rP` check together
+> discharge the role CHK assigns to the one-time signature."* It is **NOT** an
+> established premise. An auditor handed *"we have established this is CHK/BCHK"*
+> may accept the framing and let it do all the work — which would convert an
+> unproven security argument into an assumption at exactly the point the
+> engagement exists to test. The sharpened question, which is the deliverable:
+> **does the AES-GCM tag + FO check discharge CHK's one-time-signature role, and
+> does that survive thresholdisation with PUBLISHED partial decryptions?**
+
+**The result with teeth, and it lands on a sentence we have already written.**
+**PKC 2026, eprint 2025/1665** (Brzuska–Klooß–Woo) shows that security under
+*maximal* corruptions does **NOT** imply security under *fewer* corruptions when
+the adversary also holds partial decryptions of challenge ciphertexts. Conclave
+publishes VE shares for **every** sealed ciphertext. That lands directly on
+`AUDIT_SCOPE_1.8` **§7's "confidentiality holds against any coalition of < t"**,
+which is stated as though corruption composes monotonically. **§7's sentence is
+hereby FLAGGED for explicit re-examination as a named audit sub-question** — it
+is not withdrawn (no counterexample against *our* construction is known), but it
+may no longer be asserted as self-evident, and the engagement must return a
+verdict on it specifically. Nearest published construction: **eprint 2025/341**
+(CCS 2025), CCA-secure threshold Boneh–Franklin IBE, motivated by mempool
+privacy — still **no audited implementation**, so Q2(a)'s core answer holds.
+
 1. **STOP #1 — adopt-vs-audit (the fork research enables).** Decide, as a real
    isolated stop, which construction goes to audit:
    - **(a) Audit as-built.** O1 as scoped: prove/refute IND-CCA of the
      composed KEM/DEM under attacker-influenced identity `id = H(DST‖C_dem)`.
      Cost: the divergence is Conclave's alone; the proof burden is maximal.
      Benefit: zero rebuild; the shipped, localnet-proven system is the audited
-     system.
+     system. **Rev 1 lowers this option's expected cost** via the CHK/BCHK
+     placement above — subject to the caution that the placement is a lead.
    - **(b) Re-derive the identity to a session-scoped external label** (the
      session id is Conclave's analog of tlock's round number), THEN audit the
      (much smaller) residual divergence. Benefit: collapses the O1 question
@@ -491,16 +723,76 @@ wrong tree. Each item below is authored, security-bearing, and post-`5f5feb8`:
   allowlist with contract-address signer stamping, Any/Stargate passthrough
   disabled, bounded query plugins, read-only CONCLUDE. Verify a contract cannot
   forge a CONCLUDE or bypass the consent gates.
-- **D-089 — `checkLimitRate`, and note this one is NEW consensus panic
-  surface.** The clause runs inside **EndBlock**, `LegacyDec.MulInt` panics on
-  overflow, and **nothing bounds an agent-signed `limit`** — so it carries a
-  `recover()` that fails closed. Verify the recover's scope is exactly the
-  arithmetic, that it is deterministic across nodes, and that failing closed is
-  the right posture (a rejected match, never a halted chain).
+- **D-089 — the §5.1 limit-RATE clause, NEW consensus panic surface.** The clause
+  runs inside **EndBlock**, `LegacyDec.MulInt` panics on overflow, and **nothing
+  bounds an agent-signed `limit`** — so it is guarded by a `recover()` that fails
+  closed. Verify the recover's scope is exactly the arithmetic, that it is
+  deterministic across nodes, and that failing closed is the right posture (a
+  rejected match, never a halted chain).
+
+  > **CORRECTED AT REV 1 (obligation 2, D-096).** This bullet previously said the
+  > `recover()` is carried by **`checkLimitRate`**. It is not. `checkLimitRate`
+  > (`x/session/keeper/solution.go:461`) contains **no** `recover`; the guard
+  > lives in **`rateWithinBound` (`solution.go:617`)**, which `checkLimitRate`
+  > calls at `:494` and `:527`. An auditor sent to the named function would have
+  > found no recover and drawn the wrong conclusion about a consensus panic
+  > boundary. The distinction also matters to the review itself: `rateWithinBound`
+  > is deliberately the NARROWER guard (it takes no `ctx`, touches no store, and
+  > calls only `LegacyDec`/`Int` operators, so the only reachable panic in its
+  > frame is the range assertion) — and the code says so in a comment that must
+  > stay true. **Verify the scope claim against `rateWithinBound`, not against
+  > `checkLimitRate`.**
+
+- **ALL EIGHT consensus-path `recover()` sites — the full census, NEW at Rev 1.**
+  §3.1.2 step 4 returns **8** non-test sites; the bullet above named **one**. Each
+  is a fail-closed panic boundary on a consensus or crypto path, so each is an
+  audit target and each must be checked for the same three properties (scope is
+  exactly what the comment claims · deterministic across nodes · failing closed is
+  the right posture). **A recover whose scope is wider than its comment silently
+  swallows unrelated bugs, which is the failure mode this census exists to
+  prevent.**
+
+  | # | Site | Guards | Fails closed to | Note for the auditor |
+  |---|---|---|---|---|
+  | 1 | `x/veil/keeper/lifecycle.go:408` `revealIntent` | the whole per-intent reveal (stub **and** real threshold path) | `revealMalformed` | **The widest of the eight and the most security-bearing** — it wraps `Combine` over attacker-supplied ciphertext AND the epoch scheme. Verify a crafted ciphertext cannot reach a *silent* wrong-plaintext rather than a recovered panic |
+  | 2 | `x/veil/keeper/lifecycle.go:645` `decodePayload` | proto-unmarshal of recovered plaintext | `ok=false` → §6.3 INVALID | The §6.3 "payload that fails proto-unmarshal at Reveal" path |
+  | 3 | `x/veil/keeper/lifecycle.go:690` `giveLegValue` | give-leg valuation via `PriceSource` | empty `sdk.Coins` | **Interacts with 3.4**: failing closed to *zero spend* is safe only while the D-065 cross-check treats zero as "no claim". Re-verify after the F-3 price-source swap lands |
+  | 4 | `x/mandate/ante/ante.go:227` `spendCommitment` | envelope decode **in the ante** | zero commitment | The one site on the **ante** path, not EndBlock. Verify the zero-commitment fallback cannot under-charge a well-formed envelope (D-085's shape) |
+  | 5 | `x/session/keeper/solution.go:619` `rateWithinBound` | the rate arithmetic only | `within,ok = false,false` | The D-089 site — see the correction above |
+  | 6 | `x/session/keeper/solution.go:776` `counterpartySatisfied` | whole §6.4 rule-5 predicate evaluation | `ok=false` (Decision A) | Deliberately **wider** than #5 because it wraps predicate parse + eval; it *does* take `ctx` and read the store. Verify a store error cannot be laundered into "predicate false" |
+  | 7 | `x/escrow/keeper/sweep.go:25` `EndBlocker` | the **entire escrow EndBlock sweep** | returns `error` (§11.5) | Second-widest. Verify a single malformed record cannot silently abort the sweep for *other* due escrows in the same block |
+  | 8 | `crypto/zkdelivery/verify.go:80` `Verify` | groth16 verification over adversarial proof bytes | `ErrInvalidProof` | Already an audit unit via the D-076 rows; listed here so the census is complete |
+
+- **`crypto/reveal/{reveal.go,stub.go}` — the epoch-0 StubScheme, NEW at Rev 1.**
+  The §3.1.2 key-material sweep surfaces these and neither `AUDIT_SCOPE §2.2` nor
+  this section named them as targets. `stub.go` is the **identity** scheme used
+  while `epoch_id == 0` — i.e. it is the literal implementation of the **L1
+  epoch-0 plaintext window** that FLAG P3-D is about. Verify the cutover cannot be
+  induced backwards (an intent sealed under a real epoch must never be revealable
+  through the stub), and that the seam cannot be selected by anything an attacker
+  influences.
+
+- **Out-of-scope by decision, recorded so the next re-derivation does not
+  re-investigate:** `cmd/conclave-demo/exit_demo.go` and `crypto/zkdelivery/
+  {gen/main.go,zktest/prove.go}` carry crypto imports but are **dev tooling** —
+  they enter no consensus path and ship in no validator binary. Named here
+  because §3.1.2's grep will surface them at every future boundary.
 - **D-088 — the store-iterator range ends.** A truncated exclusive upper bound
   made 1-in-256 records invisible on a consensus path (the §6.4 rule-5
   `has_credential` predicate). Fixed with the SDK's `PrefixEndBytes`; verify no
   remaining iterator anywhere constructs its range end by appending `0xFF`.
+
+  > **SHARPENED AT REV 1 (obligation 2, D-096) — the bullet as written PASSES and
+  > still under-describes the risk.** Re-derivation confirms **no** site appends
+  > `0xFF`. But the invariant is now maintained in **THREE independent
+  > implementations**: the SDK's `storetypes.PrefixEndBytes` (used by `x/sigil`,
+  > `x/mandate`), plus **two hand-rolled copies** — `x/veil/keeper.prefixEnd`
+  > (`intent.go:163`) and `x/session/types.PrefixEnd` (`keys.go:236`). All three
+  > are currently byte-equivalent, **so this is a latent divergence, not a live
+  > defect.** It is exactly **D-085's shape** (two readers of one rule that can
+  > drift apart) applied to D-088's own fix, and the audit question is therefore
+  > not "does any site append `0xFF`" but **"can these three implementations ever
+  > disagree, and what re-checks them?"** Owned by **F-12**.
 - **The fee-TWAP manipulation surface (D-082, task 2.5)** — the §6.2
   fee-conversion rate is a windowed average of solver-set clearing prices, so
   whoever wins solutions can steer it at the cost of bonds/skim/gas. The
@@ -612,10 +904,36 @@ grep -rn 'CONCLAVE-TODO' --include='*.go' --include='*.rs' --include='*.sh' \
      --include='*.proto' . | grep -oE 'CONCLAVE-TODO\([a-z0-9+.-]*\)' | sort | uniq -c
 ```
 
+**KNOWN NON-FINDINGS for step 7 (added at Rev 1 — each cost an investigation
+once, and naming them means it happens once).** The raw line count of
+`CONCLAVE-TODO` in the tree is **17**; the tagged census returns **15**. The
+delta is **not** an undercount and the tag-grep is **not** blind: two lines
+mention the marker string in *prose* while describing a marker that was
+**resolved in phase 0.4** — `x/session/keeper/solution.go:157` and
+`x/session/types/expected_keepers.go:51`, both reading *"resolving the 0.4
+CONCLAVE-TODO"*. They are references, not markers. **15/15 is the correct
+census**, and at `15c2470` both `phase-2` markers name OPEN tasks
+(`solution.go:143`→**2.15(a)**, `skim.go:37`→**2.12**).
+
+**A calibration note on step 6's allowlist (Rev 1).** Within the swept `$DOCS`
+set the deleted name `TestSignedConditionIsPermissionNotRequirement_BoundaryPin`
+occurs **five** times, while the allowlist declares four legitimate places and
+says a fifth "IS a finding." The fifth is **the allowlist's own text in this
+document** — the entry naming the test necessarily contains the test's name. This
+is a self-reference, not a re-citation, and it is recorded rather than
+"fixed by widening", because a check that can never come back clean is one the
+team learns to ignore (Rule 7 step 4). **The rule to apply: five occurrences of
+which one is this allowlist entry = CLEAN; a sixth, or any occurrence outside a
+marked block, IS a finding.**
+
 **A real `scripts/` implementation of this block is deliberately NOT created
-here** (decided at 2.16): the block is executable as written, and turning it
-into a committed artifact is 3.0's call once 3.0 has run it once by hand and
-knows what it actually wants to freeze.
+here** (decided at 2.16, and **re-decided at 3.0**): the block is executable as
+written, and turning it into a committed artifact was 3.0's call once 3.0 had run
+it once by hand and knew what it wanted to freeze. **3.0 has now run it, and the
+answer is YES — see F-13**, which also carries the one check this block does NOT
+have and obligation 6 proved it needs: **enumerate commits from `git log` and
+assert every one is cited somewhere.** The build is F-13's, not this docs-only
+Rev's.
 
 Diff the result against §2.2 of `AUDIT_SCOPE_1.8.md` plus §3.1.1 above. **Any
 line the greps surface that neither document names is a finding**, and the
@@ -656,7 +974,44 @@ verifier (VK serialization compatibility — spike first; if the tooling
 requires the post-3.3 gnark line, sequence 3.2 after 3.3); which `.ptau`
 artifact + its provenance; participant set + coordination venue; 3.12's fate.
 
-### 3.3 — Platform re-baseline *(two-stop)* *[PROPOSED — BEYOND CURRENT SPEC; FLAG P3-B: GATES 3.8]*
+### 3.3 — Platform re-baseline *[PROPOSED — BEYOND CURRENT SPEC; FLAG P3-B: GATES 3.8]*
+
+> ## REV 1 DECISION: 3.3 **SPLITS**, and 3.3a goes FIRST — ahead of the Phase-2 tail (D-096)
+>
+> **This is a decision, not an inheritance** — the plan-stop asked "must 3.3 be
+> pulled even earlier?", and the spike changed the answer's basis, so it is
+> re-derived here with reasoning rather than carried forward.
+>
+> **The spike decoupled two things the original 3.3 fused.** Bumping the
+> toolchain was believed to require the SDK-family migration (because the kyber
+> pin was believed to block the toolchain). It does not: `go 1.25.12` with
+> **every pin untouched** is green on the full suite and vector-identical to
+> D-082. So the security-patch axis and the platform-migration axis are now
+> **separable**, and fusing them would mean holding 16 reachable advisories
+> hostage to a multi-week SDK migration.
+>
+> | | **3.3a — toolchain + security patching** | **3.3b — SDK-family migration** *(two-stop)* |
+> |---|---|---|
+> | Content | `go` directive → a supported line; CometBFT v0.38.23→**.25**; the reachable-advisory remediations (grpc, x/net, go-getter); **golangci-lint upgraded in the same task**; F-5/F-6 CI guards + the dependency-EOL watch | SDK v0.50.15 → active family; ibc-go v8 → the family line; wasmd to match; **block-sdk disposition**; both crypto pins re-validated together; sigverify-fork retirement |
+> | Dependency churn | **Effectively none** — (a) proved the directive bump alone is green; the advisory bumps are leaf/indirect | Large — one compile error at `app/cvm/encoder.go:58` is the *source* surface, but behaviour is untested |
+> | Risk | Low, and **measured**: build/vet/test/vector all green at 1.25.12 | Unmeasured: lanes, `PrepareProposal`, VE/reveal e2e, CGO/libwasmvm packaging, vector re-baseline |
+> | Gate | Vector must stay **byte-identical to D-082** (it did in the spike) | Vector re-baseline **expected**; recorded as an ADR |
+>
+> **Why 3.3a outranks the Phase-2 tail.** The re-evaluation's point stands and is
+> now sharper: **if the 16 reachable advisories remediate through 3.3, then 3.3 is
+> the project's security-patch vehicle**, and a security-patch vehicle does not
+> queue behind reference-solver ergonomics. 3.3a is cheap, measured, and
+> reversible; nothing in the tail is exit-blocking or time-critical. **Only 2.14
+> is argued ahead of it** (§5.3) and only because it is a live functional defect
+> whose fix is independent of the platform.
+>
+> **Why 3.3b does NOT get pulled forward with it.** 3.3b is exactly the work whose
+> risk the spike did **not** retire. Nothing in (g) licenses "the migration is
+> small" — (g) was **compile-only**: no tests, no vector, no lane or VE or reveal
+> behaviour, no CGO packaging. 3.3b keeps its two-stop shape and its position.
+>
+> **3.3b still GATES 3.8** (FLAG P3-B). 3.3a does not discharge that gate: a
+> patched toolchain on an EOL SDK is still an EOL SDK.
 
 **What.** Leave the EOL island in ONE deliberate, fully-recorded migration:
 go 1.23.x → a supported line (1.25/1.26 at plan time); cosmos-sdk v0.50.15 →
@@ -672,28 +1027,65 @@ native ADR-070 unordered support covers the conformance suite (the fork's
 whole purpose dissolves on v0.53+). F-5 (machine-enforced float ban) and F-6
 (goleveldb-pin regression guard) land here as CI guards, plus a
 dependency-EOL watch (the class of rot this task exists to end).
-**Two stops (hard-to-reverse foundation — METHODOLOGY Rule 2):**
+**Two stops (hard-to-reverse foundation — METHODOLOGY Rule 2). These belong to
+3.3b; 3.3a is single-stop, because the spike already IS its decision evidence.**
 - **STOP #1 (decision):** target family — **2025.1** (SDK 0.53.x + CometBFT
   0.38.x + ibc-go v10; keeps the exact CometBFT line the VE surface is proven
-  on; native unordered txs; wasmd 0.6x line) vs **2026.1** (SDK 0.54.x +
-  CometBFT 0.39.x + ibc-go v11; BlockSTM + native BLS — bigger jump, unknown
-  interaction with lanes/VE/deterministic ordering; note 2025.1 retires when
-  the next family lands, per the two-family policy). Plus the block-sdk
+  on; native unordered txs; wasmd 0.6x line) vs **2026.1** (SDK 0.54.x/0.55.x +
+  CometBFT 0.39.x/0.40.x + ibc-go v11; BlockSTM + native BLS — bigger jump,
+  unknown interaction with lanes/VE/deterministic ordering; note 2025.1 retires
+  when the next family lands, per the two-family policy). Plus the block-sdk
   disposition and the two-pin re-validation plan. Presented with a D-077-style
   empirical spike table, reviewed in isolation.
+
+  > **REV 1 INPUTS TO STOP #1 — derive the option table AT TASK TIME, never from
+  > this prose (the 2026.1 family moved twice in a month).** Established by the
+  > 3.0 spike (§2.3): the 2025.1 set resolves MVS-clean with the directive
+  > settling at **exactly `go 1.23.8`** and **nothing transitive above it**;
+  > `wasmd v0.60.8` (not v0.61.x) is the SDK-v0.53 line inside that floor, which
+  > **D-077's table missed**; `block-sdk v2.1.5` **compiles** against SDK v0.53.8,
+  > so the disposition is a **behavioural** question, not a compile one; the
+  > source surface of the jump is **one** signature change at
+  > `app/cvm/encoder.go:58`. **All of this is compile-only evidence** — it sizes
+  > the decision, it does not make it.
+  >
+  > **Item 0, and it does not wait for the family choice:** CometBFT
+  > **v0.38.23 → v0.38.25** (consensus off-by-one in `double_sign_check_height`,
+  > mempool race, heap-amplification DoS guard) declares `go 1.22.11` and costs
+  > **nothing** on the toolchain axis. It belongs to **3.3a**.
 - **STOP #2 (post-wiring review):** the migrated tree's full evidence —
   determinism vector re-baseline (recorded ADR; expect drift on an SDK major —
   bisect dep-bumps vs wiring per the D-078 lesson), all Phase-0/1/2 suites,
   unordered conformance, lane routing, VE share transport + reveal e2e,
   localnet4 relaunch (real DKG → encrypted reveal), CGO/libwasmvm packaging.
 **Depends on.** 3.0. Nothing else starts against the OLD platform that would
-have to be redone (3.4/3.5 sequence AFTER 3.3 for this reason; 3.1/3.9/3.10/
+have to be redone (3.4/3.5 sequence AFTER **3.3b** for this reason; 3.1/3.9/3.10/
 3.11 are platform-independent and run in parallel).
-**Acceptance.** Supported toolchain + active release family everywhere; the
-laned-mempool answer proven by the lane suites on the new line; both crypto
-pins re-validated in one ADR (the §4 escape-hatch discipline, executed);
-sigverify fork retired-or-re-recorded; vector re-baselined; localnet4 green
-end-to-end; CI guards (F-5, F-6, EOL watch) live and watched red.
+
+**Acceptance — 3.3a.** Supported Go line live; **`golangci-lint` upgraded in the
+same task and CI green on it** (see below); CometBFT at v0.38.25; every
+remediable reachable advisory from the `govulncheck -mode binary` census either
+closed or carried with a written reason; **determinism vector byte-identical to
+D-082** (the spike says it will be — if it is not, that is a real finding, not a
+re-baseline); CI guards (F-5 float ban, F-6 goleveldb pin, dependency-EOL watch)
+live and **watched red**; `govulncheck` re-run and the before/after counts
+recorded in the ADR.
+
+> **NAMED WORK ITEM, on 3.3a's critical path — not a footnote.** `golangci-lint`
+> **hard-fails on any `go` newer than the version the linter binary was built
+> with**: `can't load config: the Go language version (go1.24) used to build
+> golangci-lint is lower than the targeted Go version (1.25.12)` — observed in the
+> spike, exit 2. It is **not** a toolchain ceiling (it is a dev-tooling install),
+> but it **stops `make lint` and therefore CI on the day the bump lands**. Upgrade
+> the linter **in the same commit** as the directive, and pin its version
+> alongside the toolchain so the coupling is explicit rather than rediscovered.
+
+**Acceptance — 3.3b.** Active release family everywhere; the laned-mempool answer
+proven by **the lane suites on the new line** (compile-clean is explicitly NOT
+sufficient — §2.3's limits); both crypto pins re-validated in one ADR (the §4
+escape-hatch discipline, executed); sigverify fork retired-or-re-recorded; vector
+re-baselined by recorded ADR; localnet4 green end-to-end (real DKG → encrypted
+reveal); CGO/libwasmvm packaging proven.
 **Plan-stop decisions.** Named above; plus whether the 3.3 migration itself
 becomes the first 3.6 upgrade rehearsal (a chain that has never upgraded
 should not debut upgrades on a public testnet).
@@ -738,10 +1130,28 @@ expansion:** transport serde (deal/response/justification bundles), envelope +
 epoch-tag edges, VE handler bytes (`InjectedRevealVotes`), CVM encoder JSON —
 each target either panics-never (recover→INVALID) or is dropped
 deterministically.
-**Depends on.** 3.3 (don't harden the old platform's gate twice).
-**Acceptance.** Vector demonstrably reaches the real reveal path (a sabotage
-run — e.g. corrupt the fixture commits — fails the vector by name); posture
-ADRs recorded; new fuzz targets in `make test` or a named CI lane.
+**Depends on.** 3.3b (don't harden the old platform's gate twice).
+
+**Acceptance — WIDENED AT REV 1 to all FIVE Category-1 shadows, one verdict per
+shadow (D-096).** The original acceptance line named only the reveal path. But
+**five** distinct Category-1 shadows are now on record — the generator cannot
+reach any of them, so each is *structurally* unreachable rather than merely
+untested, and an acceptance criterion that names one licenses silence on four.
+**3.5 must return a per-shadow verdict of either "the gate now reaches it (with a
+watched sabotage run)" or "hand-built adversarial fixtures are the permanent
+primary gate here, and this is the named fixture."**
+
+| Shadow | Source | What the vector cannot reach | Required verdict |
+|---|---|---|---|
+| **1. Epoch-inert reveal** | **D-069** | the real `epoch_id ≠ 0` path — the cryptographic Veil the vector exists to guard | reach it, watched: corrupt the fixture commits ⇒ vector RED **by name** |
+| **2. Fallback Solution write** | **D-086** | the no-solver default path; the sim generates no mutually fillable pair | reach it, or name the covering fixture |
+| **3. `0xFF`-prefixed ids** | **D-088** | a live 1-in-256 consensus bug passed 5 seeds | forced-`0xFF` fixture is the primary gate — **ratify explicitly** |
+| **4. Matcher rich paths** | **D-089** | `limit`/`allow_partial` never set; one leg per side; one coin give-asset | widen the generator **or** ratify fixtures — record which |
+| **5. Consent/condition paths** | **D-094** | conditioned legs, per-class buyer relations, the fallback attacher | name the covering fixtures; the vector is backstop only |
+
+Plus: posture ADRs recorded (wasm); new fuzz targets in `make test` or a named CI
+lane. **The generator-widening sub-item (§5.1) is decided HERE, once, for all five
+— not per-shadow by drift.**
 **Plan-stop decisions.** Fixture mechanism for deterministic epochs in-sim;
 whether wasm ops enter the sim or stay excluded; fuzz corpus/budget in CI.
 
@@ -907,14 +1317,15 @@ plan-stop can hard-require it.
 
 | # | Task | Authority | Gates / gated by |
 |---|---|---|---|
-| 3.0 | Rev at Phase-2 boundary | housekeeping | entry gate for all |
+| 3.0 | Rev at Phase-2 boundary | housekeeping | entry gate for all — ✅ **CLOSED, Rev 1, D-096** |
 | 3.1 | Audit: STOP + engagement + triage | SPEC §8(d) mainnet gate | gates MAINNET; starts first (FLAG P3-A) |
 | 3.2 | ZK MPC ceremony + VK swap | D-076 mainnet gate | after 3.1 STOP; decides 3.12 |
-| 3.3 | Platform re-baseline (two-stop) | PROPOSED | **gates 3.8** (FLAG P3-B) |
-| 3.4 | Mandate-bound completeness | AUDIT F-2/F-3 debts | after 3.3; before 3.8 |
-| 3.5 | Gate-coverage expansion | PROPOSED | after 3.3; before 3.8 |
-| 3.6 | Upgrade/migration infra | PROPOSED | after 3.3; before 3.8 |
-| 3.7 | Observability + L1 alarm | PROPOSED (discharges D-069 obligation) | after 3.3; before 3.8 |
+| **3.3a** | **Toolchain + security patching** *(single-stop)* | PROPOSED | **the security-patch vehicle**; ahead of the Phase-2 tail except 2.14 (§5.3) |
+| **3.3b** | **SDK-family migration** *(two-stop)* | PROPOSED | **gates 3.8** (FLAG P3-B); gates 3.4/3.5/3.6/3.7 |
+| 3.4 | Mandate-bound completeness | AUDIT F-2/F-3 debts | after **3.3b**; before 3.8 |
+| 3.5 | Gate-coverage expansion | PROPOSED | after **3.3b**; before 3.8 |
+| 3.6 | Upgrade/migration infra | PROPOSED | after **3.3b**; before 3.8 |
+| 3.7 | Observability + L1 alarm | PROPOSED (discharges D-069 obligation) | after **3.3b**; before 3.8 |
 | 3.8 | Genesis + public testnet | PROPOSED (D6/D7 hooks are SPEC) | gated by 3.3/3.6/3.7/3.9 + D7 |
 | 3.9 | Tokenomics (D6) | SPEC §14 D6 pre-testnet | before 3.8 genesis policy |
 | 3.10 | Governance + ops runbooks | PROPOSED | drills feed 3.8 |
@@ -935,9 +1346,9 @@ plan-stop can hard-require it.
 | O3 authored-surface completeness | D-071 §3 | → **3.1** (auditor verifies §2.2 inventory) |
 | O4 reveal-cost cap at production n | D-070 | → **3.8** (re-derived at testnet n) + **3.7** (histogram) |
 | T1 confirmation-count basis | D-068 | → **3.1** (verify quorum soundness) |
-| T2 kyber lowest-index premise | D-067 | → **3.1** (verify) + **3.3** (pin-bump re-runs the probe) |
+| T2 kyber lowest-index premise | D-067 | → **3.1** (verify) + **3.3b** (pin-bump re-runs the probe). *Rev 1: the 3.0 spike already ran this probe **50/50 under each of go1.23.12 / go1.25.12 / go1.26.5**, so a Go bump alone does not disturb T2; the re-run remains owed for a `kyber-bls12381 v0.3.4` adoption.* |
 | T3 share custody / daemon boundary | D-070 | → **3.1** (review) + **3.10** (custody runbook) |
-| **T4 dependency pin & license** *(added D-090)* | D-066 §8 | → **3.3** — the two-pin double-re-validation IS T4's re-verification (`kyber`/`kyber-bls12381` MPL-2.0 re-checked on the bump, no transitive divergent BLS12-381) + **3.1** (auditor confirms the pinned versions are the audited ones) |
+| **T4 dependency pin & license** *(added D-090)* | D-066 §8 | → **3.3b** — the two-pin double-re-validation IS T4's re-verification (`kyber`/`kyber-bls12381` MPL-2.0 re-checked on the bump, no transitive divergent BLS12-381) + **3.1** (auditor confirms the pinned versions are the audited ones) |
 | **L3 per-share proof = intrinsic pairing check** *(added D-090)* | D-066, FLAG III | → **3.1**, jointly with O1 — L3 says so itself ("verify the two together"): the same `id = H(DST‖C_dem)` per-ciphertext binding that O1 interrogates for IND-CCA is what makes a share non-replayable across ciphertexts |
 | **A-bind, A-barriers, A-floor, A-F4, A-inject, A-reg, A-just** *(added D-090)* | AUDIT_SCOPE_1.8 §4 | → **3.1** — these are the arguments already constructed, handed to the auditor to CHECK rather than reconstruct; each names its code and its evidence tests. They had no rows before, which risked an engagement scoped to O1–O4 alone and silently dropping seven security arguments |
 | VK MPC ceremony | D-076 | → **3.2** |
@@ -947,14 +1358,14 @@ plan-stop can hard-require it.
 | L2 unsafe default cap | D-070 | → **3.8** genesis policy |
 | F-2 unvalued msg types | AUDIT | → **3.4** |
 | F-3 / D-020 / D-044 PriceSource swap | AUDIT | → **3.4** |
-| F-5 float ban review-only | AUDIT | → **3.3** CI guard |
-| F-6 goleveldb pin unguarded | AUDIT | → **3.3** CI guard |
+| F-5 float ban review-only | AUDIT | → **3.3a** CI guard |
+| F-6 goleveldb pin unguarded | AUDIT | → **3.3a** CI guard |
 | **F-7 §5.1 limit rate ignored (D-049)** *(added D-090)* | AUDIT | ✅ **CLOSED by task 2.6** (D-089) — recorded against F-7 for the first time at D-090; it had been closed-in-fact and open-on-paper |
 | **F-8 stale `CONCLAVE-TODO(phase-0)` markers** *(added D-090)* | AUDIT | ✅ **CLOSED by the Rev-3 marker sweep** (D-090). It was unowned for two phases and independently rediscovered — see docs/AUDIT.md's disposition section for the transferable lesson |
-| Two-pin go-1.23 ceiling (now EOL) | PHASE2 §4, R2 | → **3.3** (executes the recorded escape hatch; gates 3.8) |
-| block-sdk archived | D-077, R1 | → **3.3** STOP #1 disposition |
-| SDK v0.50 / ibc-go v8 EOL | R1 | → **3.3** (new since D-077 — see §5.2 advisory) |
-| Sigverify fork retirement | D-027/D-077 | → 2.5 checkpoint result; residual → **3.3** |
+| Two-pin go-1.23 ceiling (now EOL) | PHASE2 §4, R2 | → **3.3a** (the Go bump, which the 3.0 spike proved needs NEITHER pin touched) + **3.3b** (the actual two-pin re-validation, if v0.3.4 / gnark v0.14+ are adopted). **Rev 1 re-frames this row:** PHASE2_DESIGN §4's invariant was never a constraint on the `go` directive — see §2.3(a) and §2.2 R2 |
+| block-sdk archived | D-077, R1 | → **3.3b** STOP #1 disposition. *Rev 1: **v2.1.5 is the last tag that will ever exist** (the proxy version list ends there), and it **compiles** against SDK v0.53.8 — so the disposition is a BEHAVIOURAL question (lanes, PrepareProposal), not a compile one.* |
+| SDK v0.50 / ibc-go v8 EOL | R1 | → **3.3b** (new since D-077 — see §5.2 advisory). *Rev 1: **wasmd v0.60.8** is the SDK-v0.53 line at floor `go 1.23.8` — the line D-077's table never saw.* |
+| Sigverify fork retirement | D-027/D-077 | → 2.5 checkpoint result; residual → **3.3b** (the fork's whole purpose dissolves on v0.53+ native ADR-070) |
 | Epoch-inert determinism sim | D-069 | → **3.5** |
 | wasm-inert sim posture | D-079 | → **3.5** (re-affirm or revise, recorded) |
 | **Sim intent-generator widening** *(added D-090)* | D-089 | → **3.5**, as a NAMED sub-item. D-089 called it "a legitimate task in its own right" and gave it no number — a floating phrase, Rule 6's failure mode. The generator emits one leg per side, never sets `limit`/`allow_partial`, and its cycle has one coin give-asset, which is *why* the vector cannot reach the matcher's rich paths (D-069/086/088/089). 3.5 must decide explicitly: widen the generator, or ratify hand-built adversarial fixtures as the permanent primary gate for matcher richness — and record which |
@@ -981,6 +1392,18 @@ plan-stop can hard-require it.
 | **2.15 §6.4 rule-3 per-leg attribution** *(added D-095)* | D-089, D-094 | **Phase-2 tail.** Receives BOTH items 2.7 assessed and explicitly re-deferred: (a) TODO 9 multi-intent-per-sigil (`solution.go:143` — the marker was retargeted here at 2.16, having named the closed 2.7), and (b) the `ErrLimitRateUnsupported` 1428 lift, which needs a **counter-asset designator** — D-094's verdict is that FW-2 does NOT enable it, since a `DeliveryCondition` names no counter-asset. **D-074 is orthogonal, not colliding** (D-094), and must not be re-litigated. The D-044 price source stays 3.4 and must not be reached for |
 | **2.13 condition-attachment verdict + wire-code loss** *(added D-095)* | D-093 | ✅ **CLOSED** (`0d7f167`). Recorded here because it had no row at all: (b) session `1412` now reaches the wire via the typed composite `types.InvalidSolution`; (a) the GAP verdict was closed by 2.7 for enforcement and remains open only as 2.14's reference half |
 
+| **G-1 IBC relayer operations** *(added D-096)* | Rev-1 gap analysis | → **3.10** (runbook) + **3.8** (testnet posture). Verified by grep, not asserted: the corpus has **one** relayer mention — the discharged §6b demo. A live IBC rail needs relayer **operations**: process supervision, wallet funding/rotation, stuck-packet clearing, and **light-client expiry** (an expired client is an unrecoverable-by-relayer channel state, and §6b's evidence rests on chain B's client of chain A). Not exit-blocking; it becomes real the moment 3.8 exposes a rail anyone else uses |
+| **G-2 gas / DoS pricing of the authored surface** *(added D-096)* | Rev-1 gap analysis | → **3.9** (pricing model) + **3.4** (enforcement) + **3.8** (caps at real n). **RANKED HIGHEST of the four new rows.** A **pairing-bound Reveal runs in BeginBlock paid for by nobody**, and the matcher runs in EndBlock likewise, **on an exchange chain**. O4 caps the *count*; **nothing prices the COST**. The spike supplies the first real number — **5.3 ms/intent** at n=4,t=3, i.e. a 64-intent batch is ~340 ms of pairing work in a 1 s block — so the surface is not hypothetical. The question 3.9 must answer: what does it cost an adversary to fill a session with intents that maximise consensus work and never settle? |
+| **G-3 validator key custody / double-sign protection** *(added D-096)* | Rev-1 gap analysis | → **3.10** (custody runbook, alongside T3) + **3.8** (genesis onboarding). **Zero hits** across the corpus for tmkms / horcrux / HSM / slashing-protection-file. Conclave validators hold **two** secrets, not one: the consensus key **and** the DKG share (T3) — so the standard Cosmos custody story is necessary but not sufficient, and the interaction (a validator restored from backup may double-sign **and** hold a stale share) has no owner |
+| **G-4 load / capacity testing** *(added D-096)* | Rev-1 gap analysis | → **3.8** (O4 re-derivation at real n) + **3.7** (histograms). **Zero hits**; O4 derives from a **single-node bench at n=4**. **F-9 is live evidence this row is real**, not speculative: the same measurement, run under incidental machine load, moved the recommended `max_intents_per_session` from ~56 to **5** — a 10× swing in a **consensus parameter** with no isolation guard anywhere |
+| **F-9 `TestRevealCostWithinBound` diagnoses an unestablished cause AND feeds a consensus param** *(added D-096)* | 3.0 spike | → **3.5** (the test) **and → G-4/3.8** (the parameter). **Two defects, one test, and the second is the serious one.** (a) On failure it prints *"the share gate / IBE open regressed"* — a **specific diagnosis it has not established**; it fired in the spike naming a crypto regression that did not exist. This is the negative-assertion rule applied to a **diagnosis** rather than an error code. (b) Its `recommendedCap` is an unguarded **wall-clock** measurement that **derives an O4 consensus parameter**, and it swung **5 vs ~56** purely on machine load. Fix (a) by making the message state what was measured, not what it means; fix (b) by isolating the measurement (or refusing to emit a cap when the machine is loaded) — **route (b) as G-4 evidence, not as a test cleanup** |
+| **F-10 seven of eight `recover()` sites undispositioned** *(added D-096)* | 3.0 obligation 1 | ✅ **CLOSED IN-TASK** — §3.1.2 step 4 returns **8** consensus/crypto panic boundaries; §3.1.1 named **one**. All eight are now enumerated in §3.1.1 with per-site guard/fail-closed/auditor-note. No forward owner needed; the **audit** checks them |
+| **F-11 §3.1.1 named the wrong function for the D-089 recover** *(added D-096)* | 3.0 obligation 2 | ✅ **CLOSED IN-TASK** — the guard is in `rateWithinBound` (`solution.go:617`), not `checkLimitRate`. Corrected in place with a marked block. **Recorded rather than silently fixed because it is obligation 2's proof-of-value**: a grep-diff would never have surfaced it, since nothing was *added* — existing prose was simply wrong |
+| **F-12 D-088's invariant now has THREE implementations** *(added D-096)* | 3.0 obligation 2 | → **3.5**, as a named sub-item (it is a gate-coverage question: what *test* would catch a divergence?). `storetypes.PrefixEndBytes` + `x/veil/keeper.prefixEnd` + `x/session/types.PrefixEnd`, all currently byte-equivalent. **Latent, not live.** Decide: collapse to the SDK's, or keep the copies and add a test asserting all three agree on the adversarial inputs (all-`0xFF`, empty, single-byte) |
+| **F-13 commit-hash traceability recurs BY CONSTRUCTION** *(added D-096)* | 3.0 obligation 6 | → **3.3a** (ship it with the CI-guard work). 2.16 restored hash traceability by hand; `6d6b730` was left as a deliberate calibration seed; 3.0's pass found it **and** found **`15c2470` uncited**. The gap **relocates to the newest commit every time**, so hand-fixing is a treadmill. Deliverable: the §3.1.2 block as a committed `scripts/` artifact (plan-stop decision 2, decided YES) **plus one new check obligation 6 proved is needed — enumerate from `git log` and assert every commit is cited somewhere.** The check must tolerate exactly the HEAD-can't-cite-itself case and no other |
+
+| **F-14 two METHODOLOGY amendments owed** *(added D-096)* | 3.0 obligation 5 | → **the session that commits D-096**, as its own edit to `docs/METHODOLOGY.md`. (1) Rule 8 step 3 gains the D-095 **enumerate-the-consumers-first** sub-rule with its mechanical form **verbatim** — and **written to BOTH trigger classes** (*strengthened a guarantee* **and** *renamed or split a referent*), because Rev 1 fired it on a structural split D-095's wording does not cover, and writing it narrowly would leave that case unowned (§8.1); (2) Rule 9 gains the companion **"a FLAG is a CLAIM"** rule. **Deliberately NOT made inside this Rev** — METHODOLOGY is a separate authority document, and amending it from inside a plan Rev is exactly the silent cross-document edit Rule 8 step 3 exists to prevent. Written here so the item is owned by a row, not by the memory of whoever writes the commit |
+
 ### 5.2 Advisories to the remaining Phase-2 tasks (research fallout; not Phase-3 scope)
 
 > **ALL THREE ADVISORIES ARE SPENT (task 2.16, D-095).** Every task they address
@@ -1002,6 +1425,28 @@ Recorded here so the Phase-2 sessions inherit them without re-research:
   That resequencing decision belongs to 2.5's plan-stop + task 3.0, not to
   silence. The 2.5-owned v0.53 checkpoint should consume §2.2's R1 findings.
 
+### 5.3 Where the six Phase-2 tail tasks sequence (3.0 plan-stop decision 3, D-096)
+
+The tail is **2.8, 2.9, 2.10, 2.12, 2.14, 2.15** — none exit-blocking (2.16
+re-derived that from SPEC §10's text). Rev 1 places them against the Phase-3
+critical path. **One uniform rule, and the ordering is derived from two
+properties only: does it fix a LIVE defect, and does it gate anything.**
+
+| Order | Task | Placement | Why |
+|---|---|---|---|
+| **1** | **2.14** | **ahead of 3.3a** | The **only** tail item with a **live functional defect**: non-test `solver/` reads no `Condition`, so the reference solver proposes a **slashable (5%)** solution the first time it meets a condition-signing intent. Platform-independent, so nothing about 3.3 changes its shape. Fixing a live defect outranks patching a toolchain by days, not weeks |
+| **2** | **3.3a** | next | The security-patch vehicle (see §3.3's Rev-1 decision block) |
+| **3** | **2.9** | after 3.3a, before any external use of §6 evidence | Highest-priority of the remaining five and a **hard prerequisite** for external-facing use of the exit-demo evidence; 2.7 made conditioned settlements strictly more common, so the unconditional `NONE` stamp is wrong more often. Proto + cross-module consensus work ⇒ vector re-baseline expected ⇒ **do it before 3.3b re-baselines the vector anyway**, so the two re-baselines stay attributable (Rule 7 step 2) |
+| **4** | **2.8, 2.15, 2.10** | after **3.3b** | All three are consensus-surface work that would be **built twice** if done against the old platform — the exact reason 3.4/3.5 sequence after 3.3b. 2.8 is a design question with no blocker; 2.15 and 2.10 are matcher/attribution surface whose primary gate is hand-built fixtures either way |
+| **5** | **2.12** | after **3.9** | Unchanged and re-affirmed: **"sequenced after 3.9 BY DECISION", never "blocked on D6"** — no document creates that gate, and recording a dependency no document creates is the floating phrase that produced audit finding F-3 |
+
+**Note on 2.9 vs 3.3b ordering (the non-obvious one).** Both re-baseline the
+determinism vector. Rule 7 step 2 says sequence risky changes so the gate runs
+BETWEEN causes. Doing 2.9 first means one re-baseline attributable to a **proto
+change** and a later one attributable to a **platform change**; doing them in the
+other order, or together, would fuse two causes into one unexplainable hash
+movement.
+
 ---
 
 ## 6. Phase-3 exit criterion
@@ -1019,7 +1464,9 @@ Phase 3 exits when ALL of:
 4. **Bound complete:** F-2/F-3 closed — no allowlisted msg type moves
    unbounded value past a mandate.
 5. **Gate coverage:** the determinism vector demonstrably exercises the real
-   reveal path.
+   reveal path, **and each of the other four Category-1 shadows has a recorded
+   per-shadow verdict** — "the gate reaches it, watched" or "these named
+   hand-built fixtures are the permanent primary gate" (§3.5, widened at Rev 1).
 6. **Chambers design doc approved** (build not required — FLAG P3-C).
 7. **Economics ratified:** D6 model + params ADR consumed by the testnet
    genesis.
@@ -1040,7 +1487,128 @@ for "mainnet-ready."
 
 ---
 
-*Proposed at `9722912` (2026-07-10), mid-Phase-2. Task 3.0 re-validates this
-plan at the Phase-2 boundary before any Phase-3 session begins. The working
-discipline that executes it is codified in `docs/METHODOLOGY.md`. The conclave
-prepares to convene in public.*
+---
+
+## 8. Rulings — the D-095 methodology amendment and the re-evaluation amendment set
+
+**Every row is ruled on. A row I decline is ruled on with reasoning, not
+dropped** — 3.0's obligation was to rule, not to accept.
+
+### 8.1 Ruling A1 — the D-095 candidate METHODOLOGY amendment: **ADOPTED**
+
+**The amendment.** METHODOLOGY Rule 8 step 3 ("propagate the correction to any
+document that repeated it") needs the sub-rule Rule 6 already learned:
+**enumerate the consumers FIRST**, because a correction propagated from memory
+reaches exactly the documents you remember. Task 2.7 corrected four documents and
+left five wrong, including the auditor-facing scope. That is not a diligence
+failure; it is the **absence of an enumeration step**.
+
+**The standard it was to be ruled by:** *a rule that depends on REMEMBERING does
+not fire; a rule with a RUNNABLE STEP does.*
+
+**Ruling: ADOPTED, and it passes the standard cleanly** — the amendment is not
+advice ("be thorough about propagation"), it is a command someone runs at a
+boundary. Its mechanical form is carried **verbatim**, as required:
+
+> After a task that STRENGTHENS a guarantee, grep for assertions of the OLD
+> guarantee's **NEGATION** — `"not enforced"`, `"never attaches"`, `"has no X
+> field"`, `"only through"`, `"is a … ceiling"` — **NOT for the new mechanism's
+> name.** Stale text by definition does not mention the new thing, so searching
+> for `condition_binding.go` or `attachFallbackCondition` finds exactly the
+> documents already corrected. The negation is what the stale text actually says.
+
+**Rev-1 adds a third independent data point, and it is the strongest of the
+three.** The two recorded were 2.16's own sweep (found a 20th stale statement a
+manual pass missed) and Rule 6 sub-rule 3's named worst case recurring one task
+after the rule was written. The third: **FLAG P3-B's refutation came from running
+`govulncheck` and reading four `go.mod` files** — not from research, and not from
+anyone re-reading the flag. The flag had been carried and cited for three weeks
+without once being tested against the artifact. So the amendment generalises past
+correction-propagation into a companion rule, which Rev 1 also adopts:
+
+> **A FLAG is a CLAIM, and flags accumulate authority precisely because nobody
+> re-checks them.** At every phase boundary, list the document's FLAGS and ask of
+> each: *what artifact would falsify this, and has anyone run it?* A flag with no
+> falsifying test named beside it is prose. **Flags asserting a CONSTRAINT ("X
+> blocks Y", "we cannot do Z") get priority** — they delete options, and their
+> cost is invisible because nobody plans the work a constraint forbade.
+
+**THE TRIGGER CLASS IS WIDER THAN D-095 STATED, and Rev 1 proves it on itself.**
+D-095 wrote the amendment for a **semantic strengthening**. Rev 1's own case was a
+**structural rename/split** — `3.3` became `3.3a`/`3.3b` — and the same mechanism
+caught **nine** stale referents that a search for the new names could not have
+reached. Generalised, and this is the form F-14 must carry:
+
+> **Any change that RENAMES or SPLITS a referent leaves the old referent behind in
+> every document that pointed at it, and the intuitive search is systematically
+> ANTI-CORRELATED with finding them.** Searching for the NEW name returns exactly
+> the sites already updated — **by construction**, since stale text cannot mention
+> a name that did not exist when it was written. Search for **what the stale text
+> still says**: the old name, or the old guarantee's negation. **Two triggers
+> (strengthened a guarantee · renamed or split a referent), one mechanism.**
+
+**Both rules go to METHODOLOGY as a Rule 8 amendment + a Rule 9 companion — and
+the Rule 8 amendment must be written to BOTH triggers, not just D-095's.** That
+edit is **NOT made in this Rev**: METHODOLOGY is a separate authority document,
+and amending it from inside a plan Rev would be exactly the silent cross-document
+edit Rule 8 step 3 is about. It is **F-14**, owned by the session that commits
+D-096.
+
+### 8.2 The re-evaluation amendment set — row by row
+
+| # | Proposed | Ruling |
+|---|---|---|
+| **1** | FLAG P3-B is wrong in the expensive direction; correct both halves | **ENACTED** — §1 FLAG P3-B rewritten, refuted half kept-and-marked with a forward pointer (D-095's load-bearingness rule: someone could re-derive a *decision* from it) |
+| **2** | 16 reachable advisories make 3.3 the security-patch vehicle; its priority is a DECISION | **ENACTED, and taken further than proposed** — 3.3 **splits**; 3.3a is pulled ahead of the tail (§3.3, §5.3). The re-evaluation asked for an explicit decision; the spike's decoupling made a *better* option available than the one on offer |
+| **3** | CometBFT v0.38.23→.24/.25 is free today; must not wait on the family decision | **ENACTED** — STOP #1 "item 0", assigned to **3.3a**. Version corrected to **v0.38.25** (the re-evaluation had .24); floor `go 1.22.11` verified at the proxy |
+| **4** | G-2 ranks highest of the four new gaps | **ENACTED** — §5.1 G-2, with the spike's 5.3 ms/intent as the first real cost datum |
+| **5** | O1 reframed via CHK/BCHK | **ENACTED WITH A HARD CAUTION** — §3.1, framed as the auditor's **starting point** phrased as a task. The caution is the substance: an auditor handed *"we have established this is CHK/BCHK"* may let the premise do all the work |
+| **6** | PKC-2026 non-monotone corruption lands on §7's "< t" | **ENACTED** — §3.1 flags `AUDIT_SCOPE §7`'s sentence for explicit re-examination as a named sub-question. **Flagged, not withdrawn**: no counterexample against *our* construction is known |
+| **7** | Four new gap rows (G-1…G-4) | **ENACTED** — all four in §5.1 with dispositions |
+| **8** | 3.5's acceptance is too narrow — five Category-1 shadows, not one | **ENACTED** — §3.5 widened to a per-shadow verdict table |
+| **9** | `recover()` census returns 8; §3.1.1 names one | **ENACTED** — all eight in §3.1.1, per-site. **Independently re-derived at 3.0**, not copied |
+| **10** | §3.1.2's grep block was dry-run and works (3 hits, all allowlisted; markers 15/15) | **CONFIRMED, with two additions the dry-run did not record** — the 17-vs-15 raw/tagged delta is explained as a **known non-finding**, and the step-6 allowlist **self-references** (five occurrences of which one is the allowlist entry = clean) |
+| **11** | Aptos's encrypted mempool is announced, not shipped | **ENACTED as a correction to §2.2 R3** — it weakens option (b)'s "well-trodden" support, which is a 3.1 STOP #1 input |
+| **12** | 2026.1 moved to SDK 0.55.x / CometBFT 0.40.x / ibc-go v11 in 23 days | **ENACTED as a DISCIPLINE, not a version** — §3.3 STOP #1 now says derive the option table **at task time, never from this prose**. Recording the moving numbers here would reproduce the very failure |
+| **13** | iavl pinned v1.2.4 vs v1.2.9; 5 patches behind on pruning | **ACCEPTED, assigned to 3.3a** — state-commitment code ⇒ **vector-in-isolation** event (Rule 7 step 2). Not folded into the family jump |
+| **14** | x402 moved to Linux Foundation; V2 renamed headers | **NOTED, no action** — it *strengthens* D-083's version-independence claim (the churn is HTTP-layer). 2.3 is closed and the §5.2 advisories are spent; recording it as live scope would re-open a closed task |
+| **15** | The toolchain spike runs FIRST, before any other 3.0 work | **ENACTED AND VINDICATED** — §2.3. Every sequencing decision in this Rev depends on its result, and the plan written before it would have been the plan it invalidated |
+
+**One row of the amendment set is REJECTED as stated.** The handoff's spike
+hypothesis — *"the real toolchain constraint is more likely the archived
+block-sdk v2.1.5 than kyber"* — is **REFUTED** (§2.3). It is recorded here rather
+than quietly dropped, and held to the same standard as FLAG P3-B: it was
+correct to flag it as **unverified** and correct to make testing it the spike's
+job. Authorship is not evidence in either direction.
+
+---
+
+
+## 9. Rev-1 provenance and close-out
+
+**Proposed** at `9722912` (2026-07-10), mid-Phase-2. **Rev 1** authored at task
+3.0 against `15c2470` (2026-08-03, D-096), after Phase 2 was declared EXITED
+(2.16, D-095) — both gate conditions met, so this document is now **the phase
+authority**.
+
+**Gate evidence (Rule 9's two-fingerprint standard).** The full suite and the
+determinism vector were run on `main` at `15c2470` with a **clean tree**:
+`make lint` **0** · `make test` **0** (17/17) · vector **PASS**, 5 seeds
+byte-identical to the D-082 baseline across two independent processes. Tree
+fingerprint at the gate: `git diff | sha256sum` = **`e3b0c44…b855`** (empty).
+**Rev 1 is docs-only**, so the close-out proof is the SOURCE-ONLY fingerprint of
+the shipping tree — it must still equal `e3b0c44…b855`, which shows not one
+source or test byte moved after the gate. That is a proof rather than a promise,
+and it is printed in the task record rather than asserted here.
+
+**What Rev 1 did NOT do, stated so nobody infers it.** It changed **no pin and no
+source byte**. It did not amend `docs/METHODOLOGY.md` (that is **F-14**), did not
+build the `scripts/` re-derivation artifact (that is **F-13**), and did not open
+any 3.x task. The toolchain spike's branch was destroyed; its deliverable was the
+**result**, not code.
+
+**The one sentence worth carrying forward.** The spike's finding was not that the
+platform is fine — 16 reachable advisories say otherwise, and 3.3a is now urgent.
+It was that **the platform was never trapped**, and that a constraint nobody
+tested had been quietly deleting options from every plan that inherited it for
+three weeks. *The conclave prepares to convene in public.*

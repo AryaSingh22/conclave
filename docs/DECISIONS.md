@@ -5732,3 +5732,203 @@ written**, and what fixed it was a SCHEDULED SWEEP rather than a resolution to b
 careful. Advice has a measured failure rate in this repo; commands do not. Both
 the amendment and the standard are written into **3.0's criteria as obligation
 5**, not pointed at it.
+
+---
+
+## D-096 — Task 3.0: the Phase-3 plan Rev at the Phase-2 boundary. A toolchain spike run BEFORE any planning REFUTED FLAG P3-B's constraint half at the artifact — the platform was never trapped; 3.3 SPLITS; all six written-in obligations discharged; PHASE3_PLAN becomes **Rev 1, the phase authority**
+
+**Status.** ACCEPTED. Docs-only — **no pin and no source byte changed.**
+Baseline `15c2470` (clean tree); `make lint` 0, `make test` 0 (17/17 packages),
+determinism vector PASS on 5 seeds byte-identical to the D-082 baseline (verified
+line-by-line against `DECISIONS.md:3300-3304`, not asserted), tree fingerprint
+`e3b0c44…b855` (empty) before and after.
+
+### Context
+
+`PHASE3_PLAN.md` was authored mid-Phase-2 (D-080) as a PROPOSED plan and became
+executable only after (a) the Phase-2 ledger closed and (b) a Rev-at-boundary
+reconciliation re-validated it against as-built state. (a) landed at task 2.16
+(D-095). This is (b). Task 3.0 carried **six obligations written INTO its
+acceptance criteria** rather than pointed at it, plus a reviewer-directed
+instruction to **run a toolchain spike before any planning**, on the reasoning
+that the plan written before the spike would be the plan the spike invalidated.
+
+### The spike, and why it changed the phase rather than informing it
+
+Run on a throwaway branch off `15c2470`; the only tracked edit was `go.mod`'s two
+directive lines; everything else ran in `/tmp` copies (`git archive`, no `.git`).
+Two-fingerprint discipline was carried INSIDE the spike — the working-diff hash
+was recorded before and after the vector run (`9ebb6df8…`, identical). Branch
+destroyed; post-teardown fingerprint equals the pre-spike baseline.
+
+1. **Bumping only the `go` directive to `go 1.25.0`/`toolchain go1.25.12`, with
+   every pin untouched:** build 0, vet 0, `go test ./...` 0 (17/17), crypto 24/24,
+   **determinism vector byte-identical to D-082** across two processes.
+2. **The 2025.1 stack** (sdk v0.53.8 + cometbft v0.38.24 + wasmd v0.60.8 + ibc-go
+   v10.7.0) resolves **MVS-clean**, `go mod tidy` 0, directive settling at exactly
+   **`go 1.23.8`**, and the census of modules declaring above 1.23.8 came back
+   **EMPTY** — the transitives nobody had checked.
+3. **What actually binds:** at 1.25, nothing. At 1.26, **`bytedance/sonic
+   v1.14.0`** — `undefined: GoMapIterator`, a `//go:linkname` into runtime
+   internals removed by Go 1.26's map rework, reaching us through
+   `conclave/app → cosmossdk.io/log → sonic`, with `sonic/internal/rt` inside
+   `conclaved`'s own import graph. **Not kyber. Not block-sdk.**
+4. **The pinned assembly-bearing `kilic/bls12-381 v0.1.0`** produces a
+   **byte-identical KAT (`6d98cd34…`) under go1.23.12 ≡ go1.25.12 ≡ go1.26.5**,
+   and — the stronger result — **byte-identical under `-tags generic`** against its
+   own pure-Go fallback. `TestKyberRecoverCommitSelectsLowestIndex` (the T2
+   premise) passed **50/50 per toolchain**, dosed per Rule 3 step 7.
+
+### Decision 1 — FLAG P3-B's constraint half is REFUTED, and the correction runs in the expensive direction
+
+> ~~"the kyber pin (D-066) is itself what holds the project on the EOL toolchain
+> … an ACTIVE conflict, not a future one."~~
+
+**A `go` directive is a MINIMUM, never a maximum.** `kyber-bls12381 v0.3.1`
+declares `go 1.18`; `kilic/bls12-381 v0.1.0` declares `go 1.13`. Neither imposes
+any ceiling. D-066's pin genuinely avoided a **FORCED** bump and was correct in
+Phase 1 — it never prevented a **VOLUNTARY** one, and that inference is what was
+wrong. The flag had been carried, cited and built on across multiple documents
+for three weeks **and had never once been tested against the artifact it
+described.**
+
+The other half of P3-B is CONFIRMED and worse than written: `govulncheck -mode
+binary` finds **16 reachable-symbol vulnerabilities** in the shipping binary, so
+the original *"support-horizon decision, not an exploit fire"* is FALSE
+stack-wide and true only of gnark.
+
+**The recorded block-sdk hypothesis is also REFUTED**, and is held to the same
+standard rather than quietly dropped: block-sdk v2.1.5 compiles clean under both
+1.25.12 and 1.26.5, and against SDK v0.53.8. Stated precisely — **compiling is
+not behaving**; lanes and `PrepareProposal` remain 3.3b STOP #2's evidence list.
+But the inherited framing asserted a compile/MVS *impossibility*, and that is
+false.
+
+### Decision 2 — 3.3 SPLITS, and 3.3a is pulled ahead of the Phase-2 tail
+
+The spike **decoupled** two axes the original 3.3 fused. Security patching
+(toolchain, CometBFT v0.38.25, the reachable advisories, golangci-lint, the
+F-5/F-6/EOL CI guards, iavl-in-isolation) is now **separable** from the
+SDK-family migration. Fusing them would hold 16 reachable advisories hostage to a
+multi-week migration.
+
+- **3.3a** — single-stop; effectively zero dependency churn; risk **measured**
+  (green on the full suite, vector-identical). Sequenced **ahead of the Phase-2
+  tail except 2.14**, because a security-patch vehicle does not queue behind
+  reference-solver ergonomics.
+- **3.3b** — two-stop, unchanged shape, **still gates 3.8**. A patched toolchain
+  on an EOL SDK is still an EOL SDK. The spike did **not** retire 3.3b's risk:
+  its evidence is **compile-only**.
+
+**Honest limits, binding on every row that leans on them:** full gates ran on
+**1.25.12 only**; under 1.26.5 only build/vet + crypto + KAT + T2 ran, so *"1.26
+is green"* is NOT established — only *"1.26 compiles once sonic moves, and the
+crypto path is bit-identical."* The 2025.1 build was compile-only: no tests, no
+vector, no CGO/libwasmvm packaging, no lane/VE/reveal behaviour.
+
+### Decision 3 — the six obligations, discharged with evidence
+
+1. **§3.1.2 re-derivation run from the tree, all seven steps.** Findings F-10…F-13.
+2. **§3.1.1 read as a CORRECTION TARGET.** Every existing bullet re-verified
+   against code. **One correction: the D-089 `recover()` is in `rateWithinBound`
+   (`solution.go:617`), NOT in `checkLimitRate`** — an auditor sent to the named
+   function would find no recover there (**F-11**). One sharpening: D-088's
+   invariant now has **three** implementations (**F-12**).
+3. **§5.1 row SET re-derived** by enumerating from the ledger, not by reading the
+   table. All six open tail tasks have rows (2.16's work confirmed); **ten items
+   had no row at all** and were added.
+4. **Narrowing edits re-checked.** 2.7→2.15 and 2.13→2.14 both carry their items
+   **written into the receiving task**. Rule 6 sub-rule 6 satisfied; the fourth
+   recurrence did not happen.
+5. **The D-095 amendment: ADOPTED**, mechanical form verbatim (below).
+6. **The `6d6b730` calibration: obligation 3's mechanism is PROVEN.**
+
+### Decision 4 — the calibration result, recorded because its value is diagnostic
+
+`6d6b730` appears exactly twice in the corpus, **both inside §3.0's own
+description of the omission**; it is still absent from CLAUDE.md's 2.16 row and
+PHASE2_DESIGN's scoreboard. A row-by-row pass could never have surfaced it. The
+pass that did enumerated from an **independent source** (`git log`) and asked
+whether the documents covered it — and **also surfaced something nobody seeded:
+HEAD `15c2470` is cited nowhere.** That confirms the plan's own prediction that a
+follow-up commit *relocates* the gap. **Obligation 3 needs no sharpening; the
+recurring-by-construction hygiene gap becomes F-13 with a runnable check.**
+
+### Decision 5 — the METHODOLOGY amendment is ADOPTED, plus a companion
+
+Ruled against the stated standard — *a rule that depends on REMEMBERING does not
+fire; a rule with a RUNNABLE STEP does* — and it passes: it is a command, not
+advice. Mechanical form carried verbatim into PHASE3_PLAN §8.1.
+
+Rev 1 adds a **third data point, the strongest of the three**: P3-B's refutation
+came from running `govulncheck` and reading four `go.mod` files, not from anyone
+re-reading the flag. Hence a **companion rule**:
+
+> **A FLAG is a CLAIM, and flags accumulate authority precisely because nobody
+> re-checks them.** At every boundary, ask of each flag: *what artifact would
+> falsify this, and has anyone run it?* **Flags asserting a CONSTRAINT get
+> priority** — they delete options, and their cost is invisible because nobody
+> plans the work a constraint forbade.
+
+**Neither edit is made here.** Amending METHODOLOGY inside a plan Rev would be
+precisely the silent cross-document edit Rule 8 step 3 is about. That is **F-14**.
+
+**The adopted rule immediately caught this Rev's own stale text.** Splitting 3.3
+left **eight §5.1 rows and one §2.1 line** routing to a task that no longer
+existed as one unit — surfaced by running the negation sweep against the Rev's
+own corrections, not by re-reading it. All nine were re-routed.
+
+**That instance WIDENS the rule's trigger class, and the generalisation is worth
+more than the data point.** D-095 stated the amendment for a **semantic
+strengthening**: *"after a task that STRENGTHENS a guarantee, grep for the OLD
+guarantee's negation."* This Rev's case was **not** a strengthening — it was a
+**structural rename/split**, one referent (`3.3`) becoming two (`3.3a`, `3.3b`) —
+and the mechanism fired anyway. Generalised:
+
+> **Any change that RENAMES or SPLITS a referent leaves the old referent behind in
+> every document that pointed at it, and the intuitive search is systematically
+> ANTI-CORRELATED with finding them.** Searching for the NEW name (`3.3a`,
+> `3.3b`) returns exactly the sites already updated — **by construction**, since
+> stale text cannot mention a name that did not exist when it was written. The
+> stale sites are reachable only by searching for **what they still say**: the OLD
+> name, or the OLD guarantee's negation. **Two distinct triggers, one mechanism.**
+
+**Consequence for F-14:** the METHODOLOGY amendment owed under Rule 8 step 3 must
+be written to cover **both** trigger classes — *strengthened a guarantee* **and**
+*renamed or split a referent*. Writing it narrowly to the semantic case D-095
+happened to observe would leave the structural case unowned, which is the same
+failure the amendment exists to fix, one level up.
+
+### Consequences
+
+- `PHASE3_PLAN.md` is **Rev 1** and **the phase authority**; §3.0 is CLOSED.
+- **Cross-document corrections propagated under D-095's load-bearingness rule**
+  (kept + marked + forward pointer, because a session could re-derive a *decision*
+  from them): **PHASE2_DESIGN §4's invariant** — which survives only in its
+  literal form, as a statement about adopting `v0.3.4`/`gnark v0.14+`, never as a
+  constraint on the `go` directive — plus **§FLAG D** and **CLAUDE.md's 2.2 row**,
+  whose "kyber collision" reason was wrong even though 2.2's *decision* stands on
+  block-sdk alone.
+- **D-077's and D-081's dependency tables both skipped the `wasmd v0.60` line**
+  (v0.60.8 → SDK v0.53.6 + ibc-go v10.5.0 at floor `go 1.23.8`). Recorded here
+  rather than by rewriting those ADRs.
+- **D-089's own text calls `checkLimitRate` the panic surface** — same imprecision
+  as F-11, corrected here rather than by editing the historical ADR.
+- New: **G-1** relayer ops · **G-2** gas/DoS pricing (ranked highest; a
+  pairing-bound Reveal in BeginBlock paid for by nobody, on an exchange chain, now
+  with a first cost datum of **5.3 ms/intent**) · **G-3** validator key custody ·
+  **G-4** load testing · **F-9…F-14**.
+- **F-9 is two defects in one test**: `TestRevealCostWithinBound` printed *"the
+  share gate / IBE open regressed"* — **a diagnosis it had not established** — and
+  its `recommendedCap` derives an **O4 consensus parameter** from an unguarded
+  wall-clock measurement that swung **5 vs ~56** on machine load alone. Routed as
+  **G-4 evidence**, not as a test cleanup.
+- **O1 re-scoped** via the CHK/BCHK placement — carried as the auditor's
+  **STARTING POINT phrased as a task**, explicitly NOT an established premise,
+  because an auditor handed a settled framing may let it do all the work. And
+  `AUDIT_SCOPE §7`'s *"confidentiality holds against any coalition of < t"* is
+  **FLAGGED for explicit re-examination** against PKC-2026's non-monotone
+  corruption result — flagged, not withdrawn.
+- **§3.5 widened** from one shadow to a per-shadow verdict over all five.
+- **All 8 `recover()` sites** enumerated in §3.1.1 with per-site auditor notes,
+  against the one the section previously named.

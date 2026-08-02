@@ -315,8 +315,13 @@ the time (D-088).
         MPC ceremony + circuit-soundness audit = mainnet gates (carried to 1.8-style audit).
         `make lint test` + determinism vector green; 2.1a HASHLOCK/OPTIMISTIC suites green.
 - [x] 2.2 wasmd + CVM custom bindings — `9722912`, **DONE (D-077 + D-079).** STOP #1: stay
-      v0.50 (D-077 — block-sdk frozen = decisive; v0.53-wasmd line needs go 1.24 =
-      kyber collision). STOP #2 approved: wasmd v0.54.9 (SDK v0.50.15 / ibc-go
+      v0.50 (D-077 — block-sdk frozen = decisive; ~~v0.53-wasmd line needs go 1.24 =
+      kyber collision~~ — **both halves corrected 2026-08-03 by the task-3.0 spike,
+      D-096: `wasmd v0.60.8` is the SDK-v0.53 line at floor `go 1.23.8` (D-077's
+      table skipped it), and there is no "kyber collision" because a `go` directive
+      is a MINIMUM — `kyber-bls12381 v0.3.1` declares `go 1.18`. The 2.2 DECISION
+      still stands on block-sdk alone; only this supporting reason was wrong**).
+      STOP #2 approved: wasmd v0.54.9 (SDK v0.50.15 / ibc-go
       v8.8.0 exact match; go 1.23.2 — two-pin ceiling intact), READ-ONLY CONCLUDE,
       permissioned gov-only upload (Nobody/Nobody default genesis). CVM bindings =
       `app/cvm`: escrow-msg allowlist {release/prove/dispute} with contract-address
@@ -906,7 +911,35 @@ model); re-verify the §5.1 row **SET**, enumerating from this ledger; and treat
 task's NARROWING edits as the trigger to re-check every item pointed at it
 (D-093's input — the Rule-6 one-way-pointer failure has now recurred four times).
 
-## Phase-3 plan (PROPOSED — docs/PHASE3_PLAN.md, D-080)
+## Phase-3 plan (**THE PHASE AUTHORITY** — docs/PHASE3_PLAN.md Rev 1, D-096)
+
+- [x] **3.0 Phase-3 plan Rev at the Phase-2 boundary — D-096.** The entry gate.
+      **Docs-only** (no pin, no source byte). Ran a **toolchain spike FIRST**, on a
+      throwaway branch destroyed afterwards, and the spike **refuted the
+      load-bearing half of FLAG P3-B at the artifact**: a `go` directive is a
+      MINIMUM, `kyber-bls12381 v0.3.1` declares `go 1.18`, and **`go 1.25.12` with
+      every pin untouched** builds, vets, passes 17/17 packages + 24/24 crypto, and
+      returns the determinism vector **byte-identical to D-082**. The platform was
+      never trapped. The real go-1.26 binder is **`bytedance/sonic v1.14.0`**
+      (a `//go:linkname` into runtime internals removed by Go 1.26's map rework,
+      reached via `cosmossdk.io/log`) — **not kyber and not block-sdk**; the
+      recorded block-sdk hypothesis is REFUTED, and go 1.26 is reachable for **four
+      indirect `go.mod` lines**. The 2025.1 stack resolves MVS-clean with **nothing
+      transitive above `go 1.23.8`** and **one** source-level compile error
+      (`app/cvm/encoder.go:58`) — **compile-only evidence, carried at that
+      strength**. Consequence: **3.3 SPLITS** into **3.3a** (toolchain + the 16
+      reachable advisories + CometBFT v0.38.25 + golangci-lint, pulled AHEAD of the
+      Phase-2 tail except 2.14) and **3.3b** (SDK-family migration, two-stop, still
+      gates 3.8). All **six** written-in obligations discharged with evidence;
+      **obligation 3's mechanism PROVEN** by the `6d6b730` calibration (which also
+      caught an item nobody seeded — HEAD `15c2470` is cited nowhere). New findings
+      **F-9…F-14** and gap rows **G-1…G-4**. The D-095 methodology amendment is
+      **ADOPTED** with its mechanical form verbatim, plus a companion rule
+      (**a FLAG is a CLAIM**) — both owed to METHODOLOGY as **F-14**.
+      `make lint test` + vector green at `15c2470` before the Rev; source-only
+      fingerprint proves docs-only.
+
+### The plan as originally proposed (D-080)
 
 Authored 2026-07-10 mid-Phase-2 at `b2f633b` (research + planning session,
 docs-only). **This session carries no Phase-2 task number** — it is a

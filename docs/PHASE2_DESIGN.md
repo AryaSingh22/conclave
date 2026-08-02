@@ -182,13 +182,18 @@ dependency risk. Two are now resolved with recorded outcomes; two remain live
   and `docs/edge/7683_SURFACE.md` + `app/erc7683_surface_conformance_test.go`
   (D-086). The separate-repo posture itself is unchanged and permanent.
 - **FLAG D — dependency currency is a per-task check: still live, narrowed.**
-  The generic "re-check at task time" now has a hard boundary: any dependency
-  choice must clear the **two-pin go-1.23.x ceiling** (§4). D-077's spike table
+  The generic "re-check at task time" now has a hard boundary: ~~any dependency
+  choice must clear the **two-pin go-1.23.x ceiling** (§4)~~ — **corrected 2026-08-03
+  (D-096): the boundary is that no dependency may FORCE either pin upward; it was
+  never a ceiling on the `go` directive (§4).** D-077's spike table
   was the Rev-2 snapshot; **D-081's (2026-07-10) is the current one**, and it
   added a 3.3 input: ibc-go v10.7.0 itself floors at go 1.23.8 — inside the
   ceiling — so on the v0.53 path the toolchain collision now comes from **wasmd**
-  (v0.61.14+ → go 1.24), not from ibc-go. **No Phase-2 task changed a dependency
-  after 2.2**; the next currency check belongs to 3.3.
+  (v0.61.14+ → go 1.24), not from ibc-go. **Superseded in part by the task-3.0
+  spike (D-096):** `wasmd v0.60.8` targets SDK v0.53.6 + ibc-go v10.5.0 at floor
+  **go 1.23.8** — a line D-077's and D-081's tables both skipped, so there is no
+  wasmd collision on the v0.53 path either. **No Phase-2 task changed a dependency
+  after 2.2**; the next currency check belongs to **3.3a/3.3b**.
 
 ---
 
@@ -841,9 +846,34 @@ their implementation.
 ## Section 4 — The toolchain ceiling (a named invariant, two pins)
 
 Rev 1's FLAG D said "re-check versions at task time." The build made the
-boundary concrete. **Invariant: the module stays on go 1.23.x until BOTH pins
-below are deliberately re-validated in one recorded decision.** Any dependency
-whose floor crosses go 1.24 is a STOP, not a bump.
+boundary concrete.
+
+> ~~**Invariant: the module stays on go 1.23.x until BOTH pins below are
+> deliberately re-validated in one recorded decision.**~~
+>
+> **CORRECTED 2026-08-03 by the task-3.0 toolchain spike (D-096; see
+> `PHASE3_PLAN.md` §2.3 and FLAG P3-B).** This sentence is kept and marked
+> because a session could re-derive a *decision* from it — and would derive the
+> wrong one. **A `go` directive is a MINIMUM, never a maximum.** Neither pin
+> constrains it: `kyber-bls12381 v0.3.1` declares `go 1.18` and
+> `kilic/bls12-381 v0.1.0` declares `go 1.13`. Empirically, bumping the module to
+> `go 1.25.0` / `toolchain go1.25.12` **with both pins untouched** builds, vets,
+> passes 17/17 packages and 24/24 crypto tests, and returns the determinism
+> vector byte-identical to the D-082 baseline.
+
+**The invariant SURVIVES in its literal form, which is narrower than the sentence
+above implied.** It is a statement about **adopting the newer pins**, not about
+the toolchain:
+
+> **Invariant (restated): neither `kyber-bls12381` nor `gnark` moves off the
+> version below except by one recorded decision that re-validates BOTH together
+> and re-baselines the determinism vector + full crypto suite.** Any dependency
+> that *forces* one of these pins upward is a STOP, not a bump.
+
+The distinction that was lost: **v0.3.4 requiring go 1.24 means adopting v0.3.4
+drags the toolchain — it never meant the toolchain drags v0.3.4.** D-066's pin
+correctly avoided a **FORCED** bump; it never prevented a **VOLUNTARY** one.
+Task **3.3a** now performs exactly that voluntary bump, touching neither pin.
 
 | Pin | Version | Breaks at | Guarded by |
 |---|---|---|---|
