@@ -5391,7 +5391,7 @@ from a rule being FOLLOWED rather than failing: D-093 obeyed Rule 9 and still ha
 to end in a sentence asking the reader to trust it, which is the signal a rule
 has one more step in it.
 
-## D-095 — Task 2.16 Phase-2 boundary record reconciliation: 19 post-2.7 stale statements corrected under a recorded load-bearingness rule; the §6 exit criterion re-verified LIVE at HEAD (inference → evidence); PHASE2_DESIGN Rev 4; **PHASE 2 DECLARED EXITED** with a six-task tail under one uniform rule
+## D-095 — Task 2.16 Phase-2 boundary record reconciliation: 20 post-2.7 stale statements corrected under a recorded load-bearingness rule; the §6 exit criterion re-verified LIVE at HEAD (inference → evidence); PHASE2_DESIGN Rev 4; **PHASE 2 DECLARED EXITED** with a six-task tail under one uniform rule
 
 - **Date:** 2026-08-02 (boundary reconciliation at `7283b11`. Numbered as a
   ledger task, unlike D-090's unnumbered reconciliation — see "Numbering"
@@ -5424,7 +5424,7 @@ than a restatement.
 Task 2.7 (`7283b11`, D-094) inverted a security semantic — a signed delivery
 condition became a REQUIREMENT rather than a permission ceiling — and correctly
 propagated the correction into CLAUDE.md, both edge contracts, and
-PHASE2_DESIGN's §0 row and §2.7 section. **It stopped there.** Nineteen
+PHASE2_DESIGN's §0 row and §2.7 section. **It stopped there.** Twenty
 present-tense statements across five files still asserted the pre-2.7 world:
 
 | File | What it still asserted |
@@ -5684,3 +5684,51 @@ all run from the TREE at every boundary. **Candidate METHODOLOGY amendment, for
 repeated it") needs the sub-rule Rule 6 already learned — enumerate the
 consumers FIRST, because a correction propagated from memory reaches exactly the
 documents you remember.**
+
+**Its MECHANICAL FORM, added at the review stop, because the mechanism is what
+makes an amendment fire and a principle without one is advice:**
+
+> After a task that STRENGTHENS a guarantee, grep for assertions of the OLD
+> guarantee's **NEGATION** — `"not enforced"`, `"never attaches"`, `"has no X
+> field"`, `"only through"`, `"is a … ceiling"` — **NOT for the new mechanism's
+> name.** Stale text by definition does not mention the new thing, so searching
+> for `condition_binding.go` or `attachFallbackCondition` returns precisely the
+> documents already corrected. The negation is what the stale text actually says.
+
+**THE MECHANISM WAS TESTED RATHER THAN ASSERTED, AND IT FOUND ONE THE MANUAL
+PASS MISSED.** A proposed rule that is never run is a hypothesis, so the negation
+grep was executed against `7283b11` (the pre-2.16 tree) with `git grep`:
+
+| Run | Result |
+|---|---|
+| **(A) NEGATION grep at `7283b11`** — the proposed mechanism | hits **all five** stale files *plus* `PHASE3_PLAN.md` — every stale statement, **including §3.1.1**, the highest-value one |
+| **(B) NEW-MECHANISM-NAME grep at `7283b11`** — the intuitive search | returns `CLAUDE.md` + the two edge docs: **exactly the three documents 2.7 had already corrected, and zero stale ones** |
+
+(B) is the asymmetry proven rather than argued. Searching for
+`condition_binding.go` / `attachFallbackCondition` returns precisely the
+already-fixed set, because **stale text by definition does not mention the new
+thing.** The intuitive search is not merely weaker — it is *anti-correlated* with
+what you are looking for.
+
+**And the sweep then caught a TWENTIETH statement the manual enumeration had
+missed** — this ADR's own title was corrected from nineteen to twenty (Rule 8).
+`EXIT_DEMO.md`'s §6b carry-over line read: *"the **INTERNAL** classification, the
+epoch-0 plaintext Veil, and 'conditioned escrows are reachable live only through
+demo tooling' (task 2.13) all carry over from §6a unchanged."* The §6a boundary
+list had been corrected; this §6b line **re-asserted the same claim 190 lines
+later**, and a careful reading of the document walked straight past it. Fixed
+in-task.
+
+That is the whole argument for the amendment, demonstrated on itself: a careful
+manual pass by the person holding all the context missed one, and a one-line
+command did not. It is also a second instance of the session's governing
+finding — **the manual pass reached the documents I remembered.**
+
+**And the STANDARD to rule it by, which generalises past this amendment: a rule
+that depends on REMEMBERING does not fire; a rule with a RUNNABLE STEP does.**
+Two independent data points from this one session say the same thing — Rule 6
+sub-rule 3's explicitly-named worst case recurred **one task after the rule was
+written**, and what fixed it was a SCHEDULED SWEEP rather than a resolution to be
+careful. Advice has a measured failure rate in this repo; commands do not. Both
+the amendment and the standard are written into **3.0's criteria as obligation
+5**, not pointed at it.

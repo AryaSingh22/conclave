@@ -315,13 +315,55 @@ obligations 3.0 owns that its original acceptance line did not name:
    pointed at it** (D-093's input, restated because it has now recurred a fourth
    time): a narrowing edit to a receiving task silently orphans what was pointed
    at it, and nothing re-checks the pointer.
+5. **RULE ON THE CANDIDATE METHODOLOGY AMENDMENT (D-095), and rule on it against
+   a stated standard.** The amendment: Rule 8 step 3 ("propagate the correction
+   to any document that repeated it") needs the sub-rule Rule 6 already
+   learned — **enumerate the consumers FIRST**, because a correction propagated
+   from memory reaches exactly the documents you remember. Task 2.7 corrected
+   four documents and left five wrong, including the auditor-facing scope; that
+   is not a diligence failure, it is the absence of an enumeration step.
+
+   **Its MECHANICAL FORM, which is the part that makes it fire — carry this
+   verbatim into any amendment text:**
+
+   > After a task that STRENGTHENS a guarantee, grep for assertions of the OLD
+   > guarantee's **NEGATION** — `"not enforced"`, `"never attaches"`, `"has no X
+   > field"`, `"only through"`, `"is a … ceiling"` — **NOT for the new
+   > mechanism's name.** Stale text by definition does not mention the new thing,
+   > so searching for `condition_binding.go` or `attachFallbackCondition` finds
+   > exactly the documents already corrected. The negation is what the stale text
+   > actually says.
+
+   **The standard to rule by, which generalises past this amendment: a rule that
+   depends on REMEMBERING does not fire; a rule with a RUNNABLE STEP does.** Two
+   independent data points from one session say the same thing — Rule 6 sub-rule
+   3's explicitly-named worst case recurred **one task after the rule was
+   written**, and what fixed it was a SCHEDULED SWEEP rather than a resolution to
+   be careful. Apply that test to this amendment and to any other 3.0 considers:
+   if it cannot be reduced to a command someone runs at a boundary, it is advice,
+   and advice has a measured failure rate in this repo.
+6. **A FREE CALIBRATION of obligation 3 — use it, do not just fix it.** Task
+   2.16's own commit `6d6b730` is cited in neither CLAUDE.md nor
+   PHASE2_DESIGN's scoreboard, because a commit cannot contain its own hash. It
+   is a **known, documented, cost-free omission**, deliberately left for 3.0
+   (the alternatives regress: a follow-up commit whose only content references
+   the commit before it is itself uncitable, and amending would have relocated
+   the gap while destroying the fingerprint chain). Its value is diagnostic:
+   a row-by-row pass CANNOT surface it and a row-SET re-derivation SHOULD.
+   **If 3.0's set-re-derivation catches it, obligation 3 is proven to work; if it
+   misses it, obligation 3 needs sharpening — and you learn that on an item whose
+   absence costs nothing** rather than on the next one that matters. Record which
+   happened.
 
 **Depends on.** Phase-2 exit — **satisfied** (2.16, D-095).
 **Acceptance.** Rev committed; every §5 disposition row re-verified **and the
 row SET re-derived** (obligation 3); the authored-surface inventory re-derived
 from the tree and every addition directly read (obligation 1); §3.1.1's
-existing bullets re-verified against code (obligation 2); any Phase-2 leftovers
-explicitly re-owned (nothing floats).
+existing bullets re-verified against code (obligation 2); the D-095 amendment
+**ruled on against the runnable-step standard**, with its mechanical form
+carried verbatim if adopted (obligation 5); the `6d6b730` calibration result
+**recorded either way** (obligation 6); any Phase-2 leftovers explicitly
+re-owned (nothing floats).
 **Plan-stop decisions.** Whether 3.3 must be pulled even earlier (ahead of any
 tail work) given platform-EOL drift since this writing; whether §3.1.2's block
 becomes a committed `scripts/` artifact (2.16 deliberately left that to 3.0);

@@ -332,9 +332,13 @@ This is the part to read before quoting the exit criterion anywhere.
   true means deploying the verification bridge (a contract on B running ICS-23
   against its client), which is resolver-repo scope by contract. It is named
   here as a boundary rather than blurred.
-- The **INTERNAL** classification, the epoch-0 plaintext Veil, and
-  "conditioned escrows are reachable live only through demo tooling" (task 2.13)
-  all carry over from §6a unchanged.
+- The **INTERNAL** classification and the epoch-0 plaintext Veil carry over from
+  §6a unchanged. ~~"Conditioned escrows are reachable live only through demo
+  tooling" (task 2.13)~~ does **not** — superseded by task 2.7 (D-094): the
+  in-consensus fallback attaches signed conditions
+  (`attachFallbackCondition`), so consensus itself is a live writer. What
+  carries over is the narrower **task 2.14**: `solver/` still never reads
+  `IntentPayload.condition`.
 
 ## A constraint a real bridge operator inherits
 

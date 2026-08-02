@@ -10,7 +10,7 @@ Rev 2 (2026-07-02, D-078) reconciled it to as-built state after 2.1a/2.1b with
 signed delivery condition became a REQUIREMENT rather than a permission
 ceiling — and propagated the correction into CLAUDE.md, both edge contracts,
 and this document's §0 row and §2.7 section. It stopped there. A boundary audit
-found **nineteen present-tense statements across five files still asserting the
+found **twenty present-tense statements across five files still asserting the
 pre-2.7 world**, including this document's §5 row 9, §6 and FLAG 7, and
 `PHASE3_PLAN.md`'s auditor-facing §3.1.1. Every one of them under-claims — they
 describe a protection as absent that is present — which is harmless to a user
@@ -76,7 +76,7 @@ load-bearing and recorded (§4).
 | 2.15 | §6.4 rule-3 per-leg attribution — TODO 9's `SettleLeg` intent tag + the `ErrLimitRateUnsupported` 1428 counter-asset designator | **open** (NEW in 2.7) — both re-deferred from 2.7 with explicit verdicts; D-074 recorded as orthogonal, not colliding | D-089, **D-094** |
 | §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13; CLOSED by 2.7 — the fallback is now a live writer) | `65376ab`, D-091 · artifact: `docs/EXIT_DEMO.md` |
 | §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED.** Re-run green at HEAD by 2.16 | `1aecfbf`, D-092 · artifact: `docs/EXIT_DEMO.md` |
-| 2.16 | Phase-2 boundary record reconciliation (this Rev) | **DONE** — 19 post-2.7 stale statements corrected under a recorded load-bearingness rule; stale marker retargeted to 2.15; deleted-test citation removed from 3 sites; 5 missing §5.1 rows written; hash traceability restored; §3.1.1 corrected as PROSE + §3.1.2 grep re-keyed to `errorsmod.Register` + citation sweep added; **§6b re-run green at HEAD**; **Phase 2 declared EXITED** | D-095 |
+| 2.16 | Phase-2 boundary record reconciliation (this Rev) | **DONE** — 20 post-2.7 stale statements corrected under a recorded load-bearingness rule; stale marker retargeted to 2.15; deleted-test citation removed from 3 sites; 5 missing §5.1 rows written; hash traceability restored; §3.1.1 corrected as PROSE + §3.1.2 grep re-keyed to `errorsmod.Register` + citation sweep added; **§6b re-run green at HEAD**; **Phase 2 declared EXITED** | D-095 |
 
 > ## PHASE 2 IS **EXITED** (declared at task 2.16, D-095)
 >
@@ -1107,7 +1107,7 @@ state-reconciliation audit:** all five SPEC §10 tasks plus 2.6 and 2.11 are
 DONE, five tasks (2.8–2.12) gained rows, FLAG C discharged, the ownership
 collisions resolved, and the exit demo unblocked with its 2.9 condition
 recorded (Rev 3 shipped as `ae597fc`). **Rev 4 (D-095, task 2.16) reconciled at
-`7283b11` at the phase boundary:** the nineteen post-2.7 stale statements corrected, the exit criterion
+`7283b11` at the phase boundary:** the twenty post-2.7 stale statements corrected, the exit criterion
 re-verified live at HEAD, the marker census and citation sweep re-run from the
 tree, hash traceability restored, and **Phase 2 declared EXITED** with the
 six-task tail under one uniform rule.*

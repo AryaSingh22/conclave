@@ -240,7 +240,7 @@ green and the task is reviewed + committed.
 One task per session, in order. Mark complete only after `make lint test` is
 green and the task is reviewed + committed. **`docs/PHASE2_DESIGN.md` is the
 approved phase authority** (D-072; **Rev 4** — the Phase-2 boundary record
-reconciliation, task 2.16 / D-095: 19 post-2.7 stale statements corrected, the
+reconciliation, task 2.16 / D-095: 20 post-2.7 stale statements corrected, the
 exit criterion re-verified live at HEAD, marker + citation sweeps re-run from the
 tree, hash traceability restored, and **Phase 2 declared EXITED** with the
 six-task tail under one uniform rule. Rev 3 was D-090's reconciliation audit) —
@@ -839,7 +839,7 @@ the time (D-088).
       work-gone-missing would be an unforced irony, and it carries a live gate.
       **The finding:** 2.7 inverted a security semantic and propagated the
       correction into CLAUDE.md, both edge docs and PHASE2_DESIGN's §0/§2.7 — but
-      **19 present-tense statements across 5 files still asserted the pre-2.7
+      **20 present-tense statements across 5 files still asserted the pre-2.7
       world**, every one of them UNDER-claiming (describing a protection as absent
       that is present). Harmless to a user; **actively harmful to an auditor**,
       since PHASE3_PLAN §3.1.1 told a reviewer `IntentLeg` has no condition field
