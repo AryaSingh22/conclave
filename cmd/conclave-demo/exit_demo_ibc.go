@@ -146,9 +146,14 @@ func (c *cli) exitDemoIBC(b *cli) error {
 	fmt.Println("     ceiling (task 2.7, D-094): signed ⇒ attached is enforced at both")
 	fmt.Println("     chokepoints and the in-consensus fallback ATTACHES, so the")
 	fmt.Println("     network has a live writer. D-093's GAP verdict is CLOSED.")
-	fmt.Println("   · Still open: the reference solver in solver/ never reads")
-	fmt.Println("     IntentPayload.condition, so it would propose a slashable")
-	fmt.Println("     solution against a condition-signing intent — task 2.14.")
+	fmt.Println("   · The reference solver ATTACHES a signed condition (task 2.14,")
+	fmt.Println("     D-097): solver/condition resolves the chain's own")
+	fmt.Println("     EffectiveSellerCondition, honours the per-class buyer relation,")
+	fmt.Println("     and drops any candidate the chain would reject instead of")
+	fmt.Println("     proposing it. Contract: docs/edge/SOLVER_SURFACE.md.")
+	fmt.Println("   · Still open (task 2.17, found by 2.14): the SPEC §6.4 invalid-")
+	fmt.Println("     solution and equivocation bond slashes are reverted with the")
+	fmt.Println("     failing tx, so a rejected proposal costs a solver gas only.")
 	fmt.Println("=================================================================")
 	return nil
 }

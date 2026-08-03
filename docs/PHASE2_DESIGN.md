@@ -72,7 +72,9 @@ load-bearing and recorded (§4).
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
 | 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | `0d7f167`, D-093 |
-| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **open** (NEW in 2.13) — 2.7 has now fixed WHAT it demonstrates, and handed it a live consequence to close: the in-tree reference solver will propose a slashable solution against a condition-signing intent until it learns to attach or skip | D-093, **D-094** |
+| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **DONE** — `solver.Solve` attaches the signed condition, resolved by the chain's OWN `EffectiveSellerCondition` (called, not mirrored), and drops any candidate the chain would reject instead of proposing it; contract = `docs/edge/SOLVER_SURFACE.md`. Produced **new task 2.17** (SPEC §6.4's bond slashes are reverted with the failing tx — a rejected proposal costs gas only) and **new task 2.18** (F-14's METHODOLOGY amendments are owned by a session reference, hence by nobody) | D-093, D-094, **D-097** |
+| 2.17 | Solver bond slashes do not persist on the tx path | **open** (NEW in 2.14) — verified on both `1412` and `1410`; green until now because every in-tree assertion calls the keeper on a raw, un-cache-wrapped context | **D-097** |
+| 2.18 | METHODOLOGY amendment backlog (F-14's two + 2.14's harness-silence rule) | **open** (NEW in 2.14) — F-14 was assigned to "the session that commits D-096" and went unowned when that session ended | **D-097** |
 | 2.15 | §6.4 rule-3 per-leg attribution — TODO 9's `SettleLeg` intent tag + the `ErrLimitRateUnsupported` 1428 counter-asset designator | **open** (NEW in 2.7) — both re-deferred from 2.7 with explicit verdicts; D-074 recorded as orthogonal, not colliding | D-089, **D-094** |
 | §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13; CLOSED by 2.7 — the fallback is now a live writer) | `65376ab`, D-091 · artifact: `docs/EXIT_DEMO.md` |
 | §6b | Exit demo part B — live-relayer IBC USDC + second-chain receipt verification | **DONE — THE §6 EXIT CRITERION IS ASSERTED.** Real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; the buy settles in the `ibc/<hash>` voucher end to end; the receipt ICS-23-verified against chain B's on-chain light-client root of chain A, with the honest B→A / A→B boundary stated. **D-082 DISCHARGED.** Re-run green at HEAD by 2.16 | `1aecfbf`, D-092 · artifact: `docs/EXIT_DEMO.md` |
@@ -92,8 +94,11 @@ load-bearing and recorded (§4).
 > the GATE. Applied to every open task, the test CONFIRMS each "off the exit
 > path" row rather than inheriting it.
 >
-> **The Phase-2 tail — a uniform rule, not six exceptions.** Six tasks remain
-> open and none is exit-blocking: **2.8, 2.9, 2.10, 2.12, 2.14, 2.15**. They
+> **The Phase-2 tail — a uniform rule, not six exceptions.** ~~Six tasks remain
+> open and none is exit-blocking: **2.8, 2.9, 2.10, 2.12, 2.14, 2.15**.~~
+> **UPDATED at task 2.14 (D-097): 2.14 is CLOSED and produced two new rows, so
+> the tail is now 2.8, 2.9, 2.10, 2.12, 2.15, 2.17, 2.18** — still none
+> exit-blocking. They
 > keep their `2.x` numbers, which are IDENTIFIERS, not a schedule —
 > renumbering would break roughly fifteen cross-references in `DECISIONS.md`
 > and the in-tree markers. Each has a `PHASE3_PLAN.md` §5.1 row written at
@@ -108,13 +113,25 @@ load-bearing and recorded (§4).
 > pointed at it.
 >
 > **Two live consequences the tail carries, recorded here so they are not
-> discovered later.** (a) **2.14** — `solver/` never reads
+> discovered later.** ~~(a) **2.14** — `solver/` never reads
 > `IntentPayload.condition`, so the in-tree reference solver would propose a
 > **slashable (5%)** solution the first time it meets a condition-signing
-> intent. This is the only remaining item with a live functional defect.
+> intent. This is the only remaining item with a live functional defect.~~
+> **(a) is CLOSED by task 2.14 (D-097)** — `solver.Solve` attaches, and the
+> chain's own predicate drops anything it would reject; see §2.14 and
+> `docs/edge/SOLVER_SURFACE.md`.
 > (b) **2.9** — the run is **INTERNAL**; 2.9 remains a hard prerequisite
 > before any external-facing use of this evidence, and 2.7 made conditioned
 > settlements strictly more common, widening it.
+>
+> **(c) NEW, found while closing (a) — task 2.17 (D-097).** The "slashable
+> (5%)" phrasing struck through above was itself wrong about the mechanism:
+> SPEC §6.4's invalid-solution (5%) and equivocation (20%) slashes are
+> **reverted with the failing tx**, because `slashSolver` runs and then an
+> error is returned, so baseapp discards the message's cache context. A
+> rejected proposal costs a solver **gas only**. Verified on both paths. This
+> is the economic assumption the untrusted-solver model rests on, so it ranks
+> above the rest of the tail on severity while remaining non-exit-blocking.
 
 **Exit-demo leg readiness (§6): all four legs are now DONE.** ZK_DELIVERY
 escrow leg (end-to-end conditioned ZK CONCLUDE proven: both parties signing
@@ -986,11 +1003,30 @@ seller and ZK buyer EXACT, HASHLOCK buyer `timeout ≤ signed` (a MAXIMUM),
 OPTIMISTIC buyer `window ≥ signed` (a MINIMUM). Executable form:
 `TestSignedConditionIsRequirement_Enforced`.
 
-**One half of 2.13's verdict is still open, and it is task 2.14:** non-test
-`solver/` still never reads `IntentPayload.condition`, so the in-tree reference
-solver would propose a **slashable (5%)** solution the first time it meets a
-condition-signing intent. "The chain now requires it" is not "the reference
-client now does it."
+**That half of 2.13's verdict is now CLOSED TOO, by task 2.14 (D-097):** the
+reference solver reads `IntentPayload.condition` (and the FW-2 per-leg
+refinement, through the chain's own `EffectiveSellerCondition`), attaches it to
+the DataGrant leg, and self-checks every candidate against
+`keeper.CheckConditionBinding` and `keeper.CheckConditionedMatchShape` — so it
+drops what the chain would reject rather than proposing it. The solver-facing
+contract is `docs/edge/SOLVER_SURFACE.md`. **"The chain now requires it" is not
+"the reference client does it", and both are now true.**
+
+> **SUPERSEDED — kept for the record (closed by D-097; forward pointer: the
+> paragraph above, `solver/condition/condition.go`, and
+> `docs/edge/SOLVER_SURFACE.md`):**
+>
+> *"One half of 2.13's verdict is still open, and it is task 2.14: non-test
+> `solver/` still never reads `IntentPayload.condition`, so the in-tree reference
+> solver would propose a **slashable (5%)** solution the first time it meets a
+> condition-signing intent. "The chain now requires it" is not "the reference
+> client now does it."*
+>
+> **Note the residual error inside the struck text**, corrected by D-097 and
+> flagged here because it is load-bearing: the penalty is written as a
+> "slashable (5%)" solution, but the 5% never actually lands — the slash is
+> reverted with the failing tx (**task 2.17**). The pre-2.14 defect was real; its
+> stated price was not.
 
 > **SUPERSEDED — kept for the record (D-093, closed by D-094; the forward
 > pointer is the two paragraphs directly above, `condition_binding.go`, and
@@ -1078,9 +1114,12 @@ an x402 HTTP conversation.
    CVM (D-079) and 2.6 proved partial fills cannot arise on a conditioned leg,
    so D-074's bilateral shape is reached exactly as before — and D-074 was
    **KEPT**, the feared FW-2 collision dissolving as orthogonal. New error
-   `ErrConditionNotHonored` (session `1429`). **Still open: the reference
+   `ErrConditionNotHonored` (session `1429`). ~~**Still open: the reference
    attachment path (2.14)** — the chain requires attachment; `solver/` does not
-   yet do it.
+   yet do it.~~ **CLOSED by task 2.14 (D-097): the reference solver attaches,
+   calling the chain's own resolver and consent predicate rather than mirroring
+   them, and drops any candidate the chain would reject
+   (`docs/edge/SOLVER_SURFACE.md`).**
    > **SUPERSEDED — kept for the record (D-093, closed by D-094; forward
    > pointer: the paragraph above and `condition_binding.go`):** *"…load-bearing
    > and proven reached from every direction in the ATTACH direction only. The

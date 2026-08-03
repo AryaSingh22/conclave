@@ -157,9 +157,11 @@ rejected specifically because *"buyer … did not sign this ZK condition"*
    **NO LONGER TRUE; superseded by task 2.7 (D-094).** The in-consensus fallback
    now ATTACHES a signed condition (`attachFallbackCondition`,
    `x/session/keeper/fallback.go`), so consensus itself is a live writer of
-   `SettleLeg.Condition`. What survives is narrower and is task **2.14**: the
-   reference solver in `solver/` still never reads `IntentPayload.condition` —
-   see below.
+   `SettleLeg.Condition`. ~~What survives is narrower and is task **2.14**: the
+   reference solver in `solver/` still never reads `IntentPayload.condition`~~ —
+   **and task 2.14 (D-097) has closed that half too:** the reference solver reads
+   the signed condition, attaches it, and self-checks every candidate against the
+   chain's own predicate. See below.
 4. **The bridge checks run in the driver**, which is correct by contract
    (7683_SURFACE §6.3 makes the settler resolver-repo scope), but §6a's root is
    the node's own header. **§6b replaced the ROOT** with one held by a second
@@ -182,11 +184,23 @@ writer of `SettleLeg.Condition` (§6a's finding) and remains a valid one — it 
 simply no longer the only one. Stage 7 still proves the thing worth proving
 about it: that writer cannot **impose** a condition.
 
-**What survives, and it is task 2.14:** non-test `solver/` never reads
-`IntentPayload.condition` — re-verified by grep at this boundary, zero hits — so
-the in-tree **reference solver would propose a slashable (5%) solution** the
-first time it meets a condition-signing intent. "The chain now requires it" is
-not "the reference client now does it."
+**Nothing survives — task 2.14 (D-097) closed the last of it.** The reference
+solver reads `IntentPayload.condition` (and the FW-2 per-leg refinement),
+attaches it, and drops any candidate the chain's own consent and shape
+predicates would reject. Contract: `docs/edge/SOLVER_SURFACE.md`.
+
+> **SUPERSEDED — kept for the record (closed by D-097; forward pointer:
+> `solver/condition/condition.go` and `docs/edge/SOLVER_SURFACE.md`):**
+> *"What survives, and it is task 2.14: non-test `solver/` never reads
+> `IntentPayload.condition` — re-verified by grep at this boundary, zero hits —
+> so the in-tree **reference solver would propose a slashable (5%) solution** the
+> first time it meets a condition-signing intent. "The chain now requires it" is
+> not "the reference client now does it.""*
+>
+> **One clause of that was wrong on its own terms, not merely stale:** there is
+> no "slashable (5%)" price. D-097 found that the SPEC §6.4 slash is reverted
+> with the failing tx, so a rejected proposal costs gas only — **task 2.17**. The
+> defect was real; the penalty attached to it was not.
 
 > **SUPERSEDED — kept for the record (§6a/D-091 and 2.13/D-093, both closed by
 > D-094; forward pointer: the three paragraphs above, `condition_binding.go`,
@@ -336,9 +350,12 @@ This is the part to read before quoting the exit criterion anywhere.
   §6a unchanged. ~~"Conditioned escrows are reachable live only through demo
   tooling" (task 2.13)~~ does **not** — superseded by task 2.7 (D-094): the
   in-consensus fallback attaches signed conditions
-  (`attachFallbackCondition`), so consensus itself is a live writer. What
+  (`attachFallbackCondition`), so consensus itself is a live writer. ~~What
   carries over is the narrower **task 2.14**: `solver/` still never reads
-  `IntentPayload.condition`.
+  `IntentPayload.condition`.~~ **Nor does that carry over any longer — task 2.14
+  (D-097) closed it; the reference solver attaches.** What DOES carry forward is
+  new: **task 2.17** — a rejected solver proposal costs gas only, because the
+  SPEC §6.4 bond slash is reverted with the failing tx.
 
 ## A constraint a real bridge operator inherits
 

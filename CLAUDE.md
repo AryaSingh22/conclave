@@ -707,7 +707,52 @@ the time (D-088).
       Covering gates named separately: the two ABCIInfo tests, the boundary pin, and
       `scripts/exit_demo.sh` stage 7 on a live node.
 
-- [ ] 2.14 Reference solver-side condition attachment (NEW in 2.13, D-093) — the
+- [x] **2.14 Reference solver-side condition attachment — CLOSED — D-097.** The
+      Phase-2 tail's only LIVE FUNCTIONAL DEFECT is closed: `solver.Solve` now
+      attaches a signed delivery condition and can no longer propose a
+      downgrade. **STOP decisions:** (1) it lives in **`solver/`** — option (iii)
+      was *established* impossible (the sim imports root `solver`, which imports
+      `cycles`/`gate`/`naive`, so any boundary `Solve` can cross is already in
+      the graph) and cmd/-side was rejected because the defect IS `Solve`;
+      D-091's D4 excluded the demo's LIVE-NETWORK WRITER, not attachment logic.
+      (2) The consent predicate is **CALLED, not mirrored** — `solver/gate`'s
+      charter is verbatim "the rules that would otherwise cost it a 5% slash", so
+      it is a call site; D-085's one-implementation-two-callers at a new
+      boundary. Shipped: keeper exports `CheckConditionBinding` /
+      `EffectiveSellerCondition` / `CheckConditionedMatchShape` (pure
+      extraction, chain delegates to them); new `solver/condition` (Attach,
+      CycleEligible); `gate.AcceptConsent` + `gate.AcceptConditionShape`.
+      **Mid-build finding, surfaced at the moment (Rule 8):** the approved plan's
+      self-check missed **D-074's shape rule (1426)**, leaving `CycleEligible` as
+      the sole thing preventing a slashable conditioned-cycle proposal — which
+      contradicts the endorsed principle that the guarantee must not depend on
+      the attacher; closed structurally, at the cost of one keeper export beyond
+      "solver/ only". **`CycleEligible` is recorded as an EFFICIENCY guard, NOT
+      the guarantee** (D-089 applied to this session's own code: removing it
+      changes nothing observable). **Three of six sabotage predictions were
+      WRONG and are kept visible** — most importantly S3, where the harness
+      reported a **non-compiling** sabotage as "(no failures)" and would have
+      recorded the resolver call as not load-bearing, the exact opposite of the
+      truth about the decision STOP #2 turned on. **NEW FINDING F-1 → task
+      2.17:** the SPEC §6.4 bond slashes (5% invalid, 20% equivocation) are
+      REVERTED with the failing tx, so a rejected proposal costs gas only —
+      verified on both paths, green everywhere because every in-tree assertion
+      calls the keeper on a raw context (Rule 4 step 5). **NEW task 2.18:** F-14
+      is NOT discharged. Deliverable `docs/edge/SOLVER_SURFACE.md`, whose
+      load-bearing limit is §6.1 — **no in-tree LIVE path reaches HASHLOCK or
+      OPTIMISTIC** (the exit demo is ZK-only). `make lint test` green; vector run
+      in ISOLATION **twice** (keeper extraction alone, then solver) —
+      **byte-identical to the D-082 baseline both times**, fingerprints identical
+      before/after, no re-baseline. Covering gate named separately: **the vector
+      covers NOTHING here** (Category-1 shadow proven at the generator), so
+      `solver/condition_attachment_test.go` + `app/solver_conformance_test.go`
+      ARE the gate. A DEVIATION is recorded: Cause B's gate was started before the
+      negation-grep and had to be re-run after it found a stale statement in
+      *source* (the exit demo's live banner).
+- [x] ~~2.14 Reference solver-side condition attachment~~ **← CLOSED; the block
+      below is the PRE-2.14 problem statement, retained for the record. The
+      checkbox reads [x] so a mechanical "count the open rows" scan cannot
+      miscount it.** (NEW in 2.13, D-093) — the
       REFERENCE half of 2.13(a)'s GAP verdict. Nothing in the tree shows a
       third-party solver how to attach a delivery condition correctly: non-test
       `solver/` never reads `IntentPayload.Condition`, and the only live-network
@@ -748,7 +793,64 @@ the time (D-088).
       fragment of 2.14's own contract shipped early and half-formed. Acceptance
       additionally requires this to be closed: the reference solver must either
       attach correctly or skip condition-signing intents, never propose a
-      downgrade.
+      downgrade. **← ALL OF THE ABOVE IS THE PRE-2.14 STATEMENT OF THE PROBLEM,
+      kept for the record; it is CLOSED by D-097 (see the checked row above).
+      NOTE one clause that was wrong on its own terms rather than merely stale:
+      "it will propose a slashable (5%) solution" — the proposal was real, the
+      PRICE was not. D-097 found the 5% is reverted with the failing tx, which
+      is now task 2.17.**
+
+- [ ] **2.17 Solver bond slashes do not persist on the tx path (NEW in 2.14,
+      D-097 finding F-1)** — SPEC §6.4 and D-024 price an invalid solution at 5%
+      of bond and equivocation at 20%. `x/session/keeper/solution.go` calls
+      `slashSolver` for both (lines 114 and 97) **and then returns an error**, so
+      baseapp discards the failing message's cache context and the slash write is
+      reverted with it. Through the msg server a rejected proposal costs a solver
+      **gas only**, and `msg_server.go:54`'s comment ("the slash commits with the
+      failing tx") is false. **Verified on BOTH tx paths**, not inferred: `1412`
+      invalid-solution and `1410` equivocation each reached their branch and left
+      `slashed_count = 0` with the bond untouched through real `FinalizeBlock`
+      txs. **Why the suite was green:** every in-tree slash assertion calls
+      `k.ProposeSolution` on a RAW keeper context with no tx cache-wrap
+      (`solution_test.go:53`), where the write does persist — one path verified,
+      the sibling never enumerated (METHODOLOGY Rule 4 step 5; the D-093 shape).
+      Severity: this is the D-024 incentive that makes "solvers are untrusted"
+      economically safe, and `max_solutions_per_session` does not bound invalid
+      proposals since they are never stored. Bounded pre-testnet (no production
+      solvers). **Sequencing: 2.8 is the natural sibling** — it already owns the
+      v0.50 charging-shape question (ante-vs-msg-server, D-085), and this is the
+      same "what survives a failing tx" problem; consider doing them together, or
+      2.17 first since it is a live incorrectness and 2.8 is a design question.
+      **Acceptance:** an invalid solution and an equivocation each leave the bond
+      reduced by the SPEC bps on the msg-server path; the two boundary pins
+      `TestDroppingTheConditionIsRejectedAtTheWire` and
+      `TestEquivocationSlashAlsoDoesNotPersist` **MUST go red and be replaced
+      with the slash assertions, not relaxed** (they say so in their own doc
+      comments); `msg_server.go:54`'s comment corrected; a keeper-level test is
+      NOT sufficient evidence — the gate must run through the msg server. Any
+      charging-path change ⇒ determinism vector in isolation. Off the exit path.
+
+- [ ] **2.18 METHODOLOGY amendment backlog (NEW in 2.14, D-097)** — the receiving
+      task for amendments that are owed to `docs/METHODOLOGY.md` and currently
+      owned by nobody. **F-14 is NOT discharged:** PHASE3_PLAN §5.1 assigns its
+      two amendments to *"the session that commits D-096"* — a phrase, not a
+      numbered task. That session was 3.0 (`42ac490`); neither amendment is in
+      METHODOLOGY (grep: zero hits for both). **It went unowned the moment that
+      session ended — the F-3 floating-owner failure recurring inside the very
+      document that catalogues it**, which is itself the strongest evidence for
+      the rule that forward items get task numbers and never session references.
+      Carries: **(a)** Rule 8 step 3 gains D-095's enumerate-the-consumers-first
+      sub-rule in its mechanical form verbatim, written to BOTH trigger classes
+      (*strengthened a guarantee* and *renamed or split a referent*); **(b)**
+      Rule 9 gains the companion **"a FLAG is a CLAIM"** rule; **(c)** NEW from
+      2.14 — **a watched-red harness must fail loudly when the sabotage does not
+      COMPILE.** Rule 3 says "see the red", and a harness that greps only for
+      test failures reports a non-building sabotage as "no failures", making
+      silence and success indistinguishable. In 2.14 that nearly recorded a
+      load-bearing guard as not load-bearing — about the very decision that
+      task's STOP turned on. Acceptance: all three land in METHODOLOGY with their
+      instances; F-14's row updated to point here; no amendment left owned by a
+      session reference. Docs-only. Off the exit path.
 
 - [ ] 2.15 §6.4 rule-3 per-leg attribution (NEW in 2.7, D-094) — the receiving task for
       the two D-089 re-points 2.7 assessed and explicitly re-deferred. **One task
@@ -884,8 +986,10 @@ Importance drives SEQUENCE; only the SPEC's text drives the GATE. Applied to
 every open task it **CONFIRMS** each "off the exit path" row rather than
 inheriting it.
 
-**The Phase-2 tail — one uniform rule, not six exceptions.** **2.8, 2.9, 2.10,
-2.12, 2.14, 2.15** remain open and none is exit-blocking. They keep their `2.x`
+**The Phase-2 tail — one uniform rule, not six exceptions.** ~~**2.8, 2.9, 2.10,
+2.12, 2.14, 2.15**~~ **UPDATED at 2.14 (D-097): 2.14 is CLOSED, and it produced
+two new rows — the tail is now 2.8, 2.9, 2.10, 2.12, 2.15, 2.17, 2.18.** None is
+exit-blocking. They keep their `2.x`
 numbers (identifiers, not a schedule — renumbering breaks ~15 `DECISIONS.md`
 cross-references and the in-tree markers), and each has a PHASE3_PLAN §5.1 row
 written at 2.16, **before** 3.0's pass. A special case for any one of them is how
@@ -895,12 +999,24 @@ SPEC §14 tokenomics; 2.12's row cites D-050/D-051, already-decided ADRs), and
 recording a dependency no document creates is the floating phrase that produced
 audit finding F-3.
 
-**Two live consequences the tail carries.** (a) **2.14** — non-test `solver/`
+**Two live consequences the tail carries.** ~~(a) **2.14** — non-test `solver/`
 contains zero reads of `Condition`, so the reference solver would propose a
 **slashable (5%)** solution the first time it meets a condition-signing intent;
 the only remaining item with a live functional defect, and why it sequences
-first. (b) **2.9** — the §6 run stays **INTERNAL**; 2.9 is a hard prerequisite
-for any external-facing use of that evidence, and 2.7 widened it.
+first.~~ **(a) is CLOSED by 2.14 (D-097): `solver.Solve` attaches, and drops any
+candidate the chain would reject rather than proposing it.** (b) **2.9** — the §6
+run stays **INTERNAL**; 2.9 is a hard prerequisite for any external-facing use of
+that evidence, and 2.7 widened it.
+
+**A THIRD live consequence, discovered while closing (a) — task 2.17 (D-097).**
+The 5%/20% figure in (a) was itself wrong about the mechanism: those SPEC §6.4
+slashes **never land on the tx path**, because `slashSolver` is called and then
+an error is returned, so the write is reverted with the failing message. A
+rejected proposal costs a solver gas only. Verified on both the invalid-solution
+(`1412`) and equivocation (`1410`) paths; green everywhere until now because
+every in-tree assertion calls the keeper directly on an un-cache-wrapped context.
+It is the economic assumption the whole solver-untrusted model rests on, so it
+outranks the rest of the tail on severity even though it is not exit-blocking.
 
 **PHASE3_PLAN task 3.0 is TRIGGERED** and now plans from a settled boundary. Four
 obligations are written INTO 3.0's criteria rather than pointed at it (D-095):

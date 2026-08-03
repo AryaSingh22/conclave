@@ -280,6 +280,99 @@ func checkLegConditionBinding(leg types.SettleLeg, sellerSigned, buyerSigned *es
 	return conditionSatisfies(leg.Condition, buyerSigned, roleBuyer, leg.ToSigil)
 }
 
+// EffectiveSellerCondition resolves the delivery condition a party's signed
+// payload imposes on ONE of its own give legs, identified by conservation asset
+// key: the per-leg IntentLeg.condition if that leg sets one, else the
+// payload-level IntentPayload.condition (the FW-2 refinement order, D-094).
+//
+// EXPORTED FOR THE REFERENCE SOLVER (task 2.14, D-097). An off-chain solver
+// must attach exactly the condition the chain will resolve here, and the
+// resolution ORDER is part of that: a solver that read only the payload-level
+// field would drop a per-leg refinement and be slashed 5% for a downgrade it
+// could not see. Reusing this function rather than mirroring it is the same
+// no-drift discipline solver/gate applies to CheckConservation and
+// CheckPriceBinding (D-054/D-055).
+//
+// The buyer-side resolution is deliberately NOT exported: a solver never needs
+// to resolve it, because it never chooses what the buyer requires — it attaches
+// the seller's condition and asks CheckConditionBinding whether the buyer
+// accepts. Exporting a resolver with no reader would be decoration (Rule 4).
+func EffectiveSellerCondition(p veiltypes.IntentPayload, legKey string) *escrowtypes.DeliveryCondition {
+	return effectiveCondition(p, legKey, roleSeller)
+}
+
+// CheckConditionedMatchShape reports whether a match carrying a delivery
+// condition has the D-074 shape the escrow funding can serve: exactly one
+// conditioned DataGrant leg seller→buyer, paid only by coin legs buyer→seller,
+// across exactly two distinct sigils. An unconditioned match is always fine.
+//
+// EXPORTED FOR THE REFERENCE SOLVER (task 2.14, D-097), and it is a SEPARATE
+// rule from the consent binding rather than part of it: consent asks whether
+// the parties agreed to this condition, the shape asks whether the settlement
+// machinery can carry it at all. They fail with different errors —
+// ErrConditionUnsupportedMatch (1426) here, 1427/1429 there — and a solver that
+// self-checked only consent would still be slashed for putting a perfectly
+// consented condition into an n-party cycle.
+func CheckConditionedMatchShape(m types.Match) error {
+	return validateConditionedMatch(m)
+}
+
+// CheckConditionBinding enforces the SPEC §6.5 consent binding in BOTH
+// directions over one match. It is pure and ctx-free: `payloadFor` returns the
+// IntentPayload a sigil signed, and everything else is a function of the match.
+//
+// TWO CALLERS, ONE IMPLEMENTATION (task 2.14, D-097):
+//   - the chain, at solution validation (validateConditionBinding, solution.go);
+//   - the off-chain reference solver's pre-submission self-check
+//     (solver/gate.AcceptConsent), so a candidate the chain would reject on
+//     consent is DROPPED instead of proposed and slashed.
+//
+// That second caller is why this is exported rather than mirrored. A solver
+// that reimplements the predicate and drifts one bit — a per-class inequality
+// in the wrong direction, a missed per-leg refinement — loses 5% of its bond,
+// silently, on a path no test of its own would show. This is the rule the
+// solver cannot afford to guess at, so it calls the chain's copy of it.
+//
+// THE LOOP BOUND IS THE FIX, and it is worth stating plainly because the
+// predicate alone would not have closed anything. Before task 2.7 this walk
+// visited only legs that ALREADY carried a condition and `continue`d past every
+// other one — so the single case it could never observe was the case that
+// mattered: a leg whose signed condition had been DROPPED. It walks every
+// DataGrant leg (the legs that CAN carry a condition) and asks the predicate
+// about each, which is what makes the requirement direction reachable at all.
+// A test that proves the predicate works but not that this loop reaches the
+// right legs has proven nothing about the downgrade.
+func CheckConditionBinding(m types.Match, payloadFor func(sigil string) (veiltypes.IntentPayload, bool)) error {
+	for li := range m.Legs {
+		leg := m.Legs[li]
+		key, applies := legConditionKey(leg)
+		if !applies {
+			// Not a DataGrant: it may carry no condition at all, and no signed
+			// condition governs it (validateConditionedMatch rejects a conditioned
+			// non-DataGrant leg; this is the same bar, reached independently).
+			if leg.Condition != nil && leg.Condition.Condition != nil {
+				return errorsmod.Wrapf(types.ErrConditionUnsupportedMatch, "leg %d: conditioned leg is not a DataGrant", li)
+			}
+			continue
+		}
+		sellerPayload, ok := payloadFor(leg.FromSigil)
+		if !ok {
+			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no seller intent for sigil %s", li, leg.FromSigil)
+		}
+		buyerPayload, ok := payloadFor(leg.ToSigil)
+		if !ok {
+			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no buyer intent for sigil %s", li, leg.ToSigil)
+		}
+		if err := checkLegConditionBinding(leg,
+			effectiveCondition(sellerPayload, key, roleSeller),
+			effectiveCondition(buyerPayload, key, roleBuyer),
+		); err != nil {
+			return errorsmod.Wrapf(err, "leg %d", li)
+		}
+	}
+	return nil
+}
+
 // legConditionKey returns the conservation asset key a DataGrant settlement leg
 // is matched against in the signed payload, and whether the leg is one the
 // binding applies to at all. Only DataGrant legs can carry a condition (SPEC

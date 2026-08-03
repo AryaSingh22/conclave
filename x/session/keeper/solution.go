@@ -685,48 +685,23 @@ func validateConditionedMatch(m types.Match) error {
 }
 
 // validateConditionBinding enforces the SPEC §6.5 consent binding in BOTH
-// directions over a match, at solution-validation time (task 2.7, D-094). The
-// rule itself lives in condition_binding.go; this walks the match and loads what
-// each party signed.
+// directions over a match, at solution-validation time (task 2.7, D-094).
 //
-// THE LOOP BOUND IS THE FIX, and it is worth stating plainly because the
-// predicate alone would not have closed anything. Before 2.7 this function
-// walked only legs that ALREADY carried a condition and `continue`d past every
-// other one — so the single case it could never observe was the case that
-// mattered: a leg whose signed condition had been DROPPED. It now walks every
-// DataGrant leg (the legs that CAN carry a condition) and asks the predicate
-// about each, which is what makes the requirement direction reachable at all.
-// A test that proves the predicate works but not that this loop reaches the
-// right legs has proven nothing about the downgrade.
+// The walk itself is the EXPORTED CheckConditionBinding (condition_binding.go),
+// which the off-chain reference solver calls to self-check before proposing
+// (task 2.14, D-097). This function is the chain-side caller: it supplies the
+// payload lookup and nothing else, so there is ONE implementation of the rule
+// with two callers rather than a chain copy and a solver copy that can drift —
+// the same discipline solver/gate already applies to CheckConservation and
+// CheckPriceBinding (D-054/D-055), applied at a new boundary (D-085's lesson).
 func validateConditionBinding(m types.Match, byID map[string]matchIntent) error {
-	for li := range m.Legs {
-		leg := m.Legs[li]
-		key, applies := legConditionKey(leg)
-		if !applies {
-			// Not a DataGrant: it may carry no condition at all, and no signed
-			// condition governs it (validateConditionedMatch rejects a conditioned
-			// non-DataGrant leg; this is the same bar, reached independently).
-			if leg.Condition != nil && leg.Condition.Condition != nil {
-				return errorsmod.Wrapf(types.ErrConditionUnsupportedMatch, "leg %d: conditioned leg is not a DataGrant", li)
-			}
-			continue
-		}
-		seller, ok := intentBySigil(byID, leg.FromSigil)
+	return CheckConditionBinding(m, func(sigil string) (veiltypes.IntentPayload, bool) {
+		mi, ok := intentBySigil(byID, sigil)
 		if !ok {
-			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no seller intent for sigil %s", li, leg.FromSigil)
+			return veiltypes.IntentPayload{}, false
 		}
-		buyer, ok := intentBySigil(byID, leg.ToSigil)
-		if !ok {
-			return errorsmod.Wrapf(types.ErrConditionNotConsented, "leg %d: no buyer intent for sigil %s", li, leg.ToSigil)
-		}
-		if err := checkLegConditionBinding(leg,
-			effectiveCondition(seller.payload, key, roleSeller),
-			effectiveCondition(buyer.payload, key, roleBuyer),
-		); err != nil {
-			return errorsmod.Wrapf(err, "leg %d", li)
-		}
-	}
-	return nil
+		return mi.payload, true
+	})
 }
 
 // intentBySigil returns the match intent a sigil submitted. Rule 1 guarantees a

@@ -701,9 +701,17 @@ wrong tree. Each item below is authored, security-bearing, and post-`5f5feb8`:
   flows (D-079 claims they are structurally unreachable from CVM — check it) and
   across 2.6's new partial-fill paths (D-089 claims a DataGrant is exact-fill
   only in both new matchers, so no partial fill can arise on a conditioned leg).
-  **Still open, and NOT part of the authored surface to audit — task 2.14:**
+  ~~**Still open, and NOT part of the authored surface to audit — task 2.14:**
   non-test `solver/` never reads `IntentPayload.condition`, so the reference
-  client does not yet meet the rule the chain now enforces.
+  client does not yet meet the rule the chain now enforces.~~ **CLOSED by task
+  2.14 (D-097).** The reference client now meets it — and the auditor should note
+  that this ADDED authored surface on the consensus side: `x/session/keeper`
+  exports `CheckConditionBinding`, `EffectiveSellerCondition`, and
+  `CheckConditionedMatchShape` so the off-chain solver CALLS the chain's rule
+  instead of mirroring it. The exported functions are the same code the
+  chokepoints run (pure extraction, no behaviour change), but their being
+  exported is itself an audit-relevant fact: an off-chain consumer now depends on
+  their exact semantics.
 - **The escrow `nextState` gate (D-073/D-076)** — one authoritative transition
   gate over three per-class legal sub-graphs, backed by an exhaustive
   transition-table test. Verify the sub-graphs are not a permissive union and
@@ -1388,7 +1396,9 @@ plan-stop can hard-require it.
 | **THE PHASE-2 TAIL — six open tasks, one uniform rule** *(added D-095, task 2.16)* | CLAUDE.md ledger | **Phase 2 EXITED with these open; none is exit-blocking**, established by re-deriving the test from SPEC §10's text rather than inheriting each row's claim. They keep their `2.x` numbers (identifiers, not a schedule — renumbering breaks ~15 `DECISIONS.md` cross-references and the in-tree markers). **Rows written at 2.16, BEFORE 3.0's pass, because a row-by-row re-verification structurally cannot surface a MISSING row** — F-8's mechanism in the receiving document. Individually dispositioned below; 3.0 sequences them against the Phase-3 critical path |
 | **2.8 submit-charge structural fork + timeouts→params** *(added D-095)* | D-085, D-090 | **Phase-2 tail.** The G2 SECURITY hole is already CLOSED (2.3's `SubmitIntentPrevalidationDecorator`, verified in the ante chain at `app/ante.go:125`); 2.8 owns only the DESIGN question (keep ante-prevalidation, or a v0.50 mode-split charge) plus the timeouts→params promotion, of which it is the **single** owner (Rev 3 resolved the double-ownership). No blocker; opens with its own plan-stop |
 | **2.9 receipt condition-outcome integrity** *(added D-095)* | D-087, D-094 | **Phase-2 tail, HIGHEST PRIORITY of the six.** Not exit-blocking — SPEC §10 asks the receipt be *verified* on a second chain (ICS-23 check 1 passes); §6.3 check 3 is a 7683-rail admissibility rule, not the SPEC's criterion. **But it is the hard prerequisite for any external-facing use of the §6 evidence**, and 2.7 made conditioned settlements strictly more common, so the unconditional `NONE` stamp is now wrong more often. Proto + cross-module consensus work; vector re-baseline expected |
-| **2.14 reference solver-side condition attachment** *(added D-095)* | D-093, D-094 | **Phase-2 tail — the ONLY remaining item with a LIVE FUNCTIONAL DEFECT.** Verified at the boundary: non-test `solver/` contains **zero** reads of `Condition`, so after 2.7 made attachment mandatory the in-tree reference solver **would propose a slashable (5%) solution** the first time it meets a condition-signing intent. Not exit-blocking (SPEC §10 places the reference solver in Phase 0 row 0.10, gated on `demo_e2e.sh`, which generates no conditions and still passes) — but it is why 2.14 sequences ahead of 2.8/2.10/2.12/2.15. `solver/` is import-linked into `x/session/simulation` ⇒ vector in isolation |
+| **2.14 reference solver-side condition attachment** *(added D-095)* | D-093, D-094, **D-097** | ✅ **CLOSED.** `solver.Solve` attaches the signed condition and self-checks every candidate against the chain's own `CheckConditionBinding` + `CheckConditionedMatchShape`, so it drops what the chain would reject instead of proposing it. Placement decided at a STOP: **in `solver/`** (an import-graph-preserving boundary was *established* impossible, and cmd/-side would leave `Solve` itself broken). Vector run in isolation TWICE — byte-identical to D-082 both times. Deliverable `docs/edge/SOLVER_SURFACE.md`; its load-bearing limit is §6.1, **no in-tree LIVE path reaches HASHLOCK or OPTIMISTIC**. Spawned rows **2.17** and **2.18** below |
+| **2.17 solver bond slashes do not persist on the tx path** *(added D-097)* | D-097 F-1 | **Phase-2 tail — NEW, and the highest-severity item in it.** SPEC §6.4 / D-024 price an invalid solution at 5% and equivocation at 20%; `solution.go` calls `slashSolver` for both **and then returns an error**, so baseapp reverts the failing message's cache context and the slash goes with it. A rejected proposal costs a solver **gas only** — the economic assumption the untrusted-solver model rests on. **Verified on both paths** (`1412`, `1410`) through real txs; green until now because every in-tree assertion calls the keeper on a raw, un-cache-wrapped context (`solution_test.go:53`) — Rule 4 step 5, the D-093 shape. Pinned by two boundary tests that instruct their own replacement. Not exit-blocking; **sequence with or just before 2.8**, which owns the sibling "what survives a failing tx" charging question |
+| **2.18 METHODOLOGY amendment backlog** *(added D-097)* | F-14, D-095, D-097 | **Phase-2 tail — NEW, docs-only.** **F-14 IS NOT DISCHARGED**, and this row exists because 3.0 assigned it to *"the session that commits D-096"* — a session reference, not a task number — so it went unowned the moment that session ended. Neither amendment is in `docs/METHODOLOGY.md` (grep: zero hits for both). **This is the F-3 floating-owner failure recurring inside the document that catalogues it**, which is the strongest available evidence for the rule it violates. Carries F-14's (a) Rule-8 enumerate-the-consumers sub-rule and (b) Rule-9 "a FLAG is a CLAIM", plus (c) NEW from 2.14: **a watched-red harness must fail loudly when the sabotage does not COMPILE** — 2.14's harness reported a non-building sabotage as "no failures" and nearly recorded a load-bearing guard as inert |
 | **2.15 §6.4 rule-3 per-leg attribution** *(added D-095)* | D-089, D-094 | **Phase-2 tail.** Receives BOTH items 2.7 assessed and explicitly re-deferred: (a) TODO 9 multi-intent-per-sigil (`solution.go:143` — the marker was retargeted here at 2.16, having named the closed 2.7), and (b) the `ErrLimitRateUnsupported` 1428 lift, which needs a **counter-asset designator** — D-094's verdict is that FW-2 does NOT enable it, since a `DeliveryCondition` names no counter-asset. **D-074 is orthogonal, not colliding** (D-094), and must not be re-litigated. The D-044 price source stays 3.4 and must not be reached for |
 | **2.13 condition-attachment verdict + wire-code loss** *(added D-095)* | D-093 | ✅ **CLOSED** (`0d7f167`). Recorded here because it had no row at all: (b) session `1412` now reaches the wire via the typed composite `types.InvalidSolution`; (a) the GAP verdict was closed by 2.7 for enforcement and remains open only as 2.14's reference half |
 
@@ -1425,16 +1435,27 @@ Recorded here so the Phase-2 sessions inherit them without re-research:
   That resequencing decision belongs to 2.5's plan-stop + task 3.0, not to
   silence. The 2.5-owned v0.53 checkpoint should consume §2.2's R1 findings.
 
-### 5.3 Where the six Phase-2 tail tasks sequence (3.0 plan-stop decision 3, D-096)
+### 5.3 Where the Phase-2 tail tasks sequence (3.0 plan-stop decision 3, D-096; updated D-097)
 
-The tail is **2.8, 2.9, 2.10, 2.12, 2.14, 2.15** — none exit-blocking (2.16
-re-derived that from SPEC §10's text). Rev 1 places them against the Phase-3
-critical path. **One uniform rule, and the ordering is derived from two
-properties only: does it fix a LIVE defect, and does it gate anything.**
+~~The tail is **2.8, 2.9, 2.10, 2.12, 2.14, 2.15**~~ — **updated at task 2.14
+(D-097): 2.14 is CLOSED and produced two new rows, so the tail is 2.8, 2.9,
+2.10, 2.12, 2.15, 2.17, 2.18** — none exit-blocking (2.16 re-derived that from
+SPEC §10's text, and the same test applied to 2.17/2.18 confirms it: SPEC §10's
+Phase-2 paragraph can be truthfully asserted without either). Rev 1 places them
+against the Phase-3 critical path. **One uniform rule, and the ordering is
+derived from two properties only: does it fix a LIVE defect, and does it gate
+anything.**
+
+> **The rule reproduced itself.** 2.14 was sequenced first because it was the
+> only tail item with a live functional defect; executing it surfaced **2.17**,
+> a live defect of the same kind one layer down, which now inherits the slot.
+> That is the ordering rule working, not drifting — a tail is finished when
+> executing its head stops producing new heads.
 
 | Order | Task | Placement | Why |
 |---|---|---|---|
-| **1** | **2.14** | **ahead of 3.3a** | The **only** tail item with a **live functional defect**: non-test `solver/` reads no `Condition`, so the reference solver proposes a **slashable (5%)** solution the first time it meets a condition-signing intent. Platform-independent, so nothing about 3.3 changes its shape. Fixing a live defect outranks patching a toolchain by days, not weeks |
+| ~~**1**~~ | ~~**2.14**~~ | ✅ **DONE** (D-097) | ~~The **only** tail item with a **live functional defect**~~ — closed. It ran ahead of 3.3a as planned and the reasoning held. **It also invalidated its own parenthetical:** the "slashable (5%)" price does not exist, because the slash is reverted with the failing tx — that is the new **2.17**, which inherits this row's "fix a live defect first" argument |
+| **1′** | **2.17** | **ahead of 3.3a**, with or just before **2.8** | Inherits 2.14's slot. The SPEC §6.4 bond slashes never land on the msg-server path, so the untrusted-solver model's economics are currently absent. Platform-independent. **2.8 is the natural sibling** — it already owns the v0.50 "what survives a failing tx" charging question (D-085), and doing them apart risks two answers to one problem. **2.18** (docs-only) can land alongside either |
 | **2** | **3.3a** | next | The security-patch vehicle (see §3.3's Rev-1 decision block) |
 | **3** | **2.9** | after 3.3a, before any external use of §6 evidence | Highest-priority of the remaining five and a **hard prerequisite** for external-facing use of the exit-demo evidence; 2.7 made conditioned settlements strictly more common, so the unconditional `NONE` stamp is wrong more often. Proto + cross-module consensus work ⇒ vector re-baseline expected ⇒ **do it before 3.3b re-baselines the vector anyway**, so the two re-baselines stay attributable (Rule 7 step 2) |
 | **4** | **2.8, 2.15, 2.10** | after **3.3b** | All three are consensus-surface work that would be **built twice** if done against the old platform — the exact reason 3.4/3.5 sequence after 3.3b. 2.8 is a design question with no blocker; 2.15 and 2.10 are matcher/attribution surface whose primary gate is hand-built fixtures either way |

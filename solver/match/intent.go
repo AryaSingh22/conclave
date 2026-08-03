@@ -3,7 +3,7 @@
 // helpers the cycle and pairwise matchers build on.
 //
 // This package imports ONLY proto message types (x/veil/types,
-// x/session/types) — never x/session/keeper. The reference solver is an
+// x/session/types, x/escrow/types) — never x/session/keeper. The reference solver is an
 // external, permissionless gRPC client (SPEC §6.4, §7): it observes open
 // sessions and proposes matches, but the chain's on-chain 6-rule validation is
 // the sole authority over whether a match is accepted. The matching IDEA is
@@ -19,6 +19,7 @@ import (
 
 	"cosmossdk.io/math"
 
+	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
 	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
@@ -33,6 +34,30 @@ type OpenIntent struct {
 	Give         []veiltypes.IntentLeg
 	Want         []veiltypes.IntentLeg
 	AllowPartial bool
+	// Condition is the PAYLOAD-LEVEL delivery condition this intent signed
+	// (IntentPayload.condition), governing every data/service leg the intent
+	// carries unless a leg refines it with its own IntentLeg.condition (which
+	// travels inside Give/Want). Nil means the intent signed NONE.
+	//
+	// Carried since task 2.14 (D-097) because it is now REQUIRED, not optional:
+	// task 2.7 made a signed condition a requirement rather than a permission
+	// ceiling, so a solver that cannot see this field proposes a solution that
+	// DROPS it and is slashed 5% (ErrConditionNotHonored, session 1429). Before
+	// 2.14 DecodeOpenIntent discarded it, which is precisely why the in-tree
+	// reference solver carried that live defect.
+	Condition *escrowtypes.DeliveryCondition
+}
+
+// Payload reassembles the signed IntentPayload fields the SPEC §6.5 delivery-
+// condition binding reads, so an OpenIntent can be handed to the chain's own
+// resolver and consent predicate (keeper.EffectiveSellerCondition,
+// keeper.CheckConditionBinding) instead of a mirrored copy of them.
+//
+// It carries give, want, and the payload-level condition — exactly the fields
+// that binding consults. counterparty_class is deliberately absent: it is §6.4
+// rule 5, evaluated by the chain against Sigil state a solver does not hold.
+func (oi OpenIntent) Payload() veiltypes.IntentPayload {
+	return veiltypes.IntentPayload{Give: oi.Give, Want: oi.Want, Condition: oi.Condition}
 }
 
 // DecodeOpenIntent reduces a veil IntentRecord to an OpenIntent by unmarshaling
@@ -52,6 +77,7 @@ func DecodeOpenIntent(rec veiltypes.IntentRecord) (OpenIntent, bool) {
 		Give:         payload.Give,
 		Want:         payload.Want,
 		AllowPartial: env.AllowPartial,
+		Condition:    payload.Condition,
 	}, true
 }
 

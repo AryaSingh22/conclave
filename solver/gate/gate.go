@@ -8,17 +8,20 @@
 // can never believe a price-binding-valid solution the chain would reject, or
 // skip one the chain would accept.
 //
-// This is the only solver package that imports x/session/keeper, and it imports
-// only the pure validation primitives — never the fallback matcher (the matching
-// idea is reimplemented in solver/cycles and solver/naive). Stateful §6.4 rules
-// (OPEN-in-session, no-reuse, counterparty class) are the chain's authority;
-// this gate covers exactly the conservation + price-binding rules that are under
-// the solver's control and would otherwise cost it a 5% slash.
+// It imports only the pure validation primitives — never the fallback matcher
+// (the matching idea is reimplemented in solver/cycles and solver/naive).
+// Stateful §6.4 rules (OPEN-in-session, no-reuse, counterparty class) are the
+// chain's authority; this gate covers exactly the rules that are under the
+// solver's control and would otherwise cost it a 5% slash: conservation,
+// price-binding, and — since task 2.14 (D-097) — the §6.5 delivery-condition
+// consent binding. (solver/condition is the other package that imports
+// x/session/keeper, for the same no-drift reason.)
 package gate
 
 import (
 	sessionkeeper "github.com/AryaSingh22/conclave/x/session/keeper"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
+	veiltypes "github.com/AryaSingh22/conclave/x/veil/types"
 )
 
 // Accept returns nil iff match m passes the chain's pure §6.4 checks a solver
@@ -32,6 +35,46 @@ func Accept(m sessiontypes.Match) error {
 		return err
 	}
 	return sessionkeeper.CheckPriceBinding(m, flows)
+}
+
+// AcceptConditionShape returns nil iff a conditioned match has the D-074 shape
+// the escrow funding can serve (keeper.CheckConditionedMatchShape — the same
+// function validateSolution runs at the rule-2 position). An unconditioned
+// match always passes.
+//
+// It is a SEPARATE self-check from AcceptConsent because it is a separate rule
+// with its own error (ErrConditionUnsupportedMatch, 1426): a condition BOTH
+// parties consented to is still invalid inside an n-party cycle, since the
+// payment-into-escrow funding needs one unambiguous coin payment against one
+// deliverable. A solver that checked only consent would propose that match and
+// be slashed for it.
+func AcceptConditionShape(m sessiontypes.Match) error {
+	return sessionkeeper.CheckConditionedMatchShape(m)
+}
+
+// AcceptConsent returns nil iff every DataGrant leg of m satisfies what BOTH
+// its parties signed under SPEC §6.5 — the delivery-condition consent binding,
+// in both directions: nothing attached that a party did not sign
+// (ErrConditionNotConsented, 1427) and nothing dropped that a party did sign
+// (ErrConditionNotHonored, 1429).
+//
+// IT IS THE CHAIN'S OWN PREDICATE, not a copy of it (keeper.CheckConditionBinding,
+// the same function validateSolution runs). That matters more here than anywhere
+// else in this package: the rule is a per-class relation whose two halves point
+// in OPPOSITE directions — a HASHLOCK timeout the buyer signed is a MAXIMUM, an
+// OPTIMISTIC dispute window is a MINIMUM (D-094 R3) — and it resolves the
+// per-leg IntentLeg.condition refinement before the payload-level field. A
+// mirrored implementation that inverted one inequality would look correct, pass
+// its own tests, and lose 5% of the bond on the first intent that used the other
+// class.
+//
+// THIS IS THE INVARIANT BEHIND "never propose a downgrade", and it is why
+// attachment (solver/condition) and this check are separate: a candidate whose
+// condition was mis-attached, half-attached, or not attached at all is DROPPED
+// here rather than proposed, so the guarantee does not rest on the attacher
+// having covered every shape.
+func AcceptConsent(m sessiontypes.Match, payloadFor func(sigil string) (veiltypes.IntentPayload, bool)) error {
+	return sessionkeeper.CheckConditionBinding(m, payloadFor)
 }
 
 // PriceBindingOK is the boolean form of the price-binding self-check: it reports

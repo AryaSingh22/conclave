@@ -5932,3 +5932,244 @@ failure the amendment exists to fix, one level up.
 - **§3.5 widened** from one shadow to a per-shadow verdict over all five.
 - **All 8 `recover()` sites** enumerated in §3.1.1 with per-site auditor notes,
   against the one the section previously named.
+
+## D-097 — Task 2.14: the reference solver's delivery-condition attachment path — the last live functional defect of the Phase-2 tail CLOSED; and the SPEC §6.4 bond slash found not to land on the tx path (NEW task 2.17)
+
+- **Date:** 2026-08-03 (task 2.14, after an approved plan-stop with two ratified
+  decisions).
+- **SPEC:** §4 (`solver/`), §6.4 (solution validation, slashing, the fallback),
+  §6.5 (condition classes), §11.6 (determinism); builds on **D-054/D-055** (the
+  solver reuses the chain's validation primitives verbatim), **D-074** (the
+  bilateral conditioned shape), **D-075/D-076** (the consent gates), **D-085**
+  (one source of truth), **D-086** (the fallback's synthetic Solution),
+  **D-089** (candidate gates are not guarantees), **D-093** (the GAP verdict and
+  the wire-code fix), **D-094** (a signed condition is a REQUIREMENT);
+  METHODOLOGY Rules 1/2/3/4/6/7/8/9.
+
+### The defect, re-derived from the tree rather than inherited
+
+Non-test `solver/` contained **zero** reads of `Condition`. `match.DecodeOpenIntent`
+discarded `IntentPayload.condition` outright, so `naive.buildPair` built a
+mutually-fillable data-for-coin pair with a BARE DataGrant leg. That match passes
+`gate.Accept` (conservation and price binding are indifferent to conditions), so
+the pre-2.14 pipeline **admitted and proposed it** — and since D-094 the chain
+rejects exactly that as `ErrConditionNotHonored` (session `1429`).
+
+Confirmed reachable end to end before any code was written, and reproduced after
+the fact by sabotage S6b (below), which returns `solver/` to its pre-2.14 shape
+and makes the acceptance test fail on a nil condition.
+
+### STOP decisions (both ratified before building)
+
+**(1) Placement: in `solver/`.** Option (iii) — a boundary preserving the
+simulation's import graph — was **established as impossible rather than argued
+down**: `x/session/simulation` imports root `solver`, which imports
+`cycles`/`gate`/`naive`, so anything `Solve` can reach is already in that graph.
+Option (ii) (cmd/-side, the D-091 D4 precedent) was rejected because the defect
+IS `solver.Solve`: an invalid constructor plus a repair step elsewhere is two
+places to be wrong, and leaves the library entry point broken. **D-091's D4 was
+read correctly and does not apply** — it excluded the demo's LIVE-NETWORK WRITER
+(signing, broadcast, gRPC polling) from a pure matching library, not attachment
+logic.
+
+**(2) The consent predicate is CALLED, not mirrored.** `solver/match`'s standing
+contract is that the MATCHING idea is reimplemented off-chain while the rules
+that must not drift are reused verbatim (D-054/D-055). The condition binding is
+a validation rule, and the asymmetry decides it: a mirrored predicate that
+drifts one bit costs a third-party solver 5% of its bond, silently, on a path no
+test of its own would show. `solver/gate`'s charter is verbatim "the rules under
+the solver's control that would otherwise cost it a 5% slash" — a call site, not
+a copy site. **D-085's lesson at a new boundary: one implementation, two
+callers.**
+
+### What was built
+
+**Cause A — `x/session/keeper`, a pure extraction.** `CheckConditionBinding(m,
+payloadFor)` is the exported, ctx-free walk that `validateConditionBinding` now
+delegates to, supplying only a lookup closure; `EffectiveSellerCondition`
+exports the FW-2 resolver. Behaviour, error identities, message text and check
+order are unchanged. The buyer-side resolver is deliberately NOT exported —
+a solver never needs it, and a function with no reader is decoration (Rule 4).
+
+**Cause B — `solver/`.** `match.OpenIntent` gains `Condition` + `Payload()`;
+new package **`solver/condition`** holds `Attach` (per DataGrant leg, the
+GIVER's resolved condition, mirroring `attachFallbackCondition`),
+`SignsDataCondition`, `CycleEligible`, and the participant/payload plumbing;
+`gate` gains `AcceptConsent` and `AcceptConditionShape`; `Solve` attaches, then
+gates, then admits.
+
+### The mid-build finding that changed the design (Rule 8, surfaced at the moment)
+
+Writing the cycle-exclusion test exposed a hole in the approved plan:
+`AcceptConsent` covers 1427/1429 but **not D-074's shape rule** (`1426`). Under
+the plan as approved, a conditioned leg inside an n-party cycle would attach,
+pass conservation/price/consent, and be PROPOSED — with `CycleEligible` as the
+only thing preventing a slashable proposal. That contradicts the very principle
+the plan-stop endorsed: *the guarantee must not depend on the attacher being
+exhaustive*. Closed structurally by exporting `CheckConditionedMatchShape` and
+adding `gate.AcceptConditionShape`. **This added one keeper export beyond the
+plan's "solver/ only" Cause B; recorded rather than absorbed.**
+
+### CycleEligible is an EFFICIENCY guard, not the guarantee — stated, not discovered later
+
+D-089's lesson applied to this session's own code rather than inherited: with the
+shape gate in place, removing `CycleEligible` changes nothing observable
+(sabotage S4a, green). What it actually buys is liveness — `cycles.Find` marks
+intents used inside its own traversal, so a doomed conditioned cycle can consume
+intents that would otherwise have formed a valid one. The guarantee is
+`gate.AcceptConditionShape`. Saying so in the doc comment is the point: a
+candidate gate whose removal is unobservable is an optimisation, and calling it a
+guarantee is how a project comes to trust the wrong line.
+
+### Load-bearing tests — PREDICTED, watched, and three predictions WRONG
+
+Six sabotages, each predicted in writing before removal:
+
+| | Sabotage | Predicted | Observed |
+|---|---|---|---|
+| S1 | `condition.Attach` removed | attach tests + the 5 "clears" + both PerLeg | **as predicted** (+ the leg-order test, added after the prediction) |
+| S2 | `gate.AcceptConsent` removed | the 4 "dropped" + buyer-signed-seller-not | **as predicted** |
+| S3 | resolver mirrored, not called | `TestPerLegConditionRefinesPayloadLevel` only | **as predicted, on the second attempt** |
+| S4a | `CycleEligible` removed | nothing | **as predicted** |
+| S4b | shape-gate call site removed | `BothMoves/ATTACHING` | **WRONG — nothing red** |
+| S4c | both removed | `ConditionedIntentNeverEntersACycle` | **WRONG — nothing red** |
+
+**S1 and S2 red DISJOINT subtest sets**, which is the evidence the attacher and
+the gate are independently load-bearing (the D-094 loop-bound/predicate pattern).
+
+**The three misses, kept visible:**
+
+1. **S3 first reported "(no failures)" — and the harness was lying.** The
+   sabotage replaced `EffectiveSellerCondition(giver.Payload(), key)` with
+   `giver.Condition`, which leaves `key` and the keeper import unused: it did not
+   COMPILE. The harness greped only for `--- FAIL`, so a build failure printed as
+   "(no failures)" and **silence was indistinguishable from success**. Had the
+   sabotage's plausibility not been re-checked against the code, this session
+   would have recorded "the resolver call is not load-bearing" — the exact
+   opposite of the truth, about the very decision STOP #2 turned on. Harness
+   fixed to fail loudly on a non-building sabotage; re-run reds exactly one test,
+   as predicted. **This is a METHODOLOGY amendment candidate (below).**
+2. **S4b** was predicted wrong because removing a CALL SITE cannot red a test
+   that calls the FUNCTION directly. The model, not the code, was wrong.
+3. **S4c** was predicted wrong for a substantive reason: the obvious fixture has
+   only the SELLER signing, so a conditioned cycle is rejected by CONSENT
+   (`1427`) before the shape rule is ever the reason — the fixture could not
+   isolate the rule it claimed to test. Fixed by
+   `bothSigningConditionedCycle`, where both parties sign identically so every
+   consent question answers YES and D-074 stands alone; S4c then reds as it
+   should.
+
+**Dosing.** D-089's `-count=25` rule was examined rather than applied by rote:
+this suite's intent ids are literals, so repetition pins the SAME
+`naive.Find` sort order every time and proves nothing about role assignment. The
+fixture was varied instead (`TestAttachmentIsIndependentOfLegOrder`, seller
+sorting first vs the default buyer-first). The app-level tests were still run
+`-count=25`, green 25/25.
+
+### FINDING F-1 — the SPEC §6.4 bond slash does not land on the tx path (→ NEW task 2.17)
+
+`x/session/keeper/solution.go` calls `slashSolver` for an invalid solution (5%,
+line 114) and for equivocation (20%, line 97) — **and then returns an error**, so
+baseapp discards the failing message's cache context and the slash write is
+reverted with it. Through the msg server a rejected proposal costs a solver
+**gas only**. The comment at `msg_server.go:54` ("the slash commits with the
+failing tx") is false.
+
+**Verified on both paths, not inferred:** `1412` (invalid solution) and `1410`
+(equivocation, branch confirmed reached by its own message) each leave
+`SlashedCount = 0` and the bond untouched through real `FinalizeBlock` txs.
+
+**Why a green suite never caught it:** every in-tree slash assertion calls
+`k.ProposeSolution` on a RAW keeper context with no tx cache-wrap
+(`x/session/keeper/solution_test.go:53`), where the write does persist. One path
+verified, the sibling never enumerated — **METHODOLOGY Rule 4 step 5, and the
+D-093 shape exactly** (18 assertions that passed under both shapes).
+
+Severity: this is the D-024 incentive that makes "solvers are untrusted"
+economically safe, and `max_solutions_per_session` does not bound invalid
+proposals because they are never stored. Pre-testnet, no production solvers.
+**NOT fixed in this task** — a consensus-path charging change is 2.8-shaped work
+and Rule 7 step 2 forbids stacking it on a task already carrying two vector
+causes. Both halves are pinned in executable form
+(`TestDroppingTheConditionIsRejectedAtTheWire`,
+`TestEquivocationSlashAlsoDoesNotPersist`), each instructing its own replacement
+when 2.17 lands.
+
+### Gates
+
+Sequenced so drift is attributable (Rule 7 step 2), fingerprinted before and
+after each (Rule 9 step 4):
+
+- **Baseline** at `42ac490`, clean tree: `make lint test` EXIT=0.
+- **Cause A — the keeper extraction ALONE:** `make lint test` EXIT=0; vector
+  **byte-identical to the D-082 baseline** (seed 1 `245EF177…`, seed 2
+  `B48BDA6D…`, seed 7 `FA562B1D…`, seed 12 `E491FB48…`, seed 42 `6596CCA1…`),
+  two independent processes; fingerprint `44d7163e…` identical before and after.
+  **No re-baseline.**
+- **Cause B — `solver/` + the shape export:** `make lint test` EXIT=0; the same
+  five hashes; fingerprint `3f88b1e9…` identical before and after. **No
+  re-baseline.**
+
+**A DEVIATION, self-caught and reported (Rule 8).** Cause B's gate was started
+BEFORE the D-095 negation-grep was run, and that grep then found a stale
+statement in SOURCE — `cmd/conclave-demo/exit_demo_ibc.go` prints "the reference
+solver … never reads IntentPayload.condition" live to an operator. Editing it
+mid-gate would have broken the fingerprint proof, so the run was killed and
+re-run from scratch after the edit. (The first run had also failed lint on an
+unused helper, so a re-run was owed regardless — but the ordering error was
+independent of that and is recorded on its own terms.) The unused helper was not
+deleted but given a reader: it is what `TestEquivocationSlashAlsoDoesNotPersist`
+needs to put two txs in one block, which is what moved F-1's second half from a
+throwaway run to in-tree evidence.
+
+**Named covering gate (Rule 7 step 5) — the vector covers NOTHING here.** A
+**Category-1 (GENERATOR)** shadow, proven at the generator rather than by hit
+count: `x/veil/simulation/operations.go` builds `IntentPayload{Give, Want}` and
+never sets `condition`, and its `coinLeg`/`dataLeg`/`svcLeg` helpers never set
+`IntentLeg.condition`. Every path this task adds is gated on a non-nil
+condition, hence structurally unreachable under any seed count. Byte-identical
+across both causes is evidence of **ADDITIVITY, never of correctness**. The
+primary gates are `solver/condition_attachment_test.go` and
+`app/solver_conformance_test.go`.
+
+### The trap the acceptance test had to avoid, recorded because it nearly worked
+
+Since D-094 the in-consensus fallback ATTACHES conditions. So an acceptance test
+asserting only "a conditioned escrow exists" would have passed **with the defect
+fully present**: the solver's downgrade is rejected 1429, zero valid solutions
+remain, the session drops to FALLBACK, and the fallback settles it correctly. The
+test would be green, the reference solver still broken, and nothing would say so.
+The load-bearing observables are therefore the PROPOSAL's fate — tx code, the
+solver's bond and `slashed_count`, and **whose** solution won
+(`winning_solution_id`, distinguishing the solver's from D-086's synthetic
+fallback Solution). Rule 4's "passes for the wrong reason", in this task's exact
+shape.
+
+### Deliverable
+
+`docs/edge/SOLVER_SURFACE.md` — the solver-facing contract, in the
+X402/7683 shape. Unlike its siblings it names no separate repo (none exists);
+the in-repo reference is what it documents. §5 is the attachment contract
+(requirement semantics, FW-2 resolution order, the per-class relations with
+their derivations, the D-074 shape, the algorithm, the do-not-fill rule, and the
+rejection table). §6 is the honest-limits section, and its load-bearing line is
+**§6.1: no in-tree LIVE path reaches HASHLOCK or OPTIMISTIC** — the §6 exit demo
+is ZK_DELIVERY only, so those two rows are specified and unit-proven, not
+field-proven. §6.3 discloses F-1 with its owner.
+
+### Forward items, written INTO their receiving tasks (Rule 6 sub-rule 6)
+
+- **2.17 (NEW)** — the F-1 slash-persistence defect, both paths, with the
+  boundary pins named that must go red when it lands.
+- **2.18 (NEW)** — the METHODOLOGY amendment backlog, because **F-14 is NOT
+  discharged**: PHASE3_PLAN assigns its two amendments to "the session that
+  commits D-096" — a phrase, not a numbered task — that session was 3.0
+  (`42ac490`), and neither amendment is in `docs/METHODOLOGY.md` (grep: zero
+  hits for both). It went unowned the moment that session ended: **the F-3
+  floating-owner failure, recurring, in the very document that catalogues it.**
+  Not fixed here, because F-14 itself argues that amending METHODOLOGY from
+  inside another task's session is the silent cross-document edit Rule 8 exists
+  to prevent. 2.18 also receives this session's own candidate: **a watched-red
+  harness must fail loudly when the sabotage does not COMPILE** — silence and
+  success are indistinguishable otherwise, and Rule 3's "see the red" is
+  satisfiable by a harness that can only ever see one.
