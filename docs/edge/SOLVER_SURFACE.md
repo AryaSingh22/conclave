@@ -70,8 +70,8 @@ Chain-id / bech32 `conc` / `uclv` gas+bond denom as in
 | `solution_window_blocks` | 2 | same |
 | `max_solutions_per_session` | 16 | same |
 | `max_graph_legs` | 256 | same |
-| `invalid_solution_slash_bps` | 500 (5%) | same — **but read §6.3** |
-| `equivocation_slash_bps` | 2000 (20%) | same — **but read §6.3** |
+| `invalid_solution_slash_bps` | 500 (5%) | same — governable (D-007); charged, see §6.3 |
+| `equivocation_slash_bps` | 2000 (20%) | same — governable (D-007); charged, see §6.3 |
 
 ---
 
@@ -86,10 +86,18 @@ Chain-id / bech32 `conc` / `uclv` gas+bond denom as in
 Submission is `cosmos.tx.v1beta1.Service`; the replay/nonce model is
 X402_SURFACE.md §3.2. `MsgProposeSolution` rides the **general** lane.
 
+**`MsgProposeSolution` must be the SOLE top-level message of its transaction**
+(task 2.17). No siblings, and no wrapper — a proposal inside authz `MsgExec` is
+rejected too. The error is `ErrProposalNotSole` (`1430`), raised in the ante
+before anything executes and **not** slashed. Why: the SPEC §6.4 bond slash is
+applied in the ante, against pre-transaction state, so a sibling message that
+moved that state could make the penalty wrong in either direction. See §6.3.
+
 **Never propose twice for one session.** `ErrEquivocation` (`1410`) is a
-distinct, harsher category from an invalid solution. The reference solver
+distinct, harsher category from an invalid solution — **20% of bond against
+5%** — and since task 2.17 both are actually taken. The reference solver
 queries `Solutions(session_id)` for its own address before proposing
-(`cmd/conclave-solver/main.go`).
+(`cmd/conclave-solver/main.go`); that self-check is now worth real money.
 
 ---
 
@@ -225,6 +233,12 @@ undone*), and a solver must mirror it rather than reach for a fill.
 | `ErrLimitRateUnsupported` | `1428` | a leg's signed §5.1 limit RATE is not evaluable for this match shape (D-089; the lift is task 2.15) |
 | `ErrEquivocation` | `1410` | a second solution for one session |
 | `ErrSessionNotInAuction` | `1409` | the window closed |
+| `ErrProposalNotSole` | `1430` | the proposal shared its transaction with another message, or was nested in a wrapper (§6.3) |
+
+**Two of these cost bond, the rest cost gas.** `1412` costs 5% and `1410` costs
+20% (SPEC §6.4, rates in `session.Params`); every other row above costs gas
+only. See §6.3 — and note that this was **not** true before task 2.17, when the
+slash was reverted along with the rejection.
 
 ---
 
@@ -254,37 +268,55 @@ gas strategy, no competition strategy, and no view on whether a given match is
 worth the bond risk. `cmd/conclave-solver` is a thin daemon around it for
 localnet use.
 
-### 6.3 The bond slash is currently NOT applied on the proposal path
+### 6.3 ~~The bond slash is currently NOT applied on the proposal path~~ — CLOSED by task 2.17
 
-SPEC §6.4 and D-024 price an invalid solution at 5% of bond and equivocation at
-20%. `x/session/keeper/solution.go` does call `slashSolver` for both — and then
-returns an error, so baseapp discards the failing message's cache context and
-**the slash write is reverted with it**. Through the msg server an invalid
-solution therefore costs a solver **gas only**.
+> **This section documented a temporary gap and said it would be closed. It is
+> closed.** Retained, marked, with the forward pointer, because a solver author
+> who read the previous version may have designed around it — and it explicitly
+> told them not to.
+>
+> **What it said** (its "D-024" citation was wrong — the rates are **D-007**'s;
+> corrected at 2.17): SPEC §6.4 prices an invalid solution at 5% of bond and
+> equivocation at 20%; `x/session/keeper/solution.go` called `slashSolver` for
+> both and then returned an error, so baseapp discarded the failing message's
+> branch and the slash went with it. A rejected proposal cost a solver **gas
+> only**. Found by task 2.14 (D-097 finding F-1), pinned by
+> `TestDroppingTheConditionIsRejectedAtTheWire` and
+> `TestEquivocationSlashAlsoDoesNotPersist`.
+>
+> **What changed (task 2.17):** the slash is applied in the ante handler
+> (`ProposeSolutionSlashDecorator`), the only cosmos-sdk v0.50 store branch that
+> outlives the message it penalises. Both pins were watched RED and replaced
+> with the slash assertions. The warning in the old text — *"a solver whose
+> economics assume a free retry loop will start losing bond the day 2.17
+> ships"* — is now in effect.
 
-This was found by task 2.14 and is **open as task 2.17**. Verified on both tx
-paths (`1412` invalid-solution and `1410` equivocation) and pinned in executable
-form by `TestDroppingTheConditionIsRejectedAtTheWire` and
-`TestEquivocationSlashAlsoDoesNotPersist`.
+**The slashes are real. Both of them.**
 
-**THIS IS TEMPORARY AND WILL BE CLOSED. Do not design around it.** Task 2.17
-exists to make the slashes land, it is sequenced ahead of the Phase-3 toolchain
-work, and both pins above are written to go RED when it lands. A solver whose
-economics assume a free retry loop will start losing bond the day 2.17 ships,
-with no protocol change to warn it — the wire behaviour it depends on is a
-defect, not an interface.
+| Rejection | Cost | Where it is applied |
+|---|---|---|
+| invalid solution (`1412`) | `invalid_solution_slash_bps`, **5%** of bond | ante, before the message is rejected |
+| equivocation (`1410`) | `equivocation_slash_bps`, **20%** of bond | ante, same |
+| every other rejection (`1409`, `1411`, inactive solver) | **gas only** | nothing is charged — and this is asserted, not assumed |
+| a winning solution that fails at settlement | **5%** | EndBlock (`conclude_failed`) — this one always worked |
 
-**What is NOT affected, and it is the part that protects counterparties.**
-Rejection is entirely real: an invalid solution is refused, nothing mis-settles,
-and every rule in §5 is enforced exactly as written. What is missing is the
-DETERRENT, not the check. §5 is the contract; §6.3 is a temporary gap in its
-enforcement economics. Write your solver against §5.
+The rates are **governable params** (D-007), not constants: read them from
+`session.Params` rather than hardcoding 500/2000.
 
-**Why this is disclosed rather than withheld.** A contract that says "you will be
-slashed 5%" when you will not be is simply false, and over-claiming a penalty is
-the more dangerous error: it misleads exactly the careful reader who is trying to
-comply, while anyone who submits one bad proposal discovers the truth for
-themselves. Disclosure creates no exposure that a single experiment would not.
+**One consequence for how you submit.** A `MsgProposeSolution` must be the
+**sole top-level message of its transaction**, and must not be nested inside a
+wrapper such as authz `MsgExec`. Anything else is `ErrProposalNotSole`
+(`1430`), rejected before execution and **not** slashed. The reason is
+structural: the ante prices the proposal against pre-transaction state, so a
+sibling message that moved that state could make the price wrong in either
+direction. Bundling is the only thing this rule costs you; batching several
+proposals means several transactions.
+
+**What was never affected, and it is the part that protects counterparties.**
+Rejection was always entirely real: an invalid solution was refused, nothing
+mis-settled, and every rule in §5 was enforced exactly as written. What was
+missing was the DETERRENT, not the check — which is why §5 needed no correction
+when 2.17 landed.
 
 ### 6.4 Conditioned settlements and `condition_outcome`
 
@@ -320,11 +352,23 @@ are the gate.
   with no hand-built keeper Matches: proposal accepted (code 0), solver not
   slashed, and **the solver's solution is the one that settles** rather than the
   fallback's. Its sibling pins the rejection identity (`("session", 1412)` +
-  the `1429` message) and the §6.3 boundary.
+  the `1429` message) and — since task 2.17 — the 5% slash actually landing.
+- **`app/proposal_slash_test.go`** (in `make test`) — the task-2.17 economics:
+  that an UNPRICED rejection (`1409`) still costs nothing, that the
+  sole-message rule holds for both a sibling message and an authz `MsgExec`
+  wrapper, and that the conclude-time slash lands too, asserted by its event
+  reason rather than by a count.
 - **`x/session/keeper/condition_binding_test.go`** — the chain-side rule these
   self-checks call (task 2.7, D-094).
 - Watched red: removing the attachment path, the consent gate, or the resolver
-  call each reds a distinct, recorded set of the above (D-097).
+  call each reds a distinct, recorded set of the above (D-097); removing the
+  ante slash call, the sole-message rule, its nested walk, or the unpriced-verdict
+  guard each reds a distinct set (task 2.17).
+- **Live:** `scripts/exit_demo.sh`'s consent stage reads the solver's bond back
+  after the rejection and checks the governed rate. It used to *print* that the
+  solver was slashed 5% without querying anything, while the slash was in fact
+  being reverted — which is how a banner can be wrong for two phases.
 
 *Authored task 2.14 (D-097). The chain-side semantic it documents is task 2.7
-(D-094); the wire-code dispatchability in §5.7 is task 2.13 (D-093).*
+(D-094); the wire-code dispatchability in §5.7 is task 2.13 (D-093); the
+proposal-time slash economics in §6.3 are task 2.17.*

@@ -84,7 +84,9 @@ func dataLegCondition(t *testing.T, m sessiontypes.Match) *escrowtypes.DeliveryC
 // live defect, at the library level. Before 2.14 non-test solver/ read no
 // Condition anywhere, so this pair produced a match with a BARE DataGrant leg —
 // a downgrade, invalid since task 2.7 (ErrConditionNotHonored, session 1429),
-// and a 5% bond slash that commits with the failing tx.
+// and a 5% bond slash. Since task 2.17 that slash is applied in the ante and
+// is therefore actually taken; it was reverted with the failing tx until then
+// (D-097 F-1), which app/proposal_slash_test.go now guards against recurring.
 //
 // All three classes, because the pre-2.14 blindness was total: a fix that
 // attached only the class someone happened to test would read as closed.

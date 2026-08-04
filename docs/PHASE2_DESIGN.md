@@ -72,8 +72,8 @@ load-bearing and recorded (§4).
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
 | 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | `0d7f167`, D-093 |
-| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **DONE** — `solver.Solve` attaches the signed condition, resolved by the chain's OWN `EffectiveSellerCondition` (called, not mirrored), and drops any candidate the chain would reject instead of proposing it; contract = `docs/edge/SOLVER_SURFACE.md`. Produced **new task 2.17** (SPEC §6.4's bond slashes are reverted with the failing tx — a rejected proposal costs gas only) and **new task 2.18** (F-14's METHODOLOGY amendments are owned by a session reference, hence by nobody) | D-093, D-094, **D-097** |
-| 2.17 | Solver bond slashes do not persist on the tx path | **open** (NEW in 2.14) — verified on both `1412` and `1410`; green until now because every in-tree assertion calls the keeper on a raw, un-cache-wrapped context | **D-097** |
+| 2.14 | Reference solver-side condition attachment (the reference half of 2.13(a)) | **DONE** — `solver.Solve` attaches the signed condition, resolved by the chain's OWN `EffectiveSellerCondition` (called, not mirrored), and drops any candidate the chain would reject instead of proposing it; contract = `docs/edge/SOLVER_SURFACE.md`. Produced **new task 2.17** (SPEC §6.4's bond slashes were reverted with the failing tx — a rejected proposal cost gas only; **CLOSED by D-098**) and **new task 2.18** (F-14's METHODOLOGY amendments are owned by a session reference, hence by nobody) | D-093, D-094, **D-097** |
+| 2.17 | Solver bond slashes do not persist on the tx path | **DONE** — the SPEC §6.4 proposal-time slashes are applied in the ANTE (`ProposeSolutionSlashDecorator`), the only cosmos-sdk v0.50 store branch that outlives a failing message. ONE evaluator (`EvaluateProposal`) serves both the ante's price and the msg server's rejection, so deterrent and rejection cannot drift apart again; `MsgProposeSolution` is restricted to a SOLE top-level message (`ErrProposalNotSole`, 1430) so both read identical state. Both boundary pins watched RED, then replaced. **Determinism vector RE-BASELINED** — the first movement since D-082, attributable to one cause and PREDICTED from a pre-build measurement | **D-098** |
 | 2.18 | METHODOLOGY amendment backlog (F-14's two + 2.14's harness-silence rule) | **open** (NEW in 2.14) — F-14 was assigned to "the session that commits D-096" and went unowned when that session ended | **D-097** |
 | 2.15 | §6.4 rule-3 per-leg attribution — TODO 9's `SettleLeg` intent tag + the `ErrLimitRateUnsupported` 1428 counter-asset designator | **open** (NEW in 2.7) — both re-deferred from 2.7 with explicit verdicts; D-074 recorded as orthogonal, not colliding | D-089, **D-094** |
 | §6a | Exit demo part A — x402 ingress + ZK escrow + CVM release, LIVE | **DONE** — D-079 discharged (a real contract released a real ZK escrow with a real proof); the condition system's only live writer is DEMO tooling (→ 2.13; CLOSED by 2.7 — the fallback is now a live writer) | `65376ab`, D-091 · artifact: `docs/EXIT_DEMO.md` |
@@ -124,14 +124,20 @@ load-bearing and recorded (§4).
 > before any external-facing use of this evidence, and 2.7 made conditioned
 > settlements strictly more common, widening it.
 >
-> **(c) NEW, found while closing (a) — task 2.17 (D-097).** The "slashable
-> (5%)" phrasing struck through above was itself wrong about the mechanism:
-> SPEC §6.4's invalid-solution (5%) and equivocation (20%) slashes are
-> **reverted with the failing tx**, because `slashSolver` runs and then an
-> error is returned, so baseapp discards the message's cache context. A
-> rejected proposal costs a solver **gas only**. Verified on both paths. This
-> is the economic assumption the untrusted-solver model rests on, so it ranks
+> **(c) NEW, found while closing (a) — task 2.17 (D-097), CLOSED by D-098.** The
+> "slashable (5%)" phrasing struck through above was itself wrong about the
+> mechanism: SPEC §6.4's invalid-solution (5%) and equivocation (20%) slashes
+> **were reverted with the failing tx**, because `slashSolver` ran and then an
+> error was returned, so baseapp discarded the message's cache context. A
+> rejected proposal cost a solver **gas only**. Verified on both paths. This was
+> the economic assumption the untrusted-solver model rests on, so it ranked
 > above the rest of the tail on severity while remaining non-exit-blocking.
+> **Task 2.17 closed it (D-098):** the slashes are applied in the ante handler,
+> the only v0.50 store branch that outlives a failing message; the rejection
+> stays in the msg server, so D-093's wire identities are untouched. The
+> statement's own correction is recorded here rather than deleted, because the
+> sequence — "slashable (5%)" wrong, then "costs gas only" right-then-obsolete —
+> is the record of how one clause was wrong twice in three tasks.
 
 **Exit-demo leg readiness (§6): all four legs are now DONE.** ZK_DELIVERY
 escrow leg (end-to-end conditioned ZK CONCLUDE proven: both parties signing
@@ -1024,9 +1030,10 @@ contract is `docs/edge/SOLVER_SURFACE.md`. **"The chain now requires it" is not
 >
 > **Note the residual error inside the struck text**, corrected by D-097 and
 > flagged here because it is load-bearing: the penalty is written as a
-> "slashable (5%)" solution, but the 5% never actually lands — the slash is
-> reverted with the failing tx (**task 2.17**). The pre-2.14 defect was real; its
-> stated price was not.
+> "slashable (5%)" solution, but at the time the 5% never actually landed — the
+> slash was reverted with the failing tx. The pre-2.14 defect was real; its
+> stated price was not. **Task 2.17 (D-098) made the price real**, so the struck
+> text's *number* is now correct even though its mechanism claim never was.
 
 > **SUPERSEDED — kept for the record (D-093, closed by D-094; the forward
 > pointer is the two paragraphs directly above, `condition_binding.go`, and

@@ -51,8 +51,16 @@ func (m msgServer) UnbondSolver(goCtx context.Context, msg *types.MsgUnbondSolve
 
 // ProposeSolution implements SPEC §6.4 MsgProposeSolution. The solution id is
 // the tx hash (ties in scoring break by lower id — SPEC §6.4). An invalid
-// solution or equivocation slashes the solver and returns an error; the slash
-// commits with the failing tx.
+// solution or equivocation is REJECTED here, with the registered code on the
+// wire (("session", 1412) / ("session", 1410) — D-093).
+//
+// The SPEC §6.4 bond slash for those two rejections is NOT applied here. It is
+// applied by ProposeSolutionSlashDecorator in the ante, because a write made
+// on this path is discarded together with the error that rejects the proposal
+// (cosmos-sdk v0.50 baseapp: the message branch commits only on success). This
+// comment used to claim the opposite — "the slash commits with the failing tx"
+// — and that claim was false for the whole of Phases 0–2: task 2.14 found it
+// (D-097 finding F-1), task 2.17 fixed it.
 func (m msgServer) ProposeSolution(goCtx context.Context, msg *types.MsgProposeSolution) (*types.MsgProposeSolutionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	addr, err := sdk.AccAddressFromBech32(msg.Solver)

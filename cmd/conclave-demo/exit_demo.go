@@ -41,10 +41,19 @@
 // buyer attached window >= signed (a MINIMUM — the window IS the buyer's
 // inspect-and-dispute protection).
 //
-// STILL TRUE, and it is task 2.14's: the reference solver in solver/ never
-// reads IntentPayload.condition, so it would propose a SLASHABLE (5%) solution
-// the first time it meets a condition-signing intent. 2.14 must make it attach
-// correctly or skip such intents — never propose a downgrade.
+// CORRECTED at task 2.17. This block used to read:
+//
+//	"STILL TRUE, and it is task 2.14's: the reference solver in solver/ never
+//	reads IntentPayload.condition, so it would propose a SLASHABLE (5%)
+//	solution the first time it meets a condition-signing intent."
+//
+// Both halves are now wrong. Task 2.14 (D-097) made solver/ attach — see
+// solver/condition and docs/edge/SOLVER_SURFACE.md §5 — and 2.14's OWN
+// negation sweep corrected the sibling statement in exit_demo_ibc.go while
+// missing this one, which is why 2.17's sweep looked at comments and not only
+// at printed banner strings. And the "SLASHABLE (5%)" price did not exist when
+// it was written: the slash was reverted with the failing tx until task 2.17
+// moved it into the ante (D-097 finding F-1). It exists now.
 //
 // SUPERSEDED — kept for the record (D-091/D-093, both closed by D-094; the
 // forward pointer is condition_binding.go and D-094, above):
@@ -928,8 +937,16 @@ func (c *cli) exitAssertConditionBoundary(s *exitState, ev *exitEvidence) error 
 // intent), and the proposer attaches the condition anyway. That is exactly the
 // D-076 buyer-side hole, and validateSolution must reject the whole solution
 // (ErrInvalidSolution carrying ErrConditionNotConsented) and slash the
-// over-reaching solver 5%. Run last: the slash takes solver1's bond below
-// solver_min_bond, so nothing after it may need a solution.
+// over-reaching solver 5%.
+//
+// RUN LAST, AND SINCE TASK 2.17 THAT IS LOAD-BEARING RATHER THAN CAUTIOUS.
+// The rationale was always "the slash takes solver1's bond below
+// solver_min_bond, so nothing after it may need a solution" — but until 2.17
+// the slash was reverted with the failing tx, so the ordering constrained
+// nothing and this stage could have been moved anywhere without any run
+// noticing. It now really does take 5% of the bond, on a live node, before
+// every later stage. DO NOT REORDER THIS STAGE without re-checking what
+// follows it: the reason is no longer hypothetical.
 //
 // It also asserts the WIRE IDENTITY of that rejection (task 2.13/D-093): the
 // (codespace, code) pair an off-chain solver dispatches on. This was D-091's
@@ -963,6 +980,13 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 	if err := c.waitForAuction(rec.SessionId); err != nil {
 		return err
 	}
+	// Read the solver's bond BEFORE the rejection, so the slash below is a
+	// measured DELTA rather than an absolute compared against an assumption
+	// about what earlier stages left behind.
+	before, err := c.solverState(s.solver)
+	if err != nil {
+		return err
+	}
 	code, space, log, err := c.proposeMatch(s.solver, rec.SessionId,
 		conditionedMatch(ids[0], ids[1], s.sigilP, s.sigilS, s.cond, s.settleDenom))
 	if err != nil {
@@ -977,7 +1001,21 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 		return fmt.Errorf("unsigned-condition solution rejected for the WRONG reason (code %d): %s", code, log)
 	}
 	fmt.Println("consent gate reached from the live path: the proposer CANNOT impose an unsigned")
-	fmt.Printf("  ZK condition — solution rejected and the solver slashed 5%% ✓\n")
+	fmt.Printf("  ZK condition — solution rejected ✓\n")
+
+	// THE SLASH, ASSERTED RATHER THAN ANNOUNCED (task 2.17). This line used to
+	// print "and the solver slashed 5% ✓" with nothing behind it — and it was
+	// FALSE for every run that ever printed it: the slash was written by the msg
+	// server and reverted with the failing tx, so no live run has ever taken a
+	// solver's bond (D-097 finding F-1). A banner asserting an outcome it never
+	// queried is the positive form of the vacuous negative: it "passes" whatever
+	// the chain does, which is why it survived two phases saying something untrue.
+	//
+	// Now the bond is read back and the SPEC §6.4 rate checked exactly. If the
+	// ante decorator is ever unwired, THIS is what fails, on a live node.
+	if err := c.assertProposalSlash(before); err != nil {
+		return err
+	}
 
 	// WIRE-IDENTITY ASSERTION (task 2.13 / D-093, replacing D-091's F-1 boundary
 	// pin). An off-chain solver dispatches on the (codespace, code) PAIR, so both
@@ -1001,6 +1039,58 @@ func (c *cli) exitStageConsentNegative(s *exitState) error {
 	}
 	fmt.Printf("  wire identity: codespace %q code %d (ErrInvalidSolution) — an off-chain solver\n", space, code)
 	fmt.Println("  can dispatch on the documented SPEC §13 codespace, and the rule text survives ✓")
+	return nil
+}
+
+// solverState reads a solver's registry record (bond + slashed_count).
+func (c *cli) solverState(priv cryptotypes.PrivKey) (sessiontypes.Solver, error) {
+	res, err := c.sessionc.Solver(context.Background(),
+		&sessiontypes.QuerySolverRequest{Addr: addrOf(priv).String()})
+	if err != nil {
+		return sessiontypes.Solver{}, fmt.Errorf("query solver: %w", err)
+	}
+	return res.Solver, nil
+}
+
+// assertProposalSlash checks that the SPEC §6.4 invalid-solution slash actually
+// moved the solver's bond, at the governed rate (task 2.17).
+//
+// The rate is read from chain PARAMS rather than hardcoded at 5%: it is
+// governable (invalid_solution_slash_bps, D-007/D-008), so a demo asserting a
+// literal would start lying the first time governance changed it — the same
+// class of error this assertion replaces.
+func (c *cli) assertProposalSlash(before sessiontypes.Solver) error {
+	ctx := context.Background()
+	params, err := c.sessionc.Params(ctx, &sessiontypes.QueryParamsRequest{})
+	if err != nil {
+		return fmt.Errorf("query session params: %w", err)
+	}
+	bps := params.Params.InvalidSolutionSlashBps
+
+	after, err := c.sessionc.Solver(ctx, &sessiontypes.QuerySolverRequest{Addr: before.Addr})
+	if err != nil {
+		return fmt.Errorf("read solver back after the rejection: %w", err)
+	}
+	if after.Solver.SlashedCount != before.SlashedCount+1 {
+		return fmt.Errorf("SPEC §6.4 SLASH DID NOT LAND: slashed_count %d → %d. "+
+			"Task 2.17 moved this slash into the ante (ProposeSolutionSlashDecorator) "+
+			"because a msg-server write is discarded with the failing tx; if this fires, "+
+			"that decorator is not in the chain",
+			before.SlashedCount, after.Solver.SlashedCount)
+	}
+	want := sdk.NewCoins()
+	for _, coin := range before.Bond {
+		cut := coin.Amount.MulRaw(int64(bps)).QuoRaw(10_000)
+		if rem := coin.Amount.Sub(cut); rem.IsPositive() {
+			want = want.Add(sdk.NewCoin(coin.Denom, rem))
+		}
+	}
+	if !after.Solver.Bond.Equal(want) {
+		return fmt.Errorf("SPEC §6.4 SLASH AMOUNT WRONG: bond is %s, want %s "+
+			"(invalid_solution_slash_bps = %d)", after.Solver.Bond, want, bps)
+	}
+	fmt.Printf("  and the solver's bond REALLY fell: %s → %s at %d bps ✓\n",
+		before.Bond, after.Solver.Bond, bps)
 	return nil
 }
 

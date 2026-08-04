@@ -50,9 +50,31 @@ func (s swap) match() types.Match {
 	}
 }
 
+// propose models what a MsgProposeSolution TX does, which since task 2.17 is
+// TWO keeper calls in two different baseapp store branches: the ante applies
+// the SPEC §6.4 slash (ApplyProposalSlash), then the msg server produces the
+// solution or the rejection (ProposeSolution). Calling only the second would
+// assert against a keeper that no longer slashes at all.
+//
+// READ THIS BEFORE TRUSTING A SLASH ASSERTION IN THIS PACKAGE. This helper
+// REPRODUCES the sequence; it is not evidence that the chain performs it. That
+// evidence is app/solver_conformance_test.go, which drives real FinalizeBlock
+// txs through the wired ante chain — and it is required precisely because
+// every keeper-level slash assertion here passed for the whole of Phases 0–2
+// while the shipping path slashed nobody (D-097 finding F-1, task 2.17).
 func (f *fixture) propose(t testingT, solver sdk.AccAddress, sessionID uint64, matches []types.Match) error {
 	t.Helper()
-	return f.k.ProposeSolution(f.ctx, solver, sessionID, matches, types.IDHex(contentHash("sol-"+solver.String())))
+	return f.proposeWithID(t, solver, sessionID, matches, types.IDHex(contentHash("sol-"+solver.String())))
+}
+
+// proposeWithID is propose with an explicit solution id (equivocation and
+// scoring fixtures need distinct ids).
+func (f *fixture) proposeWithID(t testingT, solver sdk.AccAddress, sessionID uint64, matches []types.Match, solID string) error {
+	t.Helper()
+	if err := f.k.ApplyProposalSlash(f.ctx, solver, sessionID, matches); err != nil {
+		return err
+	}
+	return f.k.ProposeSolution(f.ctx, solver, sessionID, matches, solID)
 }
 
 func TestProposeSolution_Valid(t *testing.T) {
@@ -79,9 +101,9 @@ func TestProposeSolution_Equivocation(t *testing.T) {
 	solver := randAddr()
 	f.registerSolver(t, solver, minSolverBond())
 
-	require.NoError(t, f.k.ProposeSolution(f.ctx, solver, c.sessionID, c.matches(), types.IDHex(contentHash("a"))))
+	require.NoError(t, f.proposeWithID(t, solver, c.sessionID, c.matches(), types.IDHex(contentHash("a"))))
 	// second solution for the same session = equivocation → 20% slash.
-	err := f.k.ProposeSolution(f.ctx, solver, c.sessionID, c.matches(), types.IDHex(contentHash("b")))
+	err := f.proposeWithID(t, solver, c.sessionID, c.matches(), types.IDHex(contentHash("b")))
 	require.ErrorIs(t, err, types.ErrEquivocation)
 
 	s, err := f.k.GetSolver(f.ctx, 0, solver)

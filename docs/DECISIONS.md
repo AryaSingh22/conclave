@@ -2617,7 +2617,9 @@ The SPEC remains the source of truth; entries here fill gaps, never override.
   `IntentPayload.condition`. Enforced at TWO layers: (1) **solution validation**
   (`validateConditionConsent` in `validateSolution`) so a solver proposing an
   unsigned/mismatched condition has its solution rejected as invalid and is
-  slashed (D-024 incentive); (2) the **settlement boundary**
+  slashed (~~D-024~~ **D-007** incentive — mis-citation corrected at task 2.17,
+  D-098; this is the line the wrong number propagated from, and until 2.17 the
+  slash it names did not actually land); (2) the **settlement boundary**
   (`openConditionedEscrows` in `conclude.go`, via `intentConditionForSigil`) — the
   AUTHORITATIVE guard, since `Conclude` does not re-run `validateSolution`, so no
   path to escrow creation can skip the consent check. Mismatch / no-signed-
@@ -6066,7 +6068,7 @@ fixture was varied instead (`TestAttachmentIsIndependentOfLegOrder`, seller
 sorting first vs the default buyer-first). The app-level tests were still run
 `-count=25`, green 25/25.
 
-### FINDING F-1 — the SPEC §6.4 bond slash does not land on the tx path (→ NEW task 2.17)
+### FINDING F-1 — the SPEC §6.4 bond slash does not land on the tx path (→ NEW task 2.17) — **CLOSED by D-098; and the heading itself is OVER-BROAD, see the correction below**
 
 `x/session/keeper/solution.go` calls `slashSolver` for an invalid solution (5%,
 line 114) and for equivocation (20%, line 97) — **and then returns an error**, so
@@ -6088,6 +6090,17 @@ D-093 shape exactly** (18 assertions that passed under both shapes).
 Severity: this is the D-024 incentive that makes "solvers are untrusted"
 economically safe, and `max_solutions_per_session` does not bound invalid
 proposals because they are never stored. Pre-testnet, no production solvers.
+
+> **CORRECTION (task 2.17, D-098): "D-024" is a MIS-CITATION.** D-024 is "§1.3
+> steps 2–3 demonstrated in two phases until task 0.7"; the slash bps are
+> **D-007**'s invented params (`invalid_solution_slash_bps` 500,
+> `equivocation_slash_bps` 2000). Corrected in place with the original kept,
+> because this line is where the mis-citation propagated from — it reached
+> CLAUDE.md's 2.17 row, PHASE3_PLAN §5.1, SOLVER_SURFACE §6.3 and a test
+> comment. **Also over-broad, and this is the substantive half:** the finding
+> below is about the two PROPOSAL-TIME slashes; the conclude-time
+> `conclude_failed` slash runs in EndBlock on the parent ctx and was never
+> affected (verified through a real block at 2.17).
 **NOT fixed in this task** — a consensus-path charging change is 2.8-shaped work
 and Rule 7 step 2 forbids stacking it on a task already carrying two vector
 causes. Both halves are pinned in executable form
@@ -6173,3 +6186,285 @@ field-proven. §6.3 discloses F-1 with its owner.
   harness must fail loudly when the sabotage does not COMPILE** — silence and
   success are indistinguishable otherwise, and Rule 3's "see the red" is
   satisfiable by a harness that can only ever see one.
+
+## D-098 — Task 2.17: the SPEC §6.4 proposal-time bond slashes are applied in the ANTE, the only v0.50 store branch that outlives a failing message; the untrusted-solver model's economics exist for the first time
+
+- **Date:** 2026-08-04 (task 2.17, after an approved plan-stop with six ratified
+  decisions).
+- **SPEC:** §6.4 (solution validation, slashing), §13 (codespaces), §11.6
+  (determinism); builds on **D-007** (the ADR that PRICES the slashes —
+  `invalid_solution_slash_bps` 500, `equivocation_slash_bps` 2000), **D-085**
+  (one implementation, two callers; and the v0.50 postHandler finding),
+  **D-059** (zero mode branching), **D-093** (the wire identities that must not
+  regress), **D-097** (finding F-1, which opened this task); METHODOLOGY Rules
+  1/2/3/4/6/7/8/9.
+
+### The defect, re-derived at the artifact rather than inherited
+
+`cosmos-sdk v0.50.15`, `baseapp/baseapp.go`, read directly:
+
+- the **ante** branch is written at **line 933**, the moment the ante returns
+  nil — before any message runs, and regardless of what the messages then do;
+- the **message** branch is written at **line 989**, only when `runMsgs`
+  returns no error;
+- a **postHandler** runs on a context derived from that same message branch
+  (**line 972**) — which is why D-085 found a postHandler refund structurally
+  impossible, and equally rules out a postHandler charge.
+
+`x/session/keeper/solution.go` called `slashSolver` and then returned an error,
+so the slash was written into the branch the rejection threw away. Through the
+msg server a rejected proposal cost a solver **gas only**.
+
+### The over-broad inheritance, corrected — the most important record change here
+
+D-097 filed this as *"the SPEC §6.4 bond slash does not land on the tx path"*,
+and it was being read as *"the §6.4 slash does not land"*. **x/session slashes
+in THREE places and only two were broken.** The third — `conclude.go`'s
+`conclude_failed` 5%, when a WINNING solution fails at settlement — runs in
+EndBlock on the parent context, where no per-message branch exists to discard
+it. It was never broken.
+
+Verified through a real `FinalizeBlock` rather than by reading the code
+(`TestConcludeFailedSlashPersistsThroughARealBlock`), because METHODOLOGY Rule 4
+step 5 applies to this session's own claim as much as to the one it corrects.
+**A task that corrects an over-claim is the likeliest place to produce the
+mirror over-claim.** The test asserts the slash EVENT REASON, not a count: the
+session concludes in the very block the proposal lands in, so no
+"not-slashed-then-slashed" discriminator exists in time — only the reason
+attribute distinguishes the third site from the two just fixed.
+
+### The model decision: CLOSE the gap (not adopt gas-only deterrence)
+
+Gas-only deterrence is a coherent model and was rejected on a reason, not by
+default. Adopting it would (a) require a SPEC §6.4 amendment and a D-007
+supersession rather than a code fix, and (b) **pick an unvalidated deterrent
+over a specified one** — PHASE3_PLAN's **G-2** records that nothing prices the
+authored surface's consensus cost at all, and ranks that highest of four gaps.
+Choosing "gas is the deterrent" while gas pricing is itself an open Phase-3 row
+would rest the untrusted-solver model on the weaker of the two.
+
+### Mechanism: the ante, and it is the option space rather than a preference
+
+`ProposeSolutionSlashDecorator` (`x/mandate/ante/propose_slash.go`) applies the
+slash and returns **nil**, precisely so the ante branch commits and the message
+can then fail. Rejection stays in the msg server, so every D-093 wire identity
+is untouched: `("session", 1412)` with the specific rule reachable by
+`errors.Is`, and `("session", 1410)`.
+
+**ONE evaluator, two callers** — `keeper.EvaluateProposal` returns a
+`ProposalVerdict{Err, SlashBps, Reason}`; the ante turns it into the price, the
+msg server into the rejection. D-085's rule at a new boundary, and it is the
+structural answer to how this defect was possible: the deterrent and the
+rejection had drifted *completely apart* while both looked present.
+
+Rejected alternatives, recorded so they are not re-litigated:
+
+- **message succeeds, verdict in the response/events** — trivially persistent,
+  but inverts D-093 one task after it landed, breaks SOLVER_SURFACE §5.7's
+  published `(codespace, code)` dispatch contract and 18 `errors.Is`
+  assertions, and makes a rejected proposal read as success to every generic
+  Cosmos client;
+- **postHandler** — impossible, see above;
+- **ante REJECTS the proposal** — worse than the defect: a tx failing the ante
+  is rolled back entirely, so the solver would not even pay gas.
+
+### The sole-message rule (`ErrProposalNotSole`, session 1430)
+
+`MsgProposeSolution` must be the SOLE top-level message of its tx and must not
+be nested in a wrapper. Without it the ante prices against pre-tx state while
+the msg server judges against post-sibling state, and **both directions are
+defects**: a sibling that turns an invalid proposal VALID slashes a solver whose
+solution then succeeds; one that turns a valid proposal INVALID is a free way to
+propose garbage. With it, both evaluations read identical state and run the same
+function — agreement is a property of the code, not of the tx the solver chose
+to build. **The guarantee must not depend on the attacker's tx shape** (D-097's
+own endorsed principle, applied to a different mechanism).
+
+The nested walk reuses `nestedAnys` and `max_msg_nesting_depth` — the same
+unwrap the mandate chokepoint and D-085's prevalidation decorator use — because
+a top-level-only rule would leave authz `MsgExec` as the bypass. Proven: S4
+below reds ONLY the wrapper case.
+
+### Exec-mode: NO branch
+
+Runs identically in CheckTx, DeliverTx and simulation, preserving D-059's
+zero-mode-branching posture. A CheckTx-side write lands in the mempool's own
+branch and is reset at the next Commit; simulation discards everything it
+writes, and running the same code there keeps gas estimation honest. **If task
+2.8 introduces a mode split it breaks this posture chain-wide** — that cost is
+written into 2.8's criteria.
+
+### The 2.8 coupling: SEQUENCE, not fold — and the discriminator generalises
+
+PHASE3_PLAN §5.3 proposed folding 2.17 into 2.8 ("doing them apart risks two
+answers to one problem"). Overruled at the plan-stop on a test worth reusing:
+**fold when neither problem constrains the other first; sequence when one
+does.** 2.17 had to establish what survives a failing tx before 2.8's
+ante-vs-msg-server question could be answered on anything but intuition — a
+one-directional dependency. Folding would also have (a) repeated the shape that
+nearly overloaded 2.7 (two hard things arriving together because they are
+RELATED, which is a different justification from CHEAP TOGETHER), and (b) fused
+two vector causes into one unattributable hash movement. 2.17's re-baseline is
+attributable precisely because 2.8's params work was not stacked on it.
+
+**Five findings are written INTO 2.8's acceptance criteria** (Rule 6 sub-rule
+6), not pointed at it: the v0.50 branch facts with line numbers, the
+one-evaluator-two-callers precedent, the exec-mode ruling and its chain-wide
+cost, the tx-shape hazard any ante/msg-server split inherits, and the new vector
+baseline to run against.
+
+### Load-bearing tests — PREDICTED, watched, and two predictions WRONG
+
+Both boundary pins were watched RED before replacement, at their own
+self-announcing messages (`expected: 0x0, actual: 0x1`), then replaced with
+`SlashedCount 1` + bond `95_000_000` / `80_000_000` — replaced, not relaxed.
+
+| | Sabotage | Predicted | Observed |
+|---|---|---|---|
+| S1 | ante slash call removed | the two pins | **as predicted** |
+| S2 | sole-message rejection removed | both sole-message subtests | **as predicted** — after a compile failure, below |
+| S3 | `SlashBps == 0` guard removed | `TestUnpricedRejectionDoesNotSlash` | **WRONG — four tests red** |
+| S4 | nested walk disabled | only the `MsgExec` subtest | **as predicted** |
+
+**S1/S2 and the two halves of S4 red DISJOINT sets**, which is the evidence the
+attacher, the rule, and its nested walk are independently load-bearing.
+
+**The two misses, kept visible:**
+
+1. **S3 was wrong in an informative direction.** Removing the guard reds FOUR
+   tests, not one, because `slashSolver` increments `SlashedCount`
+   unconditionally — a zero-bps call is **not** a no-op. So the guard is the only
+   thing preventing every VALID proposal from being recorded as a slash event.
+   The model, not the code, was wrong, and the corrected model is worth carrying:
+   *"slash of zero" is not "no slash"*.
+2. **A red prediction earlier in the task was also wrong**, in a way that
+   mattered more than S3: removing the keeper-side slash was predicted to red
+   three tests and red **five**. All five asserted the slash on a RAW keeper
+   context. D-097 wrote that "every in-tree slash assertion" had this shape; the
+   number is **five test functions**, so the false-confidence surface was wider
+   than the finding implied.
+
+**The harness caught a non-compiling sabotage — 2.18's candidate amendment (c),
+firing on this session's own run.** S2's first form left `errorsmod` unused and
+did not build. The run reported `FAIL ... [build failed]` and was recognised
+ONLY because the grep pattern included `build failed` alongside `FAIL:`. An
+earlier command in this same session had the very defect 2.14 recorded — `go vet
+... | head -5 && echo BUILD-OK`, where `head` masks the exit code so the OK
+prints unconditionally. **The amendment is not yet in METHODOLOGY (it is
+2.18's), and it earned its keep before being written down.**
+
+### The determinism vector: RE-BASELINED, and the movement was PREDICTED
+
+**A pre-build measurement, run on a throwaway instrumented tree** (reverted, and
+the tree fingerprinted back to the empty-diff hash): across the five committed
+seeds the sim invokes `SimulateMsgProposeSolution` **2872** times, enters the
+keeper's `ProposeSolution` **870** times, and reaches the slash branches
+**126 times — all equivocation, zero invalid-solution, zero conclude-failed**.
+Hashes with the probes in place were byte-identical to D-082, confirming the
+instrumentation was stderr-only and perturbed nothing.
+
+So the movement was predicted, with its cause and its half named in advance:
+**126 equivocation slashes now persist.** This is the vector's FIRST re-baseline
+since D-082.
+
+**New baseline** (two independent processes, byte-identical):
+
+| seed | D-082 baseline | D-098 baseline |
+|---|---|---|
+| 1 | `245EF177…` | `E9C4A6827487B65283A9A91CD5147AAE28C416E0B9255D33914685D92C74BD0F` |
+| 2 | `B48BDA6D…` | `C1EE3B5F577EFE934AF35B867E306E0D93CC5B9EE857A0AE0BB493BDA615B576` |
+| 7 | `FA562B1D…` | `DA743B6A0B72642CA231CE40C95035C71A2817ACFC229CDBBACA41E3D17BE0EE` |
+| 12 | `E491FB48…` | `B183307D1FD9A2BF4EAA5ED48746589B060B87638F87555B245ED0EC1CE383AA` |
+| 42 | `6596CCA1…` | `36661093B93AB53254FD3B751304AAE8E57CB825CDAB904A4DDE49918A03D819` |
+
+**Named covering gate (Rule 7 step 5), and note the SPLIT.** The vector covers
+the **equivocation** half only, and covers it for the first time — this is not
+another Category-1 shadow. It covers the **invalid-solution** half NOT AT ALL
+(zero hits, measured), and the sole-message rule not at all. The covering gates
+are therefore `app/solver_conformance_test.go` (both pins) and
+`app/proposal_slash_test.go` (unpriced rejection, sole-message both shapes,
+conclude-failed), plus `scripts/exit_demo.sh` stage 7 on a live node.
+
+**The D-093 asymmetry, restated because it cuts both ways here:** a result-code
+change CANNOT move this vector (it hashes the sim's store-commit app hash;
+`SimDeliver` builds no CometBFT block), so byte-identical would have licensed
+nothing about the new 1430 rejection either. The movement observed is a STATE
+movement and only a state movement.
+
+### The live gate
+
+`scripts/exit_demo.sh` re-run end to end on a live node, **PASSED**. Stage 7's
+banner used to print `solution rejected and the solver slashed 5% ✓` with
+nothing behind it — the positive form of the vacuous negative, and it was
+**false every time it printed**. It now reads the bond back and checks the
+GOVERNED rate (from params, not a hardcoded 5%, since D-007/D-008 make it
+governable):
+
+```
+  and the solver's bond REALLY fell: 100000000uclv → 95000000uclv at 500 bps ✓
+```
+
+**Three predictions about stage-7 ordering, written before the run, all held:**
+the 5% lands; no EARLIER stage loses bond (the bond is still `100000000uclv`
+when stage 7 begins, which the delta assertion proves); and stage 7 running last
+remains sufficient. **The ordering rationale is now load-bearing rather than
+cautious** — until this task the slash was reverted, so the stage could have
+been moved anywhere and no run would have noticed. Recorded in the stage's own
+doc comment so a future reorder cannot silently break it.
+
+### The record sweep — method first, then results
+
+Ran the D-095 negation sweep for BOTH trigger classes plus two more, on the
+claim's negation rather than the mechanism's name:
+
+- **Class A — statements FALSE today** that the fix makes true:
+  `grep -rn "commits with the failing tx"` → 3 sites, plus one in 2.14's own
+  acceptance-test doc comment.
+- **Class B — statements TRUE today** that the fix makes false:
+  `grep -rni "gas only|reverted with the failing|does not persist|never lands|not applied on the proposal"`
+  → ~10 real sites across 6 files (3 unrelated "pay gas only" false positives
+  discarded).
+- **Class C — the referent, not the guarantee:** every `5%` / `20%` /
+  `slashable` / `is slashed` claim re-read against WHICH of the three sites it
+  means. This is the class the two-trigger rule does not name, and where the
+  over-broad inheritance lived.
+- **Class D — citation resolution (Rule 9 step 2):** **`D-024` is a
+  mis-citation in 5 places.** D-024 is *"§1.3 steps 2–3 demonstrated in two
+  phases until task 0.7"*; the slash bps are **D-007**'s. It propagated from a
+  loose "D-024 incentive" phrase into D-097, CLAUDE.md's 2.17 row, PHASE3_PLAN
+  §5.1, SOLVER_SURFACE §6.3 and a test comment.
+
+**21 statements corrected.** The one worth naming: `cmd/conclave-demo/exit_demo.go`
+still asserted *"the reference solver in solver/ never reads
+IntentPayload.condition"* — stale since 2.14 closed it. **2.14's own negation
+grep corrected the sibling statement in `exit_demo_ibc.go` and missed this
+one**, because that sweep looked at printed banner strings and this is a comment.
+Recorded as evidence for a sharpening of the D-095 rule: the sweep's surface is
+*every* statement, not the ones that happen to be user-visible.
+
+### Deviations (Rule 8)
+
+1. **The plan's vector prediction was wrong, then right.** The plan said the
+   vector was "likely to MOVE"; the first measurement reported zero slash hits,
+   which would have made it another coverage shadow; that measurement was
+   INVALID because `go test` discards a passing binary's output without `-v`,
+   and the control run that proved the probe worked had used `-v` while the sim
+   runs had not. Re-run correctly, the original prediction was right. **The
+   false negative and its cause are recorded rather than smoothed over: it is
+   the same silence-reads-as-success failure as 2.14's S3, in a measurement
+   harness this time.**
+2. **Documentation was edited CONCURRENTLY with the gate**, not after it. The
+   effect is identical to the post-gate case Rule 9 step 4 anticipates, and the
+   proof is the same: the shipping tree's SOURCE-ONLY diff hash equals the
+   FULL-diff fingerprint recorded at gate time, `dbf0aa6a…`, byte for byte — not
+   one source or test byte moved after the gate.
+
+### Forward items
+
+**None.** 2.17 produced no new task — the first tail head to close without
+generating another, which is §5.3's termination condition reached rather than
+asserted. The keeper-level slash assertions were migrated (not deleted) into a
+fixture that models the ante+msg-server sequence, with a doc comment stating
+plainly that it REPRODUCES the sequence and is not evidence the chain performs
+it — that evidence is the app-level tests, and the distinction is exactly what
+five green keeper tests failed to make for two phases.

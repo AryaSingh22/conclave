@@ -6,7 +6,10 @@
 // REQUIREMENT, not a permission ceiling: `signed ⇒ attached` is enforced at
 // both chain chokepoints, so a solution that DROPS a condition its giver
 // signed is invalid (ErrConditionNotHonored, session 1429) and costs the
-// solver a 5% bond slash that commits with the failing tx. Attaching one the
+// solver a 5% bond slash. That slash is applied in the ANTE handler (task
+// 2.17) — this comment used to say it "commits with the failing tx", which was
+// false: a msg-server write is discarded together with the error that rejects
+// the proposal, so the penalty did not exist (D-097 F-1). Attaching one the
 // counterparty never consented to is the mirror failure
 // (ErrConditionNotConsented, 1427), and putting a conditioned leg in a match
 // shape the escrow funding cannot serve is a third (ErrConditionUnsupportedMatch,

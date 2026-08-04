@@ -18,6 +18,7 @@ import (
 	unorderedtypes "github.com/AryaSingh22/conclave/app/unordered/types"
 	mandateante "github.com/AryaSingh22/conclave/x/mandate/ante"
 	mandatekeeper "github.com/AryaSingh22/conclave/x/mandate/keeper"
+	sessionkeeper "github.com/AryaSingh22/conclave/x/session/keeper"
 	veilkeeper "github.com/AryaSingh22/conclave/x/veil/keeper"
 )
 
@@ -29,6 +30,7 @@ type HandlerOptions struct {
 	IBCKeeper        *ibckeeper.Keeper
 	MandateKeeper    mandatekeeper.Keeper
 	VeilKeeper       veilkeeper.Keeper
+	SessionKeeper    *sessionkeeper.Keeper
 	UnorderedManager unordered.Manager
 
 	// CosmWasm (task 2.2): the wasm ante decorators need the keeper's gas
@@ -48,6 +50,7 @@ type HandlerOptions struct {
 //	  → SubmitIntentPrevalidationDecorator (D-085/G2)          — reject a submit that would fail the veil msg server, before the charge
 //	  → MandateDecorator                  (SPEC §6.2)          — the agent-safety chokepoint
 //	  → FeeAbstractionDecorator           (SPEC §6.2)          — pay gas in USDC via conversion
+//	  → ProposeSolutionSlashDecorator     (SPEC §6.4, D-097)   — the proposal-time bond slash, in the only branch that survives its own message
 //
 // Unordered-tx integration (SPEC §6.7, task 0.5):
 //   - ExtensionOptionsDecorator accepts exactly UnorderedTxExtension;
@@ -81,6 +84,12 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 	}
 	if !options.UnorderedManager.Initialized() {
 		return nil, errors.New("unordered manager is required for ante builder")
+	}
+	// Task 2.17: without it the SPEC §6.4 proposal-time slash is silently
+	// absent — the exact failure mode the task exists to close, so it fails
+	// construction rather than nil-derefing at the first proposal.
+	if options.SessionKeeper == nil {
+		return nil, errors.New("session keeper is required for ante builder")
 	}
 	if options.WasmKeeper == nil {
 		return nil, errors.New("wasm keeper is required for ante builder")
@@ -125,6 +134,14 @@ func NewAnteHandler(options HandlerOptions) (sdk.AnteHandler, error) {
 		mandateante.NewSubmitIntentPrevalidationDecorator(options.MandateKeeper, options.VeilKeeper),
 		mandateante.NewMandateDecorator(options.MandateKeeper),
 		mandateante.NewFeeAbstractionDecorator(options.MandateKeeper),
+		// Task 2.17 (D-097 F-1): the SPEC §6.4 proposal-time bond slashes.
+		// LAST on purpose. The ante's store branch is the only one in v0.50
+		// that survives a failing message, so this is where a penalty for a
+		// rejected proposal has to be written — and being last means no
+		// decorator after it can fail and roll that write back. It never
+		// rejects a slashable proposal; the msg server still does, keeping
+		// 1412/1410 on the wire (D-093).
+		mandateante.NewProposeSolutionSlashDecorator(options.MandateKeeper, options.SessionKeeper),
 	}
 
 	return sdk.ChainAnteDecorators(anteDecorators...), nil

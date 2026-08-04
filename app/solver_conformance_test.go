@@ -324,24 +324,31 @@ func (f *solverFixture) escrows() []escrowtypes.Escrow {
 // reaches the wire (2.13/D-093 made 1412 dispatchable at all) and the 1429
 // message identifying the DOWNGRADE direction rather than the 1427 mirror.
 //
-// BOUNDARY PIN — THE SLASH DOES NOT PERSIST, AND THAT IS FINDING F-1 OF TASK
-// 2.14, OWNED BY NEW TASK 2.17. SPEC §6.4 and D-024 price an invalid solution
-// at a 5% bond slash, and x/session/keeper/solution.go:114 does call
-// slashSolver — but it then RETURNS AN ERROR, so baseapp discards the failing
-// message's cache context and the slash write goes with it. Through the msg
-// server an invalid solution therefore costs the solver GAS ONLY. Verified on
-// both tx paths: invalid-solution (1412) here, and equivocation (1410,
-// solution.go:97, nominally 20%) by the same shape.
+// THE SLASH GATE (task 2.17). This is the required msg-server-path evidence
+// that the SPEC §6.4 5% invalid-solution slash actually LANDS: not a keeper
+// call on a raw context, but a real FinalizeBlock tx through the wired ante
+// chain, asserting the solver's bond and slashed_count afterwards.
 //
-// Every in-tree slash assertion is green because they all call
-// k.ProposeSolution on a RAW keeper context with no tx cache-wrap
-// (x/session/keeper/solution_test.go:53), where the write does persist — the
-// D-093 shape exactly: one path verified, the sibling never enumerated
-// (METHODOLOGY Rule 4 step 5).
+// It replaces this block's previous incarnation, which pinned the OPPOSITE —
+// SlashedCount 0, bond untouched — as task 2.14's finding F-1 (D-097). SPEC
+// §6.4 and D-007 price an invalid solution at 5%, and solution.go did call
+// slashSolver; it then RETURNED AN ERROR, so baseapp discarded the failing
+// message's branch and the slash went with it. Through the msg server a
+// rejected proposal cost the solver GAS ONLY for the whole of Phases 0–2.
+// The old pin was watched RED here before being replaced (expected 0x0, actual
+// 0x1, at this exact assertion), which is what makes its replacement a
+// verified transition rather than an edit.
 //
-// The assertions below pin the CURRENT behaviour so the finding cannot be lost.
-// WHEN TASK 2.17 FIXES IT, THIS BLOCK MUST GO RED — replace it with the slash
-// assertions (SlashedCount 1, bond 95_000_000), do not relax it.
+// Why nothing caught it: every in-tree slash assertion called k.ProposeSolution
+// on a RAW keeper context with no tx cache-wrap
+// (x/session/keeper/solution_test.go), where the write does persist — five test
+// functions, all green, none of them on the shipping path. METHODOLOGY Rule 4
+// step 5: one path verified, the sibling never enumerated.
+//
+// The slash is now applied by ProposeSolutionSlashDecorator in the ante, the
+// only v0.50 store branch that outlives a failing message. Rejection is
+// unchanged and still comes from the msg server, which is why the wire
+// assertions above it (codespace + 1412 + the 1429 message) are untouched.
 func TestDroppingTheConditionIsRejectedAtTheWire(t *testing.T) {
 	f := newSolverFixture(t)
 	sellerSigil := f.registerSigil(f.sellerPriv, "solver-conf-seller")
@@ -381,13 +388,14 @@ func TestDroppingTheConditionIsRejectedAtTheWire(t *testing.T) {
 	require.Contains(t, propose.Log, "attaches none",
 		"the 1429 DOWNGRADE message — not the 1427 mirror, which would mean a different bug")
 
-	// THE BOUNDARY PIN (finding F-1 → task 2.17). Read the doc comment above
-	// before changing either line.
+	// THE SLASH GATE (task 2.17). Read the doc comment above before changing
+	// either line. 5% of a 100_000_000 bond = 5_000_000.
 	after := f.solverState()
-	require.Equal(t, uint64(0), after.SlashedCount,
-		"F-1/task-2.17: the 5% invalid-solution slash is REVERTED with the failing tx, so it never lands")
-	require.Equal(t, math.NewInt(100_000_000), after.Bond.AmountOf(app.BaseDenom),
-		"F-1/task-2.17: the bond is untouched — an invalid solution costs gas only, not the SPEC §6.4 5%")
+	require.Equal(t, uint64(1), after.SlashedCount,
+		"task 2.17: the SPEC §6.4 invalid-solution slash must LAND on the msg-server path")
+	require.Equal(t, math.NewInt(95_000_000), after.Bond.AmountOf(app.BaseDenom),
+		"task 2.17: invalid_solution_slash_bps (500 = 5%, D-007) taken from the bond — "+
+			"the deterrent the untrusted-solver model rests on, absent until now")
 
 	// and the session still settles — via the FALLBACK, which is precisely why
 	// asserting on the escrow instead of on the proposal would have hidden all
@@ -409,25 +417,28 @@ func TestDroppingTheConditionIsRejectedAtTheWire(t *testing.T) {
 		"the FALLBACK attached the condition (task 2.7) — a test asserting only this would be green with the defect present")
 }
 
-// TestEquivocationSlashAlsoDoesNotPersist is the SECOND half of finding F-1
-// (task 2.17), pinned in-tree so a reader with only this repository can check
-// it rather than take the claim on trust.
+// TestEquivocationSlashPersists is the SECOND half of the task-2.17 slash gate,
+// and it is a separate test rather than a case of the first because it is the
+// separate error path: equivocation (1410) is priced at 20%
+// (`equivocation_slash_bps`, D-007) and is decided BEFORE validateSolution ever
+// runs, so a fix that only reached the invalid-solution branch would leave it
+// silently unpriced.
 //
-// Equivocation — two solutions from one solver for one session — is the harsher
-// of the two penalties (20%, `equivocation_slash_bps`) and takes the identical
-// shape at x/session/keeper/solution.go:97: slashSolver, then return an error.
-// The slash is discarded with the failing message exactly as the 5% one is, so
-// equivocation on the msg-server path also costs gas only.
+// It replaces TestEquivocationSlashAlsoDoesNotPersist, which pinned the
+// opposite as finding F-1's second half (D-097): slashSolver ran at
+// solution.go:97 and the error that followed discarded it. That pin was watched
+// RED here before replacement (expected 0x0, actual 0x1).
 //
 // Both proposals go in ONE block at consecutive sequences. That detail is
-// load-bearing: one-tx-per-block closes the auction between them and the second
-// proposal fails 1409 (session closed) WITHOUT ever reaching the equivocation
-// branch — which is what a first attempt at this test did, and it would have
-// "passed" while proving nothing.
+// load-bearing and is INHERITED, not re-derived: one-tx-per-block closes the
+// auction between them and the second proposal fails 1409 (session closed)
+// WITHOUT ever reaching the equivocation branch — which is what a first attempt
+// at this test did, and it would have "passed" while proving nothing.
 //
-// WHEN TASK 2.17 FIXES THIS, THIS TEST MUST GO RED — replace it with the slash
-// assertions (SlashedCount 1, bond 80_000_000), do not relax it.
-func TestEquivocationSlashAlsoDoesNotPersist(t *testing.T) {
+// The two txs are separate txs, not two messages in one — which since task 2.17
+// is also the only legal shape (ErrProposalNotSole, session 1430; see
+// TestProposeSolutionMustBeSoleMessage).
+func TestEquivocationSlashPersists(t *testing.T) {
 	f := newSolverFixture(t)
 	sellerSigil := f.registerSigil(f.sellerPriv, "solver-conf-seller")
 	buyerSigil := f.registerSigil(f.buyerPriv, "solver-conf-buyer")
@@ -458,11 +469,13 @@ func TestEquivocationSlashAlsoDoesNotPersist(t *testing.T) {
 	require.Equal(t, uint32(1410), res[1].Code, "ErrEquivocation — the branch really was reached")
 	require.Contains(t, res[1].Log, "already proposed for this session")
 
+	// 20% of a 100_000_000 bond = 20_000_000.
 	after := f.solverState()
-	require.Equal(t, uint64(0), after.SlashedCount,
-		"F-1/task-2.17: the 20% equivocation slash is REVERTED with the failing tx too")
-	require.Equal(t, math.NewInt(100_000_000), after.Bond.AmountOf(app.BaseDenom),
-		"F-1/task-2.17: bond untouched — the harsher penalty is lost by the same mechanism")
+	require.Equal(t, uint64(1), after.SlashedCount,
+		"task 2.17: the SPEC §6.4 equivocation slash must LAND on the msg-server path")
+	require.Equal(t, math.NewInt(80_000_000), after.Bond.AmountOf(app.BaseDenom),
+		"task 2.17: equivocation_slash_bps (2000 = 20%, D-007) taken from the bond — "+
+			"the harsher penalty, and it was lost by the same mechanism as the 5%")
 }
 
 // TestReferenceSolverClearsAConditionedSettlement is task 2.14's acceptance.
@@ -473,7 +486,9 @@ func TestEquivocationSlashAlsoDoesNotPersist(t *testing.T) {
 // code 0, no slash, and that solution is the one that settles. Before task 2.14
 // this exact pair produced a solution with a bare DataGrant leg, which the chain
 // rejects as ErrConditionNotHonored (session 1429) while slashing 5% of the
-// solver's bond — the live functional defect this task exists to close.
+// solver's bond — the live functional defect task 2.14 closed. (That 5% only
+// became a real cost at task 2.17; when this comment was written the slash was
+// reverted with the failing tx, so the downgrade was rejected but free.)
 func TestReferenceSolverClearsAConditionedSettlement(t *testing.T) {
 	f := newSolverFixture(t)
 	sellerSigil := f.registerSigil(f.sellerPriv, "solver-conf-seller")

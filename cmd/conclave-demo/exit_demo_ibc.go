@@ -151,9 +151,12 @@ func (c *cli) exitDemoIBC(b *cli) error {
 	fmt.Println("     EffectiveSellerCondition, honours the per-class buyer relation,")
 	fmt.Println("     and drops any candidate the chain would reject instead of")
 	fmt.Println("     proposing it. Contract: docs/edge/SOLVER_SURFACE.md.")
-	fmt.Println("   · Still open (task 2.17, found by 2.14): the SPEC §6.4 invalid-")
-	fmt.Println("     solution and equivocation bond slashes are reverted with the")
-	fmt.Println("     failing tx, so a rejected proposal costs a solver gas only.")
+	fmt.Println("   · CLOSED (task 2.17, found by 2.14): the SPEC §6.4 invalid-")
+	fmt.Println("     solution (5%) and equivocation (20%) bond slashes used to be")
+	fmt.Println("     reverted with the failing tx, so a rejected proposal cost a")
+	fmt.Println("     solver gas only. They are applied in the ANTE now — the only")
+	fmt.Println("     v0.50 store branch that outlives a failing message — and the")
+	fmt.Println("     exit demo's consent stage asserts the bond really moves.")
 	fmt.Println("=================================================================")
 	return nil
 }

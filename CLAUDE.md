@@ -567,6 +567,45 @@ the time (D-088).
       That covers `ZkDeliveryTimeoutBlocks` and the other compile-time timeout/bond
       constants (D-073/D-076 posture). Opens with that plan-stop; off the exit path;
       any charging-path change ⇒ determinism vector re-run in isolation.
+      **ACCEPTED FROM 2.17 (D-098) — written in, not pointed at. 2.8 opens by
+      RATIFYING OR SUPERSEDING a recorded answer, never by re-deriving one.**
+      2.17 and 2.8 were deliberately SEQUENCED rather than folded, on a test worth
+      reusing: **fold when neither problem constrains the other first; sequence
+      when one does.** 2.17 had to establish what survives a failing tx before
+      2.8's ante-vs-msg-server question could be answered on anything but
+      intuition — a one-directional dependency. What 2.8 inherits, and must treat
+      as findings rather than re-open:
+      **(a) The v0.50 fact, established at the artifact** (`cosmos-sdk v0.50.15`
+      `baseapp/baseapp.go`): the ante branch is written at **line 933** the moment
+      the ante returns nil, BEFORE any message runs; the message branch at **line
+      989** only when `runMsgs` returns no error; a postHandler runs on a context
+      derived from the MESSAGE branch (**line 972**), which is why D-085 found a
+      postHandler refund structurally impossible — and equally rules out a
+      postHandler charge. **Only an ante write survives a failing message.** That
+      is the entire option space; 2.8's "mode-split charging" option must be
+      designed inside it.
+      **(b) The shape 2.17 chose**, as a worked precedent: ONE evaluator
+      (`EvaluateProposal`) read by two callers, the ante applying the price and the
+      msg server producing the rejection — so the wire identity (D-093) is
+      untouched while the state effect moves. If 2.8 keeps ante-prevalidation for
+      submits, this is the same pattern twice and the project has one charging
+      idiom; if 2.8 prefers a mode split, it must say why the submit path differs
+      from the proposal path, because 2.17 answered the identical question the
+      other way.
+      **(c) The exec-mode ruling: NO branch.** 2.17 runs identically in CheckTx,
+      DeliverTx and simulation, preserving D-059's zero-mode-branching posture. A
+      CheckTx-side write lands in the mempool's own branch and is reset at the next
+      Commit. **If 2.8 introduces a mode split it breaks this posture chain-wide,
+      not just for submits** — that is the cost to weigh, and it is 2.8's call to
+      make explicitly rather than inherit.
+      **(d) A tx-shape precedent exists.** `MsgProposeSolution` is now restricted
+      to a SOLE top-level message (`ErrProposalNotSole`, 1430) so the ante's
+      pre-tx-state verdict and the msg server's post-sibling-state verdict are
+      provably the same verdict. Any 2.8 charging design that reads state in the
+      ante and re-reads it in the msg server inherits the SAME hazard and must
+      say how it closes it — the sole-message rule is one answer, not the only one.
+      **(e) The vector re-baselined at 2.17** (D-098). 2.8 must run in isolation
+      against the NEW baseline, not D-082's.
 - [ ] 2.9 Receipt condition-outcome integrity (NEW in 2.4, G1/D-087) — the §6.6
       receipt's `condition_outcome` is stamped NONE unconditionally and never
       updated when the escrow resolves, so an ICS-23-provable receipt asserts
@@ -734,10 +773,13 @@ the time (D-088).
       reported a **non-compiling** sabotage as "(no failures)" and would have
       recorded the resolver call as not load-bearing, the exact opposite of the
       truth about the decision STOP #2 turned on. **NEW FINDING F-1 → task
-      2.17:** the SPEC §6.4 bond slashes (5% invalid, 20% equivocation) are
-      REVERTED with the failing tx, so a rejected proposal costs gas only —
+      2.17:** the SPEC §6.4 bond slashes (5% invalid, 20% equivocation) were
+      REVERTED with the failing tx, so a rejected proposal cost gas only —
       verified on both paths, green everywhere because every in-tree assertion
-      calls the keeper on a raw context (Rule 4 step 5). **NEW task 2.18:** F-14
+      calls the keeper on a raw context (Rule 4 step 5). **CLOSED by 2.17
+      (D-098): the slashes are applied in the ante and land; and the finding as
+      filed was OVER-BROAD — the conclude-time slash was never affected.**
+      **NEW task 2.18:** F-14
       is NOT discharged. Deliverable `docs/edge/SOLVER_SURFACE.md`, whose
       load-bearing limit is §6.1 — **no in-tree LIVE path reaches HASHLOCK or
       OPTIMISTIC** (the exit demo is ZK-only). `make lint test` green; vector run
@@ -797,11 +839,60 @@ the time (D-088).
       kept for the record; it is CLOSED by D-097 (see the checked row above).
       NOTE one clause that was wrong on its own terms rather than merely stale:
       "it will propose a slashable (5%) solution" — the proposal was real, the
-      PRICE was not. D-097 found the 5% is reverted with the failing tx, which
-      is now task 2.17.**
+      PRICE was not. D-097 found the 5% was reverted with the failing tx, which
+      became task 2.17 — **and 2.17 (D-098) has since made the price real, so
+      the clause is true today for a reason it was not true then.**
 
-- [ ] **2.17 Solver bond slashes do not persist on the tx path (NEW in 2.14,
-      D-097 finding F-1)** — SPEC §6.4 and D-024 price an invalid solution at 5%
+- [x] **2.17 Solver bond slashes do not persist on the tx path — CLOSED —
+      D-098.** The SPEC §6.4 proposal-time slashes now LAND. They are applied in
+      the **ante handler** (`ProposeSolutionSlashDecorator`), which is not a
+      preference but the option space: in cosmos-sdk v0.50 the ante's store
+      branch is written before any message runs (`baseapp.go:933`) and the
+      message branch only on success (`:989`), and a postHandler runs on a
+      context derived from the message branch (`:972`) — so an ante write is the
+      ONLY one that outlives the message it penalises. **The model was chosen,
+      not defaulted into:** gas-only deterrence is coherent, and it was rejected
+      because adopting it would pick an *unvalidated* deterrent (PHASE3_PLAN's
+      G-2 records that nothing prices the authored surface's consensus cost) over
+      a *specified* one, and would need a SPEC §6.4 amendment rather than a code
+      fix. **ONE evaluator, two callers** (`EvaluateProposal`): the ante turns the
+      verdict into the price, the msg server into the rejection — D-085's rule at
+      a new boundary, so the deterrent and the rejection cannot drift apart again
+      (they had drifted *completely*). Rejection stays in the msg server, so
+      D-093's wire identities are untouched. **NEW: `MsgProposeSolution` must be
+      the SOLE top-level message of its tx and must not be nested**
+      (`ErrProposalNotSole`, session **1430**) — the ante prices against pre-tx
+      state and the msg server against post-sibling state, so without this the
+      two verdicts can disagree in BOTH directions (slashing a solver whose
+      solution then succeeds; or a free way to propose garbage). Both pins
+      watched **RED** (expected 0x0, actual 0x1, at their own self-announcing
+      messages) then **replaced** with `SlashedCount 1` + bond 95_000_000 /
+      80_000_000. **THE INHERITED FINDING WAS OVER-BROAD, and correcting it is
+      this task's most load-bearing record change:** x/session slashes in THREE
+      places and only the two proposal-time ones were broken — `conclude.go`'s
+      `conclude_failed` 5% runs in EndBlock on the parent ctx, where no message
+      branch exists to discard it, and it always worked. Verified through a real
+      block (`TestConcludeFailedSlashPersistsThroughARealBlock`, asserting the
+      slash EVENT REASON rather than a count) rather than asserted — Rule 4
+      step 5 applied to this session's own claim. **DETERMINISM VECTOR
+      RE-BASELINED** (first movement since D-082), predicted before the build by
+      a throwaway instrumented run: the vector reaches the equivocation branch
+      **126 times** across the five seeds and the invalid-solution branch **zero**
+      times, so the movement is that half only, for the STATE reason — a
+      result-code change cannot move it (D-093). Hashes in D-098. `make lint
+      test` green; `scripts/exit_demo.sh` re-run on a live node, its stage-7
+      banner now READING THE BOND BACK instead of printing an unverified "solver
+      slashed 5% ✓". Sweep: **21 stale statements** corrected across 4 classes,
+      including a `D-024`→**D-007** mis-citation in 5 places and one stale claim
+      in SOURCE that 2.14's own negation grep missed.
+- [ ] ~~**2.17 Solver bond slashes do not persist on the tx path (NEW in 2.14,
+      D-097 finding F-1)**~~ **← CLOSED; the block below is the PRE-2.17 problem
+      statement, retained for the record. The checkbox above reads [x]; this one
+      is left unchecked-and-struck deliberately so the pair reads as one row, and
+      a mechanical open-row scan lands on the CLOSED one first.** — SPEC §6.4 and
+      ~~D-024~~ **D-007** (the mis-citation is corrected in place: D-024 is
+      "§1.3 steps 2–3 demonstrated in two phases", and the slash bps are D-007's
+      invented params) price an invalid solution at 5%
       of bond and equivocation at 20%. `x/session/keeper/solution.go` calls
       `slashSolver` for both (lines 114 and 97) **and then returns an error**, so
       baseapp discards the failing message's cache context and the slash write is
@@ -814,7 +905,8 @@ the time (D-088).
       `k.ProposeSolution` on a RAW keeper context with no tx cache-wrap
       (`solution_test.go:53`), where the write does persist — one path verified,
       the sibling never enumerated (METHODOLOGY Rule 4 step 5; the D-093 shape).
-      Severity: this is the D-024 incentive that makes "solvers are untrusted"
+      Severity: this is the D-007 incentive (the row said "D-024"; that is a
+      mis-citation, corrected at 2.17) that makes "solvers are untrusted"
       economically safe, and `max_solutions_per_session` does not bound invalid
       proposals since they are never stored. Bounded pre-testnet (no production
       solvers). **Sequencing: 2.8 is the natural sibling** — it already owns the
@@ -851,6 +943,42 @@ the time (D-088).
       task's STOP turned on. Acceptance: all three land in METHODOLOGY with their
       instances; F-14's row updated to point here; no amendment left owned by a
       session reference. Docs-only. Off the exit path.
+      **ACCEPTED FROM 2.17 (D-098), written in rather than pointed at — three
+      more, each earned by a rule failing or falling short in that session.**
+      **(d) Rule 9 step 4's fingerprint is BLIND TO UNTRACKED FILES.**
+      `git diff | sha256sum` covers tracked files only, so a NEW file — exactly
+      what a task adding a decorator or a test file produces — sits outside the
+      proof. 2.17 shipped two such files and had to fall back on comparing their
+      mtimes against the gate log to show they had not moved after the gate. The
+      fix is one flag: `git add -N` (intent-to-add) before fingerprinting, so
+      untracked files appear in `git diff`. Amend the rule's COMMAND, not only
+      its prose — the command is what people copy.
+      **(e) (c) needs its converse: a MEASUREMENT harness reports silence as
+      success too.** 2.17 instrumented the sim to predict the vector's movement,
+      saw zero hits, and nearly recorded a coverage shadow that does not exist —
+      because `go test` DISCARDS a passing binary's output without `-v`. The
+      control run that proved the probe worked had used `-v`; the measurement
+      runs had not. (c) is written about sabotage harnesses; the failure mode is
+      *any* harness where absence of output is read as absence of the thing.
+      **(f) The negation sweep's surface is EVERY statement, not the
+      user-visible ones.** 2.14's sweep corrected a stale claim in a printed
+      banner (`exit_demo_ibc.go`) and missed the identical claim in a comment
+      four files away (`exit_demo.go`), which 2.17's sweep found. Sharpen
+      D-095's mechanical form to say the grep runs over comments, doc comments
+      and test names — not only strings a user could read.
+      **(g) F-14 GAINS A THIRD TRIGGER CLASS — REFERENT AMBIGUITY.** F-14(a)
+      names two triggers for the enumerate-the-consumers sweep: *strengthened a
+      guarantee* and *renamed or split a referent*. 2.17 hit a third that
+      neither covers. The claim "the SPEC §6.4 slash" was **unchanged and never
+      renamed**; what was never pinned is **WHICH of three slash sites it
+      points at** — and x/session has three, of which only two were broken. A
+      sweep keyed on a changed guarantee or a changed name finds nothing here,
+      because nothing changed: the ambiguity was latent from the day the second
+      site was written. The trigger is *"a claim names a mechanism that exists
+      in more than one place"*, and the sweep is to enumerate the instances and
+      make every statement say which one it means. This is what turned D-097's
+      finding from correct-as-written into over-broad-as-read, so it belongs
+      beside the other two rather than as a footnote to them.
 
 - [ ] 2.15 §6.4 rule-3 per-leg attribution (NEW in 2.7, D-094) — the receiving task for
       the two D-089 re-points 2.7 assessed and explicitly re-deferred. **One task
@@ -988,7 +1116,11 @@ inheriting it.
 
 **The Phase-2 tail — one uniform rule, not six exceptions.** ~~**2.8, 2.9, 2.10,
 2.12, 2.14, 2.15**~~ **UPDATED at 2.14 (D-097): 2.14 is CLOSED, and it produced
-two new rows — the tail is now 2.8, 2.9, 2.10, 2.12, 2.15, 2.17, 2.18.** None is
+two new rows — the tail is now 2.8, 2.9, 2.10, 2.12, 2.15, 2.17, 2.18. UPDATED
+AGAIN at 2.17 (D-098): 2.17 is CLOSED and produced NO new rows, so the tail is
+2.8, 2.9, 2.10, 2.12, 2.15, 2.18 — the first time executing a tail head has not
+produced another head, which is §5.3's "a tail is finished when executing its
+head stops producing new heads" reaching its own termination condition.** None is
 exit-blocking. They keep their `2.x`
 numbers (identifiers, not a schedule — renumbering breaks ~15 `DECISIONS.md`
 cross-references and the in-tree markers), and each has a PHASE3_PLAN §5.1 row
@@ -1008,7 +1140,9 @@ candidate the chain would reject rather than proposing it.** (b) **2.9** — the
 run stays **INTERNAL**; 2.9 is a hard prerequisite for any external-facing use of
 that evidence, and 2.7 widened it.
 
-**A THIRD live consequence, discovered while closing (a) — task 2.17 (D-097).**
+~~**A THIRD live consequence, discovered while closing (a) — task 2.17
+(D-097).**~~ **CLOSED by task 2.17 (D-098) — the text below is the finding as
+filed, retained because the correction it received is the interesting part.**
 The 5%/20% figure in (a) was itself wrong about the mechanism: those SPEC §6.4
 slashes **never land on the tx path**, because `slashSolver` is called and then
 an error is returned, so the write is reverted with the failing message. A
@@ -1017,6 +1151,17 @@ rejected proposal costs a solver gas only. Verified on both the invalid-solution
 every in-tree assertion calls the keeper directly on an un-cache-wrapped context.
 It is the economic assumption the whole solver-untrusted model rests on, so it
 outranks the rest of the tail on severity even though it is not exit-blocking.
+
+**THE CORRECTION (D-098), and it is a correction of a correction.** "Those SPEC
+§6.4 slashes never land on the tx path" is TRUE as written but was read as the
+broader "the §6.4 slash does not land", and that is **over-broad**. x/session
+slashes in three places; the third — `conclude.go`'s `conclude_failed` 5%, when
+a WINNING solution fails at settlement — runs in EndBlock on the parent context,
+where no per-message branch exists to discard it. **It was never broken**, and
+2.17 verified that through a real block rather than inheriting either claim.
+A task that corrects an over-claim is the likeliest place to produce the mirror
+over-claim, and the guard against it is the same rule that found the original
+defect: Rule 4 step 5, applied to your own finding.
 
 **PHASE3_PLAN task 3.0 is TRIGGERED** and now plans from a settled boundary. Four
 obligations are written INTO 3.0's criteria rather than pointed at it (D-095):

@@ -597,6 +597,7 @@ func (app *ConclaveApp) setAnteHandler(txConfig client.TxConfig, wasmNodeConfig 
 			IBCKeeper:             app.IBCKeeper,
 			MandateKeeper:         app.MandateKeeper,
 			VeilKeeper:            app.VeilKeeper,
+			SessionKeeper:         app.SessionKeeper,
 			UnorderedManager:      app.UnorderedManager,
 			WasmKeeper:            &app.WasmKeeper,
 			WasmNodeConfig:        wasmNodeConfig,

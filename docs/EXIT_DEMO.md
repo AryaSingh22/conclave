@@ -197,10 +197,13 @@ predicates would reject. Contract: `docs/edge/SOLVER_SURFACE.md`.
 > first time it meets a condition-signing intent. "The chain now requires it" is
 > not "the reference client now does it.""*
 >
-> **One clause of that was wrong on its own terms, not merely stale:** there is
-> no "slashable (5%)" price. D-097 found that the SPEC §6.4 slash is reverted
-> with the failing tx, so a rejected proposal costs gas only — **task 2.17**. The
-> defect was real; the penalty attached to it was not.
+> **One clause of that was wrong on its own terms, not merely stale:** there was
+> no "slashable (5%)" price. D-097 found the SPEC §6.4 slash was reverted with
+> the failing tx, so a rejected proposal cost gas only — the defect was real,
+> the penalty attached to it was not. **CLOSED by task 2.17 (D-098):** the slash
+> is applied in the ante handler, the only cosmos-sdk v0.50 store branch that
+> outlives the message it penalises, and stage 7 of this demo now READS THE BOND
+> BACK instead of announcing the penalty.
 
 > **SUPERSEDED — kept for the record (§6a/D-091 and 2.13/D-093, both closed by
 > D-094; forward pointer: the three paragraphs above, `condition_binding.go`,
@@ -353,9 +356,13 @@ This is the part to read before quoting the exit criterion anywhere.
   (`attachFallbackCondition`), so consensus itself is a live writer. ~~What
   carries over is the narrower **task 2.14**: `solver/` still never reads
   `IntentPayload.condition`.~~ **Nor does that carry over any longer — task 2.14
-  (D-097) closed it; the reference solver attaches.** What DOES carry forward is
-  new: **task 2.17** — a rejected solver proposal costs gas only, because the
-  SPEC §6.4 bond slash is reverted with the failing tx.
+  (D-097) closed it; the reference solver attaches.** ~~What DOES carry forward
+  is new: **task 2.17** — a rejected solver proposal costs gas only, because the
+  SPEC §6.4 bond slash is reverted with the failing tx.~~ **Nor does THAT carry
+  forward: task 2.17 (D-098) applies both proposal-time slashes in the ante —
+  the only v0.50 store branch that outlives a failing message — and stage 7 now
+  asserts the bond really moves rather than printing that it did. Nothing from
+  this bullet is still open.**
 
 ## A constraint a real bridge operator inherits
 

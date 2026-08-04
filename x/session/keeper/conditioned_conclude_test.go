@@ -423,7 +423,8 @@ func TestConcludeConditioned_MismatchedConditionRejected(t *testing.T) {
 // TestProposeConditioned_UnsignedRejectedAtValidation proves the consent guard
 // also fires at SOLUTION VALIDATION (propose time, before settlement): a solver
 // proposing a condition the seller never signed has its solution rejected as
-// invalid (and is slashed, D-024). Consent is checked before price binding, so
+// invalid (and is slashed, D-007 — the ADR that prices it; "D-024" here was a
+// mis-citation corrected by task 2.17). Consent is checked before price binding, so
 // this isolates the consent rejection.
 func TestProposeConditioned_UnsignedRejectedAtValidation(t *testing.T) {
 	f := setupKeeper(t)

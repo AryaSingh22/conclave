@@ -57,51 +57,79 @@ func (k Keeper) SolutionsForSession(ctx sdk.Context, sessionID uint64) ([]types.
 	return sols, nil
 }
 
-// ProposeSolution implements SPEC §6.4 MsgProposeSolution. The solver must be
-// ACTIVE and the session in AUCTION. A second solution from the same solver is
-// equivocation (20% slash); an invalid solution is slashed 5%; both reject.
-// On success the solution is stored (scoring runs in Half B's EndBlock).
+// ProposalVerdict is the SPEC §6.4 disposition of a proposed solution: the
+// error the proposal must be rejected with (nil = accept) and, when SPEC §6.4
+// PRICES that rejection, the bond fraction it costs.
 //
-// Slashing is applied on the passed ctx so it persists even though the call
-// returns an error (Guard 3 analogue — there is no cache here; the slash
-// commits with the tx's failure state via the msg server).
-func (k Keeper) ProposeSolution(ctx sdk.Context, solver sdk.AccAddress, sessionID uint64, matches []types.Match, solutionID string) error {
+// The two halves are separated because they are applied in DIFFERENT baseapp
+// store branches — see ApplyProposalSlash for why that is forced rather than
+// chosen.
+type ProposalVerdict struct {
+	// Err is nil iff the proposal is valid and must be stored.
+	Err error
+	// SlashBps is non-zero for exactly the two rejections SPEC §6.4 prices:
+	// equivocation (equivocation_slash_bps, 20%) and an invalid solution
+	// (invalid_solution_slash_bps, 5%). Every other rejection is UNPRICED —
+	// a proposal into a closed session or from an inactive solver costs gas,
+	// not bond, and always has.
+	SlashBps uint32
+	// Reason is the slash event's reason attribute ("equivocation" |
+	// "invalid_solution"); empty whenever SlashBps is zero.
+	Reason string
+}
+
+// EvaluateProposal is the SINGLE implementation of the SPEC §6.4 proposal
+// disposition. It reads state and decides; it writes nothing.
+//
+// ONE IMPLEMENTATION, TWO CALLERS (D-085's rule at a new boundary):
+//   - ProposeSolution turns the verdict into a stored solution or a returned
+//     error — the rejection;
+//   - ApplyProposalSlash turns the SAME verdict into a bond slash — the
+//     deterrent.
+//
+// A rule added here reaches both callers, so the rejection and the deterrent
+// cannot drift apart. They drifted completely before task 2.17: the rejection
+// was real and the slash was reverted with it (D-097 finding F-1).
+//
+// The second return is an INFRASTRUCTURE error (store/codec), never a verdict.
+func (k Keeper) EvaluateProposal(ctx sdk.Context, solver sdk.AccAddress, sessionID uint64, matches []types.Match) (ProposalVerdict, error) {
 	s, err := k.GetSolver(ctx, phase0Chamber, solver)
 	if err != nil {
-		return err
+		return ProposalVerdict{Err: err}, nil
 	}
 	if s.Status != types.SOLVER_STATUS_ACTIVE {
-		return errorsmod.Wrapf(types.ErrSolverNotActive, "solver %s", solver)
+		return ProposalVerdict{Err: errorsmod.Wrapf(types.ErrSolverNotActive, "solver %s", solver)}, nil
 	}
 
 	session, err := k.GetSession(ctx, phase0Chamber, sessionID)
 	if err != nil {
-		return err
+		return ProposalVerdict{Err: err}, nil
 	}
 	if session.State != types.SESSION_STATE_AUCTION {
-		return errorsmod.Wrapf(types.ErrSessionNotInAuction, "session %d is %s", sessionID, session.State)
+		return ProposalVerdict{Err: errorsmod.Wrapf(types.ErrSessionNotInAuction, "session %d is %s", sessionID, session.State)}, nil
 	}
 
 	params, err := k.GetParams(ctx)
 	if err != nil {
-		return err
+		return ProposalVerdict{}, err
 	}
 
 	existing, err := k.SolutionsForSession(ctx, sessionID)
 	if err != nil {
-		return err
+		return ProposalVerdict{}, err
 	}
 	for _, sol := range existing {
 		if sol.Solver == solver.String() {
 			// equivocation: two solutions for one session = 20% slash.
-			if err := k.slashSolver(ctx, &s, params.EquivocationSlashBps, "equivocation"); err != nil {
-				return err
-			}
-			return errorsmod.Wrapf(types.ErrEquivocation, "solver %s session %d", solver, sessionID)
+			return ProposalVerdict{
+				Err:      errorsmod.Wrapf(types.ErrEquivocation, "solver %s session %d", solver, sessionID),
+				SlashBps: params.EquivocationSlashBps,
+				Reason:   "equivocation",
+			}, nil
 		}
 	}
 	if uint32(len(existing)) >= params.MaxSolutionsPerSession {
-		return errorsmod.Wrapf(types.ErrTooManySolutions, "session %d at cap %d", sessionID, params.MaxSolutionsPerSession)
+		return ProposalVerdict{Err: errorsmod.Wrapf(types.ErrTooManySolutions, "session %d at cap %d", sessionID, params.MaxSolutionsPerSession)}, nil
 	}
 
 	if err := k.validateSolution(ctx, session, matches, params); err != nil {
@@ -111,10 +139,76 @@ func (k Keeper) ProposeSolution(ctx sdk.Context, solver sdk.AccAddress, sessionI
 		// This was errors.Join, which loses the registered code: cosmossdk.io/
 		// errors cannot walk a multi-error, so every invalid solution surfaced
 		// the internal code 1 (D-091 finding F-1, fixed in task 2.13/D-093).
-		if slashErr := k.slashSolver(ctx, &s, params.InvalidSolutionSlashBps, "invalid_solution"); slashErr != nil {
-			return slashErr
-		}
-		return types.InvalidSolution(err)
+		return ProposalVerdict{
+			Err:      types.InvalidSolution(err),
+			SlashBps: params.InvalidSolutionSlashBps,
+			Reason:   "invalid_solution",
+		}, nil
+	}
+	return ProposalVerdict{}, nil
+}
+
+// ApplyProposalSlash applies the SPEC §6.4 proposal-time bond slash for a
+// solution that EvaluateProposal prices. It is called from the ante handler,
+// and that is not a stylistic choice — in cosmos-sdk v0.50 it is the only
+// place the write can survive.
+//
+// baseapp/baseapp.go (v0.50.15) branches the store TWICE per tx. The ante's
+// branch is written at line 933 the moment the ante returns nil, BEFORE any
+// message runs and regardless of what the messages then do. The message branch
+// is written at line 989 only when runMsgs returns no error. A postHandler
+// cannot bridge them: it runs on a context derived from that same message
+// branch (line 972) — which is also why D-085 found a postHandler refund
+// structurally impossible.
+//
+// So a keeper that slashes and then returns an error slashes into a store that
+// is discarded. That is precisely what x/session did until task 2.17: the
+// rejection was real, the deterrent was not, and a rejected proposal cost a
+// solver gas only (D-097 finding F-1).
+//
+// It writes nothing when the verdict is ACCEPT, and nothing for a rejection
+// SPEC §6.4 does not price.
+func (k Keeper) ApplyProposalSlash(ctx sdk.Context, solver sdk.AccAddress, sessionID uint64, matches []types.Match) error {
+	v, err := k.EvaluateProposal(ctx, solver, sessionID, matches)
+	if err != nil {
+		return err
+	}
+	if v.SlashBps == 0 {
+		return nil
+	}
+	s, err := k.GetSolver(ctx, phase0Chamber, solver)
+	if err != nil {
+		// Unreachable: a priced verdict is only produced after GetSolver
+		// succeeded a few lines earlier, on this same ctx. Swallowed rather
+		// than returned because an error here would fail the ANTE, which
+		// rejects the whole tx and rolls back — turning a missing deterrent
+		// into a missing rejection.
+		return nil
+	}
+	return k.slashSolver(ctx, &s, v.SlashBps, v.Reason)
+}
+
+// ProposeSolution implements SPEC §6.4 MsgProposeSolution. The solver must be
+// ACTIVE and the session in AUCTION; a second solution from the same solver is
+// equivocation and an invalid solution is rejected. On success the solution is
+// stored (scoring runs in Half B's EndBlock).
+//
+// It does NOT slash. The SPEC §6.4 proposal-time slashes are applied by the
+// ante decorator through ApplyProposalSlash, because a slash written here
+// would be discarded with the failing message (see ApplyProposalSlash for the
+// baseapp mechanics, and D-097/task 2.17 for the defect that taught it).
+// EvaluateProposal is therefore run twice per proposal tx — once by the ante
+// to price the rejection, once here to produce it. That cost is accepted: the
+// alternative is handing the verdict across the ante/msg-server boundary in a
+// context value, which trades a traversal for a hidden channel. Task 2.8 owns
+// revisiting the charging shape.
+func (k Keeper) ProposeSolution(ctx sdk.Context, solver sdk.AccAddress, sessionID uint64, matches []types.Match, solutionID string) error {
+	v, err := k.EvaluateProposal(ctx, solver, sessionID, matches)
+	if err != nil {
+		return err
+	}
+	if v.Err != nil {
+		return v.Err
 	}
 
 	sol := types.Solution{
