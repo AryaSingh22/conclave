@@ -1200,6 +1200,34 @@ task's NARROWING edits as the trigger to re-check every item pointed at it
       `make lint test` + vector green at `15c2470` before the Rev; source-only
       fingerprint proves docs-only.
 
+- [x] **3.3a Toolchain + security patching — D-099.** The security-patch vehicle.
+      **go 1.23.12 → 1.26.5** with cosmos-sdk / ibc-go / wasmd / block-sdk / kyber
+      / kyber-bls12381 / gnark **all untouched** (asserted mechanically before
+      every gate, not promised). **1.26 over 1.25 on evidence the 3.0 spike did
+      not have: `go1.27rc2` is published**, so 1.25 leaves the support window
+      within weeks and a security-patch vehicle must not land on a dying line.
+      **Advisories 46 → 6** — and the inherited figure was **16**, which did not
+      reproduce; task-time measurement governs. All 31 stdlib advisories closed by
+      the toolchain alone; the 6 residuals **all have no published fix**
+      (SDK x/crisis ×2 + slashing-evasion, msgpack ×2 via wasmvm, openpgp via
+      go-getter), each accepted-risk with reasoning. **The "0" is licensed by a
+      known-positive control**: the same command in the same invocation still
+      reports 46 on the retained pre-patch binary. **Nine causes, nine isolated
+      vector runs, all five D-098 hashes IDENTICAL every time** — including
+      **iavl v1.2.4→v1.2.8 alone**, which the plan pre-committed to treating as a
+      defect if it moved. It did not. `golangci-lint` 1.64.8 → **v2.12.2**: both
+      walls hit in one command (v1 refuses the new directive; v2 refuses the old
+      config), fixed by pinning it in the Makefile and **building it from source
+      with the repo's own toolchain**, so the coupling holds by construction.
+      **AUDIT F-5/F-6 CLOSED**, but F-5 not where it was assumed — `forbidigo`
+      has measured positional blind spots on **both** linter majors, so the ban
+      lives in `scripts/determinism_guards.sh`; all five guards **watched red on
+      their predicted guard**. **F-13's check BUILT** (`make inventory-rederive`),
+      with three defects in the check itself found and fixed before its output was
+      trusted, and both failing branches proven live. **F-15: there was no CI at
+      all**, while four criteria across three documents required it — FLAG P3-B's
+      shape recurring inside the same plan. New tasks **3.13/3.14/3.15/3.16**.
+
 ### The plan as originally proposed (D-080)
 
 Authored 2026-07-10 mid-Phase-2 at `b2f633b` (research + planning session,

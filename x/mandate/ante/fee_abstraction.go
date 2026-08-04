@@ -75,10 +75,14 @@ func (d FeeAbstractionDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate
 //
 // CONCLAVE-TODO(phase-3): skipped txs carry the default 0 mempool priority;
 // per-lane fee/priority handling (SPEC §6.7) still does not replace it. Owned
-// by task 3.3 (platform re-baseline), because 3.3's block-sdk disposition —
+// by task 3.3b (SDK-family migration), because 3.3b's block-sdk disposition —
 // fork-and-maintain vs an app-side PrepareProposal lane implementation — is
 // what decides who owns lane priority at all, and settling it before that
-// settles it twice. RE-TAGGED from phase-0 at PHASE2_DESIGN Rev 3 (D-090):
+// settles it twice. RE-POINTED from "task 3.3" at task 3.3a (D-099): D-096
+// SPLIT 3.3 into 3.3a/3.3b, and a split leaves the OLD referent behind — this
+// marker named a task that had stopped existing, which is Rule 6 sub-rule 3's
+// worst case (reads as pending, owned by nobody). Found by the F-13 marker
+// check the same task built. RE-TAGGED from phase-0 at PHASE2_DESIGN Rev 3 (D-090):
 // the marker deferred this to task 0.6, which completed in Phase 0, so it was
 // an unowned debt rather than a pending one (AUDIT F-8's class). Mempool
 // ordering only — no consensus or authorization property depends on it.

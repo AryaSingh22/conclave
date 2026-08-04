@@ -14,8 +14,12 @@ package unordered
 // (app/unordered_conformance_test.go); this header is the provenance pin.
 //
 // CONCLAVE-TODO(phase-3): replace this fork with the SDK's native ADR-070
-// unordered-tx support on the SDK-family bump. Owned by task 3.3 (platform
-// re-baseline), STOP #1.
+// unordered-tx support on the SDK-family bump. Owned by task 3.3b (SDK-family
+// migration), STOP #1. RE-POINTED from "task 3.3" at task 3.3a (D-099): D-096
+// split 3.3, and the old referent survived the split in-tree. 3.3a is the
+// toolchain/security half and explicitly does NOT touch the family, so it
+// cannot retire this fork — naming it here would have been worse than the
+// stale reference it replaced.
 //
 // Checkpoint history — the fork survives on evidence, not inertia:
 //   - task 2.2 (D-077, updating D-060) RE-RESOLVED stay-on-v0.50: block-sdk

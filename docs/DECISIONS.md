@@ -6468,3 +6468,371 @@ fixture that models the ante+msg-server sequence, with a doc comment stating
 plainly that it REPRODUCES the sequence and is not evidence the chain performs
 it — that evidence is the app-level tests, and the distinction is exactly what
 five green keeper tests failed to make for two phases.
+
+---
+
+## D-099 — Task 3.3a: the toolchain and security patch. Go 1.23.12 → 1.26.5 with the SDK family untouched; 46 reachable advisories → 6, all no-fix-available; nine causes, nine isolated vector runs, zero movement
+
+- **Date:** 2026-08-04/05 (task 3.3a, single-stop, after an approved plan with
+  five ratified decisions).
+- **Authority:** PHASE3_PLAN Rev 1 §3.3's 3.3a acceptance block, §5.1 rows F-5 /
+  F-6 / F-13 / "two-pin go-1.23 ceiling", §8.2 rulings 3 and 13, §5.3 order 2.
+  Builds on **D-096** (the 3.0 spike that made this task separable from 3.3b),
+  **D-098** (the determinism baseline this task must not move), **D-066** (the
+  kyber pin, which imposes no ceiling), **D-032** (the goleveldb pin), AUDIT
+  **F-5**/**F-6**. METHODOLOGY Rules 1/2/3/4/5/6/7/8/9.
+- **Starting HEAD:** `e4c966e` (task 2.17), clean, empty-diff fingerprint
+  `e3b0c44…b855`.
+
+### What moved, and what deliberately did not
+
+| | before | after |
+|---|---|---|
+| `go` directive / toolchain | 1.23.2 / go1.23.12 | **1.26.0 / go1.26.5** |
+| golangci-lint | 1.64.8 (v1 schema) | **v2.12.2, pinned in the Makefile, built from source** |
+| CometBFT | v0.38.23 | **v0.38.25** |
+| iavl | v1.2.4 | **v1.2.8** |
+| sonic (indirect) | v1.14.0 | **v1.15.2** |
+| grpc / protobuf | v1.70.0 / v1.36.5 | **v1.82.1 / v1.36.11** |
+| x/net · x/text · go-getter · xz · jose2go | v0.35.0 · v0.26.0 · v1.7.5 · v0.5.11 · v1.6.0 | **v0.55.0 · v0.39.0 · v1.8.6 · v0.5.15 · v1.7.0** |
+| gnark-crypto | v0.18.0 | **v0.18.1** |
+| **cosmos-sdk · ibc-go · wasmd · block-sdk · kyber · kyber-bls12381 · gnark** | v0.50.15 · v8.8.0 · v0.54.9 · v2.1.5 · v1.3.1 · v0.3.1 · v0.13.0 | **UNCHANGED — asserted mechanically at every cause** |
+
+The scope fence was not a promise; `cause.sh` re-listed all seven family pins
+before every one of the nine gates, so "3.3a did not touch the family" is a
+printed record rather than an intention.
+
+### Decision 1 — go **1.26**, not 1.25, and the decider is evidence the spike did not have
+
+The 3.0 spike gated 1.25.12 fully and reached 1.26 only at compile+crypto
+strength, so 1.25 was the safe-looking default. Against that: **`go1.27rc2` is
+published**, and Go supports exactly the two most recent majors. Targeting 1.25
+would have put **the project's security-patch vehicle on a line leaving support
+within weeks** — the precise rot the task exists to end. 1.26.5 costs one
+indirect bump (`sonic`, the only real go-1.26 binder, exactly as the spike
+found: `internal/rt/stubs.go:33: undefined: GoMapIterator`, reproduced here at
+HEAD before being fixed). The spike's honest limits bound *claims*, not
+*actions*: 3.3a ran the full gates on 1.26.5 itself rather than inheriting them.
+
+### The nine causes, each isolated, each with a written prediction (Rule 7 step 2)
+
+Every cause predicted **byte-identical to the D-098 baseline** before running.
+Every cause delivered it. The assertion was mechanical — `cause.sh` carries
+D-098's five hashes and compares them, so "byte-identical" is a checked claim,
+not a reading of output.
+
+| # | cause | lint | test | vector |
+|---|---|---|---|---|
+| 1 | `go` 1.23.2 → 1.25.0 **+ the golangci-lint v1→v2 migration** | 0 | 0 | 5/5 IDENTICAL |
+| 2 | sonic → v1.15.2, alone | 0 | 0 | 5/5 IDENTICAL |
+| 3 | `go` → 1.26.0 / go1.26.5 | 0 | 0 | 5/5 IDENTICAL |
+| 4 | CometBFT → v0.38.25 | 0 | 0 | 5/5 IDENTICAL |
+| 5 | **iavl → v1.2.8, isolated** | 0 | 0 | 5/5 IDENTICAL |
+| 6 | grpc → v1.82.1 (drags protobuf → v1.36.11) | 0 | 0 | 5/5 IDENTICAL |
+| 7 | x/net, x/text, go-getter, xz, jose2go, aws-sdk | 0* | 0 | 5/5 IDENTICAL |
+| 8 | gnark-crypto → v0.18.1 | 0 | 0 | 5/5 IDENTICAL |
+| 9 | guards, F-13 artifact, CI, docs | 0 | 0 | 5/5 IDENTICAL |
+
+\* cause 7's in-gate `make lint` returned 137 (`Killed`) — an OOM kill, not a
+lint failure; re-run standalone it is `0 issues.` See "the plausible failure"
+below.
+
+**Cause 5 deserves its own sentence, because the plan pre-committed to treating
+it as a defect.** iavl is state-commitment code, and the standing instruction
+was that any movement is a FINDING, not a routine re-baseline — a patch release
+must not change tree hashing. It did not move. The value of isolating it is that
+this is now *attributable*: had the vector moved anywhere in causes 1–9, exactly
+one dependency would have been in the frame.
+
+**The vector did not re-baseline. D-098's five hashes stand unchanged.**
+
+### Decision 2 — the advisory census, and the number that was wrong
+
+PHASE3_PLAN carried **16 reachable advisories** (from the re-evaluation, via
+D-096). Measured at task time with the same command on the same artifact:
+**46**, 31 of them in the `go1.23.12` standard library. The inherited figure did
+not reproduce and nothing in the record explains the delta. **The task-time
+measurement governs** — this is the third inherited number this task had to
+correct at the artifact (see the corrections section).
+
+**Result: 46 → 6, and zero stdlib entries remain.** The toolchain bump alone
+closed all 31 stdlib advisories; the leaf bumps closed the rest that have fixes.
+
+The six residuals **all have `Fixed in: N/A`** — there is no version to move to:
+
+| advisory | module | why it stays, and who owns it |
+|---|---|---|
+| GO-2024-2584 slashing evasion | cosmos-sdk v0.50.15 | Reachable via `keeper.Slash` **and** a registered `x/auth/vesting`. The mitigation is disabling vesting msg routes — a consensus decision, not a patch, and it sits directly on 2.17's slashing economics. **→ NEW task 3.13** |
+| GO-2023-1821, GO-2023-1881 x/crisis | cosmos-sdk v0.50.15 | ACCEPTED RISK. `x/crisis` is registered because **SPEC §6.1 requires invariant registration**; the advisories are "does not halt the chain" and "does not charge ConstantFee", neither of which the chain relies on. Dissolves with the family move (3.3b) |
+| GO-2026-4740, GO-2026-4513 msgpack DoS | shamaton/msgpack v2.2.0 | ACCEPTED RISK. Pinned by `wasmvm`; no fixed version exists. **→ 3.3b** (moves with the wasmd line) |
+| GO-2026-5932 openpgp unmaintained | golang.org/x/crypto | ACCEPTED RISK. Reached through `go-getter`'s checksum verification, i.e. the upgrade-download path **3.6** owns. Unreachable in normal block processing |
+
+One advisory was *introduced* mid-task and closed inside the same cause:
+`go-getter v1.8.6` switched to `aws-sdk-go-v2` and brought **GO-2026-5764**,
+closed by `eventstream v1.7.8` / `s3 v1.97.3`. A remediation's own blast radius
+is part of the remediation.
+
+**The census was verified against a known-positive control, and this is not
+ceremony.** A scanner reporting a small number looks identical whether it is
+measuring correctly, pointed at the wrong file, or silently broken. So the final
+run scans **both binaries in one invocation with one command**: the retained
+pre-patch `conclaved` still reports **46**, the new one reports **6**. The
+control is what licenses the 6.
+
+### golangci-lint: a schema migration wearing a version bump's clothes
+
+The plan named the version coupling as a critical-path item. It is worse than
+"upgrade the binary", and all of it was observed rather than assumed:
+
+- v1.64.8 against the new directive: `the Go language version (go1.24) used to
+  build golangci-lint is lower than the targeted Go version (1.25.12)`, exit 3.
+- v2.12.2 against the old config: `unsupported version of the configuration`.
+  **Both walls in the same command** — the upgrade is not optional and the
+  config rewrite is not optional.
+
+**The fix removes the coupling rather than tracking it.** The linter is pinned
+in the Makefile (`GOLANGCI_LINT_VERSION`) and installed **from source with the
+repo's own toolchain**, so its build-Go is `>=` the targeted Go *by
+construction*. A version table would have to be maintained; this cannot drift.
+The Makefile also invokes it by absolute `$(GOPATH)/bin` path, because a stale
+distro `golangci-lint` in `/usr/local/bin` shadows it on `PATH` — `make lint`
+was one PATH entry away from silently running the old linter.
+
+**`golangci-lint migrate` was faithful but not sufficient**, and the two gaps
+are the interesting part:
+
+1. **It stripped every comment**, including the rationale for each exclusion.
+   Restored by hand. A rule nobody can justify is a rule the next session
+   deletes.
+2. **v2's `staticcheck` absorbs four check families where v1 ran two.** Default
+   settings produced **12 new findings — 10 `QF*`, 3 `ST*`, and ZERO `SA*`/`S1*`
+   ** (i.e. the pre-migration check set is still perfectly clean). Taking the
+   default would have silently widened the gate and forced edits to `x/escrow`
+   keeper code **inside a security-patch task**. Pinned to the v1-equivalent set
+   (`all, -ST*, -QF*`) with the reason recorded in-file; widening is **task
+   3.14**, a real decision with real diffs.
+
+### F-5 closed — and the ban is NOT where the audit assumed it would be
+
+AUDIT F-5 asked for a machine-enforced float ban. The obvious home was
+`forbidigo`. **Sabotage says forbidigo cannot carry it**, and the same is true
+of the wall-clock ban that has been in this repo since Phase 0:
+
+```
+FIRES on   t := time.Now()          var f float64
+MISSES     return time.Now()...     struct field `Rate float64`
+           func params/results      float64(x) conversions
+```
+
+measured with `analyze-types: true`, and **identically on v1.64.8 and v2.12.2** —
+so this is a long-standing property of the tool, **not** something the migration
+broke. That was checked explicitly by re-running the old linter against the old
+config on a rolled-back copy, because "my change caused it" and "it was always
+so" demand different responses.
+
+Consequence: **the real ban lives in `scripts/determinism_guards.sh`**, which
+greps the whole consensus surface (170 files) and has no positional blind spots;
+forbidigo stays as a second layer with its limits written into
+`.golangci.yml`'s header. **The header of that file is where F-5 came from in
+the first place** — it claimed "no floats" above a config that banned none — so
+this task's version states what it does *not* enforce. An AST-based replacement
+without blind spots is **task 3.15**.
+
+### The CI finding, which is the loudest thing in this record
+
+**There was no CI. None.** No `.github/`, no workflow, no runner, at any point
+in the project's history. Meanwhile 3.3a's own acceptance criteria required
+"**CI green on it**" and "CI guards … **live and watched red**", and AUDIT
+F-5/F-6 were both dispositioned as "→ 3.3a **CI guard**". Four criteria across
+three authority documents named an environment that had never existed.
+
+**This is FLAG P3-B's shape, recurring inside the same plan.** P3-B was a
+constraint claim carried for three weeks and never tested against the artifact;
+this is an environment claim carried across three documents and never tested
+against the repository. The narrower rule, and it is the transferable one:
+
+> **An acceptance criterion that names a tool or an environment must have that
+> tool's EXISTENCE verified at bootstrap — because a criterion you cannot run is
+> indistinguishable from a criterion that passes.**
+
+Nobody wrote anything false. "F-5 → 3.3a CI guard" is a perfectly good
+disposition. It simply encoded an assumption that the reader supplies for free
+and never checks, and the check costs one `ls`.
+
+`.github/workflows/ci.yml` now exists (build, vet, lint, test, guards,
+govulncheck; the 9-minute vector is `workflow_dispatch`/scheduled, not
+per-push). **HONEST LIMIT, recorded in the file itself and not to be quietly
+dropped: at authoring time this workflow has never executed.** Push needs a
+credential this environment cannot release non-interactively, so every step was
+verified locally, in order, on the shipping tree — and *not* by observing a
+hosted run. The first hosted run is owed.
+
+### The guards, and the reds that make them mean something
+
+`make guards` → `scripts/determinism_guards.sh`, five guards, all passing on the
+shipping tree — which is exactly the state F-5 was in for two phases. So each
+was **watched red on its own predicted guard**, then green again:
+
+| guard | sabotage | result |
+|---|---|---|
+| G1 float ban (F-5) | `float64` struct field | RED on G1 as predicted |
+| G2 wall-clock ban | `time.Now()` | RED on G2 as predicted |
+| G3 goleveldb pin (F-6) | delete the `replace` line | RED on G3 as predicted |
+| G4 platform manifest | iavl → v1.2.4 | RED on G4/iavl as predicted |
+| G4b `go` directive | 1.26.0 → 1.25.0 | RED on G4b as predicted |
+
+G3 checks both the `replace` directive **and** what actually resolves, because a
+replace can be present and overridden — presence is not enforcement.
+
+### F-13 built, and it found things — including three bugs in itself
+
+`scripts/inventory_rederive.sh` (`make inventory-rederive`) is §3.1.2's block as
+a committed artifact plus F-13's new step 8. Steps 6 and 7 are clean; step 8
+reports a real finding. **Three defects in the check itself were found and fixed
+before trusting its output**, and each is a reusable trap for anyone writing a
+comment-scanning check:
+
+1. **File scope, not block scope** — grepping whole files for `task N.N`
+   conflated a marker's OWNER with historical prose ("closed by 2.7"). It
+   reported five false owners, **two of them written by the fix that introduced
+   them**.
+2. **Wrapping** — `owned` ending one line and `by task 3.4` beginning the next;
+   the window must be joined. Three false UNOWNEDs.
+3. **The comment prefix** — joining yields `owned // by task 3.4`; the `//` must
+   be stripped first.
+
+Plus a design correction worth more than the three: the pattern must be **broad**
+(any `task N.N` in the block), not the house `owned by` phrasing, because the
+repo also writes `RE-POINTED … to **task 2.12**`. *Breadth was never the bug;
+file scope was.* And, inevitably, the artifact built to mechanise §3.1.2
+reproduced §3.1.2's own self-reference problem — it matches its own greps, so it
+excludes itself by name.
+
+**Both failing branches were then proven live** against known-positives (a
+marker naming closed task 2.7 → flagged; a marker naming no task → flagged),
+because a check whose failing branch has never been observed is indistinguishable
+from one that cannot fail.
+
+Findings from the first real run:
+
+- **Step 6 — one unresolved citation:** `TestEquivocationSlashAlsoDoesNotPersist`,
+  deleted by 2.17 **by its own instruction**. The surviving mention is inside
+  CLAUDE.md's ledger row **for task 2.17 itself**, where it is not a claim about
+  the tree but a record of what 2.17 was required to do. That is precisely the
+  case §3.1.2 predicts format-filtering cannot reach (ledger rows mark
+  supersession with strikethrough, not blockquotes). **Allowlisted with its
+  reason**; if the name ever appears outside 2.17's row, it is a finding.
+- **Step 7 — two markers named "task 3.3", which stopped existing when D-096
+  split it.** Re-pointed to **3.3b** (`fee_abstraction.go:76`,
+  `sigverify.go:16`). A split leaves the OLD referent behind, exactly as D-096
+  recorded for documents — and the same mechanism reaches in-tree markers, where
+  no rename ever happens. Note 3.3a *cannot* be the owner of either: both are
+  family work it explicitly does not touch.
+- **Step 8 — 22 commits are cited nowhere**, verified against known-positives
+  (`6d6b730`, `1aecfbf`, `65376ab` correctly found as cited) and at every
+  abbreviation length including full 40-hex. This is F-13's predicted mechanism
+  observed: the two most recent feature commits (`a572607` 2.14, `e4c966e` 2.17)
+  are uncited **because a commit cannot cite its own hash**, and nothing cited
+  them afterwards. The rest are Phase-0/1 commits never recorded by hash.
+  **→ NEW task 3.16.** This ADR cites both, taking the count to **21** — and the
+  count moving *while the ADR was being written* is the finding restating itself:
+  3.3a's own commit becomes uncitable-by-itself the instant it lands. The
+  backfill is finite work; **the check is the part that keeps working.**
+
+### The final gate, on the shipping tree
+
+Run after every source and documentation change was in place, so the
+before/after fingerprints answer the question directly rather than by argument:
+
+```
+FULL-TREE FINGERPRINT BEFORE  bb6812b856fbe2801151e4fe8a91d6fe34b0d34f52c1339966d1e84a60c51043
+make guards                   ALL PASSED (5/5)
+make inventory-rederive       steps 6,7 clean; step 8 = task 3.16
+make lint                     0 issues
+make test                     0 (17/17 packages)
+go vet                        0
+determinism vector            PASS — 5 seeds, two independent processes
+  seed 1,2,7,12,42            IDENTICAL to the D-098 baseline (asserted, not read)
+FULL-TREE FINGERPRINT AFTER   bb6812b856fbe2801151e4fe8a91d6fe34b0d34f52c1339966d1e84a60c51043
+SOURCE-ONLY (excl *.md)       0b7e08a33bfee350a731d2db3091be8458fc97b20456c91aee4ad52d1d59e6ad
+```
+
+The in-gate `go build` line reported `BUILD_RC=1` — the **fifth** OOM linker
+kill (`link: signal: killed`), not a build failure; `make lint` and `make test`
+both compile the whole tree and both passed in the same run. Re-run standalone
+once the vector released memory: **`BUILD_RC=0`, `VET_RC=0`**. It is reported
+rather than quietly re-run, because a task that spent this much of its record on
+plausible failures does not get to hide its own.
+
+Two paragraphs above (the step-8 count and this section) were written **after**
+the gate. Nothing else moved: the **source-only fingerprint of the shipping tree
+is unchanged at `0b7e08a3…`**, which is Rule 9 step 4's two-fingerprint standard
+doing exactly what it was added for — a post-gate documentation edit that is
+*justified* rather than merely confessed.
+
+### The plausible failure — a family that now has five members
+
+Four times this task, a **resource kill wore a real failure's clothes**:
+`link: signal: killed` on two probe builds and one cause-8 build, and
+`Killed` / exit **137** from `make lint` inside cause 7's gate. Each is an OOM
+kill under memory pressure while linking a ~180 MB binary; each reads exactly
+like "the advisory bumps break the build" or "the migrated lint config fails".
+Each dissolved the same way — **re-run the step alone and watch it pass** — and
+the strongest single piece of evidence was structural: cause 7's `go build`
+succeeded from the *same tree* that had just "failed" to link.
+
+With 2.17's plausible *negative* (a green keeper test that proved nothing) this
+family now has five members across two tasks, and the guard has never changed:
+**test the apparatus before believing the result.** The two forms are worth
+naming separately, because they fail in opposite directions and only one of them
+announces itself:
+
+- a **plausible negative** is silent and ships the defect;
+- a **plausible positive-failure** is loud and wastes a session chasing a
+  defect that does not exist — or, worse, gets "fixed".
+
+This task also produced two of its own: a watched-red harness that scored three
+**false negatives** because the sabotage was not `gofmt`-formatted (golangci-lint
+reports the formatting problem and suppresses the analyzer finding), and a
+`grep` that returned nothing through Git Bash because MSYS rewrote the path. In
+both cases the first instinct — "the guard is inert" — was wrong, and the
+apparatus was at fault.
+
+### Corrections to the record this task had to make at the artifact
+
+Three inherited facts did not survive contact, which is the FLAG-D discipline
+earning its place:
+
+1. **16 reachable advisories → 46** (measured, same command, same artifact).
+2. **`iavl v1.2.9` does not exist.** §8.2 ruling 13 says "v1.2.4 vs v1.2.9;
+   5 patches behind". The v1.2 line ends at **v1.2.8** (4 patches); v1.3.x is a
+   separate line. Adopted **v1.2.8**, staying on the minor line the ruling
+   intended.
+3. **3.3a's own acceptance said "vector byte-identical to D-082"** — written at
+   3.0, *before* 2.17 re-baselined at D-098. The intent survived; the citation
+   was stale. This is the D-095 shape (a correction reaches only the docs its
+   author remembers) applied to this task's own criteria, and **3.3a owns the
+   fix**: §3.3 now cites D-098.
+
+None of the three was a mistake anyone could have avoided by being more careful
+at the time. They are what a written number does after the world moves.
+
+### New tasks
+
+- **3.13** — GO-2024-2584 slashing evasion: reachable `keeper.Slash` +
+  registered `x/auth/vesting`. Decide and record the vesting msg-route posture.
+- **3.14** — the widened `staticcheck` families (`ST*`, `QF*`): 12 findings,
+  adopt or re-decline with reasons.
+- **3.15** — replace the forbidigo determinism rules with an AST check that has
+  no positional blind spots; retire the grep guard to a backstop if it succeeds.
+- **3.16** — commit-hash traceability backfill: the 22 commits step 8 names.
+
+### Deviation (Rule 8)
+
+`scripts/determinism_guards.sh` was written **after cause 1's gate captured its
+BEFORE fingerprint**, so that gate's AFTER fingerprint differed. The delta was
+bounded rather than asserted: the working diff **excluding that one file** equals
+the BEFORE fingerprint byte for byte (`2256e5b26…`). The file is a shell script
+executed by no gate, so it cannot influence a build, test or app hash. No further
+repo writes were made during any subsequent gate, and all eight remaining causes
+have byte-identical before/after fingerprints.

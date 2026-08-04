@@ -1,0 +1,92 @@
+name: ci
+
+# TASK 3.3a (D-099) CREATED THIS FILE, AND THAT IS ITSELF THE FINDING.
+#
+# Before this commit the repository had NO continuous integration of any kind —
+# no `.github/`, no workflow, no runner. Meanwhile PHASE3_PLAN §3.3's acceptance
+# criteria for this very task required "CI green on it" and "CI guards … live
+# and watched red", and AUDIT F-5/F-6 were both dispositioned as "→ 3.3a CI
+# guard". Four criteria across three documents named an environment that had
+# never existed, and nobody noticed because a criterion you cannot run looks
+# exactly like a criterion that passes.
+#
+# The generalization, recorded in D-099: ACCEPTANCE CRITERIA THAT NAME A TOOL OR
+# AN ENVIRONMENT MUST HAVE THAT TOOL'S EXISTENCE VERIFIED AT BOOTSTRAP. It is
+# the same shape as FLAG P3-B — a load-bearing claim that gained authority by
+# never being checked against the artifact — occurring a second time inside the
+# same plan.
+#
+# HONEST LIMIT, and it must not be quietly dropped later: at authoring time this
+# workflow had never executed. Push requires a credential this environment
+# cannot release non-interactively, so it was verified by running every step
+# locally, in order, on the shipping tree — and NOT by observing a hosted run.
+# The first hosted run is owed; until it is green, treat this file as unproven.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `go-version:` here on purpose. go.mod carries both the directive and
+      # the `toolchain` line, and `go-version-file` makes go.mod the SINGLE
+      # source of truth — so the toolchain cannot drift from the pin that
+      # scripts/determinism_guards.sh (G4b) asserts.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      # `make lint` installs the PINNED golangci-lint from source with this
+      # repo's own toolchain (Makefile: GOLANGCI_LINT_VERSION). That is what
+      # keeps the linter's build-Go >= the targeted Go by construction — the
+      # coupling that hard-stopped CI the moment the 3.3a directive bump landed.
+      - name: lint
+        run: make lint
+
+      - name: test
+        run: make test
+
+      - name: determinism + dependency guards
+        run: make guards
+
+      # The full determinism vector is ~9 minutes across two processes, so it is
+      # not on every push. It is the release gate, run on demand and on a
+      # schedule, and it remains a REQUIRED manual step before any task closes
+      # (METHODOLOGY Rule 7).
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go build -o /tmp/conclaved ./cmd/conclaved
+          govulncheck -mode binary /tmp/conclaved || true
+        continue-on-error: true
+
+  vector:
+    # Opt-in: the determinism gate over the committed seed vector, two
+    # independent processes. Manual/scheduled only — see above.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: false
+      - name: determinism vector
+        run: make sim-determinism

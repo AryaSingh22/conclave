@@ -10,6 +10,17 @@ ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=conclave \
 
 BUILD_FLAGS := -ldflags '$(ldflags)'
 
+# GOLANGCI_LINT_VERSION is PINNED ALONGSIDE THE TOOLCHAIN ON PURPOSE (task 3.3a,
+# D-099). golangci-lint hard-fails on any `go` directive newer than the Go the
+# linter binary was built with, so the linter version and go.mod's directive are
+# a COUPLED PAIR, not two independent choices. Installing from source with this
+# repo's own toolchain makes the constraint hold BY CONSTRUCTION rather than by
+# a version table someone has to keep in step. The absolute path matters too: a
+# stale distro-installed golangci-lint in /usr/local/bin shadows $(GOPATH)/bin
+# on PATH, and `make lint` would silently run the wrong linter.
+GOLANGCI_LINT_VERSION := v2.12.2
+GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
+
 all: lint test install
 
 # install builds conclaved into $GOPATH/bin (SPEC §12)
@@ -29,11 +40,33 @@ test:
 sim-determinism:
 	bash scripts/sim_determinism.sh
 
-lint:
-	golangci-lint run
+# lint-tools installs the PINNED linter if the pinned version is not the one
+# present. It is a prerequisite of lint so a fresh checkout, or a machine whose
+# PATH linter is stale, cannot lint against the wrong binary.
+lint-tools:
+	@"$(GOLANGCI_LINT)" --version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION:v%=%) " || \
+		(echo "installing golangci-lint $(GOLANGCI_LINT_VERSION) with $$(go env GOVERSION)" && \
+		 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION))
 
-lint-fix:
-	golangci-lint run --fix
+lint: lint-tools
+	"$(GOLANGCI_LINT)" run
+
+# guards is the machine-enforced half of SPEC §11.6 plus the dependency-pin
+# guards (AUDIT F-5 float ban, F-6 goleveldb pin, the dependency-EOL manifest).
+# It is SEPARATE from `lint` because the linter has measured positional blind
+# spots — see the header of .golangci.yml and D-099. Part of CI on every push.
+guards:
+	bash scripts/determinism_guards.sh
+
+# inventory-rederive is PHASE3_PLAN §3.1.2's standing obligation as an artifact
+# (finding F-13): the authored-surface greps, the test-citation sweep, marker
+# ownership, and the commit-citation check. Run at every boundary and before any
+# external review is contracted.
+inventory-rederive:
+	bash scripts/inventory_rederive.sh
+
+lint-fix: lint-tools
+	"$(GOLANGCI_LINT)" run --fix
 
 localnet:
 	./scripts/localnet.sh
@@ -56,4 +89,4 @@ proto-gen:
 proto-lint:
 	cd proto && buf lint
 
-.PHONY: all install build test sim-determinism lint lint-fix localnet demo-contract proto-gen proto-lint
+.PHONY: all install build test sim-determinism lint lint-tools lint-fix guards inventory-rederive localnet demo-contract proto-gen proto-lint

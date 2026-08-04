@@ -1,60 +1,138 @@
 # Conclave lint configuration (SPEC §11.6: gofmt + golangci-lint enforced,
 # including determinism guards — no wall-clock time, no floats, no map
 # iteration into state writes in consensus code).
+#
+# SCHEMA v2, and the version line is load-bearing: golangci-lint v2 REFUSES a
+# v1 config outright ("unsupported version of the configuration"), and v1
+# refuses any `go` directive newer than the Go it was built with. Task 3.3a
+# (D-099) hit both walls in the same command and migrated with
+# `golangci-lint migrate`. The migration dropped every comment in this file and
+# folded `gosimple` into `staticcheck`; the comments are restored below, because
+# they record WHY each exclusion exists and a rule nobody can justify is a rule
+# the next session deletes.
+#
+# The linter version is pinned in the Makefile (GOLANGCI_LINT_VERSION) and
+# installed FROM SOURCE with the repo's own toolchain, so the "built with go1.X
+# is lower than the targeted Go" hard-stop cannot recur: the linter's build-Go
+# is now >= the targeted Go BY CONSTRUCTION, rather than by a version table
+# someone has to keep in step.
+version: "2"
+
 run:
-  timeout: 10m
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
+    - depguard
     - errcheck
-    - gofmt
-    - goimports
-    - gosimple
+    - forbidigo
     - govet
     - ineffassign
     - misspell
-    - staticcheck
+    - staticcheck # v2: absorbs the former standalone `gosimple` linter
     - unconvert
     - unused
-    - depguard
-    - forbidigo
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/AryaSingh22/conclave
-  depguard:
+  settings:
+    staticcheck:
+      # BEHAVIOUR-PRESERVING, and the reason is recorded because the alternative
+      # is invisible: v2's `staticcheck` absorbs FOUR check families, but v1 ran
+      # only two of them here — `staticcheck` (SA*) and `gosimple` (S1*).
+      # `stylecheck` (ST*) was never enabled and `quickfix` (QF*) did not exist.
+      # Taking v2's default would have silently WIDENED the gate by 12 findings
+      # (10 QF*, 3 ST*, and ZERO SA*/S1* — i.e. the old set is still perfectly
+      # clean) and forced edits to x/escrow keeper code inside a security-patch
+      # task. Widening the lint gate is a real decision with real diffs; it is
+      # task 3.14, not a side effect of a schema migration (D-099).
+      checks:
+        - all
+        - -ST*
+        - -QF*
+    depguard:
+      rules:
+        determinism:
+          # SPEC §11.6: consensus code must be deterministic.
+          deny:
+            - pkg: math/rand
+              desc: non-deterministic; consensus code must not use math/rand (SPEC §11.6)
+            - pkg: math/rand/v2
+              desc: non-deterministic; consensus code must not use math/rand (SPEC §11.6)
+    forbidigo:
+      analyze-types: true
+      # ┌── READ THIS BEFORE TRUSTING THE RULES BELOW ──────────────────────────┐
+      # │ forbidigo is a SECOND LAYER here, NOT the enforcement. Measured at    │
+      # │ task 3.3a (D-099) by sabotage, on v1.64.8 and v2.12.2 ALIKE, so this  │
+      # │ is a pre-existing property and not a migration regression:            │
+      # │   FIRES on   `t := time.Now()`      and `var f float64`               │
+      # │   MISSES     `return time.Now()...` , struct fields `Rate float64`,   │
+      # │              func params/results, and `float64(x)` conversions        │
+      # │ i.e. it inspects some statement positions and not others, even with   │
+      # │ analyze-types enabled. The COMPLETE ban lives in                      │
+      # │ scripts/determinism_guards.sh (`make guards`), which greps the whole  │
+      # │ consensus surface. Keeping both is defence in depth; believing this   │
+      # │ file alone is what produced AUDIT F-5 in the first place — a HEADER   │
+      # │ claiming "no floats" above a config that banned none. Task 3.15 owns  │
+      # │ replacing this with an AST check that has no positional blind spots.  │
+      # └───────────────────────────────────────────────────────────────────────┘
+      forbid:
+        - pattern: ^time\.Now$
+          msg: wall-clock time is non-deterministic; use ctx.BlockTime()/BlockHeight() (SPEC §11.6)
+        - pattern: ^float(32|64)$
+          msg: floats are non-deterministic across platforms; use math.LegacyDec / math.Int (SPEC §11.6)
+  exclusions:
+    generated: lax
+    # These four presets are v2's spelling of v1's `issues.exclude-use-default:
+    # true`, which was in force before the migration. They are carried so the
+    # migration stays behaviour-preserving; they are not a new loosening.
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      determinism:
-        # SPEC §11.6: consensus code must be deterministic.
-        deny:
-          - pkg: math/rand
-            desc: "non-deterministic; consensus code must not use math/rand (SPEC §11.6)"
-          - pkg: math/rand/v2
-            desc: "non-deterministic; consensus code must not use math/rand (SPEC §11.6)"
-  forbidigo:
-    forbid:
-      - p: ^time\.Now$
-        msg: "wall-clock time is non-deterministic; use ctx.BlockTime()/BlockHeight() (SPEC §11.6)"
+      # tests and the CLI are not consensus code
+      - linters:
+          - depguard
+          - forbidigo
+        path: _test\.go
+      - linters:
+          - forbidigo
+        path: ^cmd/
+      - linters:
+          - forbidigo
+        path: ^scripts/
+      # SDK module-simulation operations are test-support code, not consensus:
+      # the simtypes.Operation signature requires math/rand, and the randomness
+      # is the framework's SEEDED *rand.Rand (deterministic given the seed),
+      # exactly as the cosmos-sdk x/*/simulation packages do (task 0.11).
+      - linters:
+          - depguard
+          - forbidigo
+        path: /simulation/
+      - linters:
+          - depguard
+          - forbidigo
+        path: ^simutil/
+    paths:
+      - .*\.pb\.go$
+      - .*\.pb\.gw\.go$
+      - third_party$
+      - builtin$
+      - examples$
 
-issues:
-  exclude-files:
-    - ".*\\.pb\\.go$"
-    - ".*\\.pb\\.gw\\.go$"
-  exclude-rules:
-    # tests and the CLI are not consensus code
-    - path: _test\.go
-      linters: [forbidigo, depguard]
-    - path: ^cmd/
-      linters: [forbidigo]
-    - path: ^scripts/
-      linters: [forbidigo]
-    # SDK module-simulation operations are test-support code, not consensus:
-    # the simtypes.Operation signature requires math/rand, and the randomness is
-    # the framework's SEEDED *rand.Rand (deterministic given the seed), exactly
-    # as the cosmos-sdk x/*/simulation packages do (task 0.11).
-    - path: /simulation/
-      linters: [depguard, forbidigo]
-    - path: ^simutil/
-      linters: [depguard, forbidigo]
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/AryaSingh22/conclave
+  exclusions:
+    generated: lax
+    paths:
+      - .*\.pb\.go$
+      - .*\.pb\.gw\.go$
+      - third_party$
+      - builtin$
+      - examples$

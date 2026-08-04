@@ -1073,11 +1073,28 @@ have to be redone (3.4/3.5 sequence AFTER **3.3b** for this reason; 3.1/3.9/3.10
 **Acceptance — 3.3a.** Supported Go line live; **`golangci-lint` upgraded in the
 same task and CI green on it** (see below); CometBFT at v0.38.25; every
 remediable reachable advisory from the `govulncheck -mode binary` census either
-closed or carried with a written reason; **determinism vector byte-identical to
-D-082** (the spike says it will be — if it is not, that is a real finding, not a
-re-baseline); CI guards (F-5 float ban, F-6 goleveldb pin, dependency-EOL watch)
-live and **watched red**; `govulncheck` re-run and the before/after counts
-recorded in the ADR.
+closed or carried with a written reason; ~~**determinism vector byte-identical to
+D-082**~~ → **byte-identical to D-098** (the spike says it will be — if it is
+not, that is a real finding, not a re-baseline); CI guards (F-5 float ban, F-6
+goleveldb pin, dependency-EOL watch) live and **watched red**; `govulncheck`
+re-run and the before/after counts recorded in the ADR.
+
+> **CORRECTED AT TASK 3.3a (D-099), and the correction is the instructive part.**
+> This criterion was authored at task 3.0 and cited **D-082**'s hashes. Task 2.17
+> (D-098) re-baselined the vector — the first movement since D-082 — between 3.0
+> and 3.3a, so by the time the criterion was executed it pointed at a **dead
+> baseline**. The intent always survived ("do not move the vector"); the citation
+> did not. This is D-095's shape applied to this plan's own acceptance criteria:
+> **a correction reaches only the documents its author remembers**, and the
+> author of D-098 had no reason to think about a criterion written for a task
+> that had not started. 3.3a ran against D-098's hashes and they held, unmoved,
+> across all nine causes.
+>
+> **A second correction, from the same class (D-099).** §8.2 ruling 13 says
+> "iavl pinned v1.2.4 vs **v1.2.9**; 5 patches behind". **`v1.2.9` does not
+> exist** — the v1.2 line ends at **v1.2.8** (4 patches), and v1.3.x is a
+> separate minor line. 3.3a adopted **v1.2.8**, which is the version the ruling
+> meant. Verify versions at task time; a version in prose is a claim.
 
 > **NAMED WORK ITEM, on 3.3a's critical path — not a footnote.** `golangci-lint`
 > **hard-fails on any `go` newer than the version the linter binary was built
@@ -1328,7 +1345,7 @@ plan-stop can hard-require it.
 | 3.0 | Rev at Phase-2 boundary | housekeeping | entry gate for all — ✅ **CLOSED, Rev 1, D-096** |
 | 3.1 | Audit: STOP + engagement + triage | SPEC §8(d) mainnet gate | gates MAINNET; starts first (FLAG P3-A) |
 | 3.2 | ZK MPC ceremony + VK swap | D-076 mainnet gate | after 3.1 STOP; decides 3.12 |
-| **3.3a** | **Toolchain + security patching** *(single-stop)* | PROPOSED | **the security-patch vehicle**; ahead of the Phase-2 tail except 2.14 (§5.3) |
+| **3.3a** | **Toolchain + security patching** *(single-stop)* | ✅ **DONE — D-099** | go 1.26.5, family untouched; **46 → 6** reachable advisories (all no-fix-available), zero stdlib; nine isolated causes, vector unmoved from D-098 |
 | **3.3b** | **SDK-family migration** *(two-stop)* | PROPOSED | **gates 3.8** (FLAG P3-B); gates 3.4/3.5/3.6/3.7 |
 | 3.4 | Mandate-bound completeness | AUDIT F-2/F-3 debts | after **3.3b**; before 3.8 |
 | 3.5 | Gate-coverage expansion | PROPOSED | after **3.3b**; before 3.8 |
@@ -1366,8 +1383,8 @@ plan-stop can hard-require it.
 | L2 unsafe default cap | D-070 | → **3.8** genesis policy |
 | F-2 unvalued msg types | AUDIT | → **3.4** |
 | F-3 / D-020 / D-044 PriceSource swap | AUDIT | → **3.4** |
-| F-5 float ban review-only | AUDIT | → **3.3a** CI guard |
-| F-6 goleveldb pin unguarded | AUDIT | → **3.3a** CI guard |
+| F-5 float ban review-only | AUDIT | ✅ **CLOSED by task 3.3a** (D-099) — but **not where this row assumed**. `forbidigo` cannot carry the ban: measured by sabotage, it fires on `var f float64` and MISSES struct fields, params and conversions — **identically on golangci-lint v1.64.8 and v2.12.2**, so the same hole has been in the §11.6 wall-clock ban since Phase 0. The enforcing guard is `scripts/determinism_guards.sh` (`make guards`), watched red; forbidigo remains a second layer with its limits written into `.golangci.yml`. AST replacement → **3.15** |
+| F-6 goleveldb pin unguarded | AUDIT | ✅ **CLOSED by task 3.3a** (D-099) — G3 checks the `replace` directive **and** what actually resolves, since a replace can be present and overridden. Watched red |
 | **F-7 §5.1 limit rate ignored (D-049)** *(added D-090)* | AUDIT | ✅ **CLOSED by task 2.6** (D-089) — recorded against F-7 for the first time at D-090; it had been closed-in-fact and open-on-paper |
 | **F-8 stale `CONCLAVE-TODO(phase-0)` markers** *(added D-090)* | AUDIT | ✅ **CLOSED by the Rev-3 marker sweep** (D-090). It was unowned for two phases and independently rediscovered — see docs/AUDIT.md's disposition section for the transferable lesson |
 | Two-pin go-1.23 ceiling (now EOL) | PHASE2 §4, R2 | → **3.3a** (the Go bump, which the 3.0 spike proved needs NEITHER pin touched) + **3.3b** (the actual two-pin re-validation, if v0.3.4 / gnark v0.14+ are adopted). **Rev 1 re-frames this row:** PHASE2_DESIGN §4's invariant was never a constraint on the `go` directive — see §2.3(a) and §2.2 R2 |
@@ -1410,9 +1427,15 @@ plan-stop can hard-require it.
 | **F-10 seven of eight `recover()` sites undispositioned** *(added D-096)* | 3.0 obligation 1 | ✅ **CLOSED IN-TASK** — §3.1.2 step 4 returns **8** consensus/crypto panic boundaries; §3.1.1 named **one**. All eight are now enumerated in §3.1.1 with per-site guard/fail-closed/auditor-note. No forward owner needed; the **audit** checks them |
 | **F-11 §3.1.1 named the wrong function for the D-089 recover** *(added D-096)* | 3.0 obligation 2 | ✅ **CLOSED IN-TASK** — the guard is in `rateWithinBound` (`solution.go:617`), not `checkLimitRate`. Corrected in place with a marked block. **Recorded rather than silently fixed because it is obligation 2's proof-of-value**: a grep-diff would never have surfaced it, since nothing was *added* — existing prose was simply wrong |
 | **F-12 D-088's invariant now has THREE implementations** *(added D-096)* | 3.0 obligation 2 | → **3.5**, as a named sub-item (it is a gate-coverage question: what *test* would catch a divergence?). `storetypes.PrefixEndBytes` + `x/veil/keeper.prefixEnd` + `x/session/types.PrefixEnd`, all currently byte-equivalent. **Latent, not live.** Decide: collapse to the SDK's, or keep the copies and add a test asserting all three agree on the adversarial inputs (all-`0xFF`, empty, single-byte) |
-| **F-13 commit-hash traceability recurs BY CONSTRUCTION** *(added D-096)* | 3.0 obligation 6 | → **3.3a** (ship it with the CI-guard work). 2.16 restored hash traceability by hand; `6d6b730` was left as a deliberate calibration seed; 3.0's pass found it **and** found **`15c2470` uncited**. The gap **relocates to the newest commit every time**, so hand-fixing is a treadmill. Deliverable: the §3.1.2 block as a committed `scripts/` artifact (plan-stop decision 2, decided YES) **plus one new check obligation 6 proved is needed — enumerate from `git log` and assert every commit is cited somewhere.** The check must tolerate exactly the HEAD-can't-cite-itself case and no other |
+| **F-13 commit-hash traceability recurs BY CONSTRUCTION** *(added D-096)* | 3.0 obligation 6 | ✅ **CHECK BUILT by task 3.3a** (D-099) — `scripts/inventory_rederive.sh` (`make inventory-rederive`), §3.1.2's block plus step 8, with **both failing branches proven live** against known-positives. Three defects in the check itself were found and fixed before its output was trusted (file-vs-block scope, comment wrapping, the `//` prefix). It immediately found (a) two markers naming **"task 3.3"**, which stopped existing when D-096 split it — re-pointed to **3.3b**; (b) one unresolved test citation, allowlisted with its reason; (c) **22 uncited commits → new task 3.16**. The BACKFILL is 3.16; the CHECK, which is what F-13 asked for, is done. *Original disposition:* → **3.3a** (ship it with the CI-guard work). 2.16 restored hash traceability by hand; `6d6b730` was left as a deliberate calibration seed; 3.0's pass found it **and** found **`15c2470` uncited**. The gap **relocates to the newest commit every time**, so hand-fixing is a treadmill. Deliverable: the §3.1.2 block as a committed `scripts/` artifact (plan-stop decision 2, decided YES) **plus one new check obligation 6 proved is needed — enumerate from `git log` and assert every commit is cited somewhere.** The check must tolerate exactly the HEAD-can't-cite-itself case and no other |
 
 | **F-14 two METHODOLOGY amendments owed** *(added D-096)* | 3.0 obligation 5 | → **the session that commits D-096**, as its own edit to `docs/METHODOLOGY.md`. (1) Rule 8 step 3 gains the D-095 **enumerate-the-consumers-first** sub-rule with its mechanical form **verbatim** — and **written to BOTH trigger classes** (*strengthened a guarantee* **and** *renamed or split a referent*), because Rev 1 fired it on a structural split D-095's wording does not cover, and writing it narrowly would leave that case unowned (§8.1); (2) Rule 9 gains the companion **"a FLAG is a CLAIM"** rule. **(3) ADDED at task 2.17 (D-098) — a THIRD trigger class: REFERENT AMBIGUITY.** The two classes above both assume something *changed* (a guarantee, a name). 2.17 hit a case where nothing changed: "the SPEC §6.4 slash" was never renamed and never strengthened, but **which of x/session's three slash sites it meant was never pinned** — and only two of the three were broken, which is how a correct-as-written finding was read as over-broad. Trigger: *a claim names a mechanism that exists in more than one place*. Sweep: enumerate the instances, then make every statement say which one it means. A change-keyed sweep is structurally blind to this, because the ambiguity is latent from the moment the second instance is written. **Deliberately NOT made inside this Rev** — METHODOLOGY is a separate authority document, and amending it from inside a plan Rev is exactly the silent cross-document edit Rule 8 step 3 exists to prevent. Written here so the item is owned by a row, not by the memory of whoever writes the commit |
+
+| **F-15 THE PLAN ASSUMED A CI THAT DID NOT EXIST** *(added D-099)* | 3.3a | ✅ **CLOSED IN-TASK** (`.github/workflows/ci.yml`), and recorded loudly because it is **FLAG P3-B's shape recurring inside this same document**. There was no CI of any kind — no `.github/`, no workflow, no runner — while 3.3a's acceptance required "**CI green on it**" and "CI guards … **live and watched red**", and F-5/F-6 above were both dispositioned "→ 3.3a **CI guard**". Four criteria across three authority documents named an environment that had never existed. **The transferable rule: an acceptance criterion naming a tool or environment must have that tool's EXISTENCE verified at bootstrap, because a criterion you cannot run is indistinguishable from one that passes.** HONEST LIMIT carried in the workflow file itself: it has never executed — push needs a credential this environment cannot release non-interactively, so every step was verified locally on the shipping tree and **not** by a hosted run. First hosted run is owed |
+| **3.13 vesting-route slashing-evasion posture** *(added D-099)* | GO-2024-2584 | **NEW.** The one residual advisory that is a decision rather than an accepted risk: reachable through `keeper.Slash` **and** a registered `x/auth/vesting`, with no fixed SDK version on the v0.50 line. Standard mitigation is disabling the vesting msg-service routes. It sits directly on 2.17's slashing economics (D-098), which is why it is not an inline patch. Decide and record the posture; if the answer is "wait for 3.3b", say so in an ADR rather than by silence |
+| **3.14 widened `staticcheck` families** *(added D-099)* | 3.3a | **NEW.** golangci-lint v2 folds `stylecheck` (ST\*) and `quickfix` (QF\*) into `staticcheck`; v1 ran neither. Adopting the default produced **12 findings (10 QF\*, 3 ST\*, zero SA\*/S1\*)** and would have forced `x/escrow` keeper edits inside a security-patch task, so 3.3a pinned the v1-equivalent set with the reason in-file. Adopt the wider set or re-decline it with reasons — a real decision with real diffs, not a config default |
+| **3.15 AST-based determinism ban** *(added D-099)* | 3.3a / AUDIT F-5 | **NEW.** `forbidigo` has measured positional blind spots (fires on `var f float64` and `t := time.Now()`; misses `return time.Now()`, struct fields, params, conversions) on **both** linter majors. `scripts/determinism_guards.sh` closes it by grep. Replace with an AST check that has no blind spots, then demote the grep to a backstop. **Note the pre-existing consequence: the §11.6 wall-clock ban has never caught `return time.Now()` since Phase 0** — no live instance exists (guard G2 is green), but the ban was weaker than its record implied |
+| **3.16 commit-hash traceability backfill** *(added D-099)* | F-13 / 3.3a step 8 | **NEW.** The CHECK is built (F-13 row above); this is the BACKFILL it found: **22 commits cited nowhere** on first run, verified against known-positives and at every abbreviation length. Two were the newest feature commits (`a572607` 2.14, `e4c966e` 2.17) — F-13's predicted mechanism exactly, since a commit cannot cite its own hash and nothing cited them afterwards. **D-099's own text cites both, so the count is now 21**, all Phase-0/1 commits never recorded by hash. **The mechanism has not been fixed, only exercised**: 3.3a's own commit will be uncitable-by-itself the moment it lands, which is why the CHECK — not this backfill — is the durable half |
 
 ### 5.2 Advisories to the remaining Phase-2 tasks (research fallout; not Phase-3 scope)
 
