@@ -613,7 +613,7 @@ the time (D-088).
       say how it closes it — the sole-message rule is one answer, not the only one.
       **(e) The vector re-baselined at 2.17** (D-098). 2.8 must run in isolation
       against the NEW baseline, not D-082's.
-- [x] 2.9 Receipt condition-outcome integrity — `<COMMIT>`, **(D-100).** The §6.6
+- [x] 2.9 Receipt condition-outcome integrity — `02ac1ea`, **(D-100).** The §6.6
       field is TRUE: `CONDITION_OUTCOME_PENDING = 5` appended, the CONCLUDE stamp
       made conditional (NONE only when NONE is true), and escrow resolution
       written back onto BOTH parties' receipts through a new `0x0C |
