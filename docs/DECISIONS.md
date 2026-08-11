@@ -6836,3 +6836,389 @@ the BEFORE fingerprint byte for byte (`2256e5b26…`). The file is a shell scrip
 executed by no gate, so it cannot influence a build, test or app hash. No further
 repo writes were made during any subsequent gate, and all eight remaining causes
 have byte-identical before/after fingerprints.
+
+---
+
+## D-100 — Task 2.9: `Receipt.condition_outcome` is TRUE — a PENDING value, a conditional CONCLUDE stamp, and escrow-resolution write-back; plus finding F-16, that the mitigation D-087 traded the fix away for was INERT on the case it was written for
+
+- **Date:** 2026-08-05 (task 2.9; plan approved at STOP #1, build reviewed at
+  STOP #2)
+- **SPEC:** §6.6 (Receipt.condition_outcome), §6.5 (condition classes), §6.4
+  (atomic CONCLUDE). **Closes:** D-087 (the finding AND its disposition (b)).
+  **Consumes:** D-094 (2.7 made conditioned settlements the default path),
+  D-090 (the §6 demo's external-facing condition), D-098 (the vector baseline
+  in force). **HEAD at start:** `e919625`.
+
+### The defect, re-derived from the tree
+
+`x/session/keeper/receipt.go` stamped `CONDITION_OUTCOME_NONE`
+unconditionally and was the only non-generated writer of the field in the
+repo — so `RELEASED`, `REFUNDED` and `DISPUTED` had no writer at all, and no
+`PENDING` value existed. A conditioned settlement's ICS-23-provable receipt
+therefore asserted, to exactly the external verifiers §6.6 exists to invite,
+that it carried no delivery condition, while its funds sat in `x/escrow` and
+could still refund. Task 2.7 then made the in-consensus fallback ATTACH signed
+conditions, so the false stamp became the common case rather than the rare one.
+
+**Two facts the brief did not carry and the bootstrap had to find.**
+
+1. **`Escrow.intent_id` is never populated.** `buildEscrowRecord` sets
+   id/session/payer/payee/amount/condition/chamber and nothing else. An escrow
+   record cannot locate its receipts — and a conditioned settlement has TWO of
+   them, one per party, which no single field could carry anyway. The 0x0C
+   index is therefore NECESSARY, not a convenience.
+2. **The disclosure was nine statements across six files, two of them
+   EXECUTABLE.** The brief named three (7683_SURFACE §6.1/§6.3/§6.4); the
+   negation sweep found X402_SURFACE ×2, SOLVER_SURFACE §6.4 (added at 2.14,
+   outside the inherited inventory), EXIT_DEMO ×3, and live tripwires in
+   `cmd/conclave-demo/exit_demo.go` and `exit_demo_ibc.go`.
+
+### What was built
+
+- **Proto:** `CONDITION_OUTCOME_PENDING = 5`, APPENDED (a proto3 enum addition
+  leaves every existing encoded value byte-identical). `DISPUTED`'s comment
+  CORRECTED — it read "resolved via dispute", which no reading could make
+  true, since the escrow's DISPUTED state is not terminal.
+- **Stamp:** `PENDING` when the settling match carries a condition; `NONE`
+  only when NONE is true.
+- **Index:** `0x0C | escrow_id | receipt_id` in the x/session store, written
+  inside the same atomic Conclude cache as the receipt and the escrow, for
+  conditioned legs only.
+- **Write-back:** `x/session/keeper/receipt_outcome.go`, reached from x/escrow
+  through a `ReceiptOutcomeWriter` seam wired in `app.go` under the established
+  set-before-capture contract.
+- **Contract:** package `fillback` — ONE implementation of 7683_SURFACE §6.3
+  check 3, called by both in-tree consumers.
+
+### The decisions (each spec-unpinned; each ruled on at the stop)
+
+**D1 — the enum.** Append `PENDING = 5`. Renumbering was never on the table.
+
+**D2 — DISPUTED is NOT terminal, and it gets a writer.** The alternatives were
+to make DISPUTED a terminal synonym for a lost-dispute refund, or to never
+write it at all. Both leave an enum value with no writer, which is the *same
+defect* 2.9 exists to close, one value smaller. The receipt therefore mirrors
+the escrow: `PENDING → [DISPUTED] → {RELEASED, REFUNDED}`.
+
+**D3 — the receipt stops being write-once, and that is safe because proofs are
+height-bound.** `condition_outcome` is rewritten in place under BOTH receipt
+keys (0x07 and 0x08 — a one-sided update would make `Receipts(sigil)` and
+`Receipt(id)` disagree about one settlement). An ICS-23 proof proves the value
+AT its `ProofHeight`, so **no proof already issued was invalidated** and no
+stored receipt needed migration. The rejected alternative — an immutable
+receipt plus a separate provable outcome key — would have left
+`condition_outcome` permanently `PENDING`: the same defect under a new name.
+
+**The mutability is BOUNDED by monotonicity, enforced rather than observed.**
+`terminalOutcome` refuses to rewrite a receipt that has reached `NONE`,
+`RELEASED` or `REFUNDED`. The escrow gate already makes those states
+absorbing; doing it again here is deliberate, because an external verifier who
+cached a terminal reading is relying on the RECEIPT's guarantee, not on
+x/escrow continuing to have that property.
+
+**D4/D5 — the seam is typed in escrow's vocabulary because the obvious
+signature is an import cycle:** `x/escrow/types → x/receipt/types →
+x/session/types → x/escrow/types`. The interface therefore names
+`EscrowState`, never `ConditionOutcome`, and the projection lives in x/session
+— which is also where it belongs on the merits, since x/session owns what a
+receipt means.
+
+**D6 — a missing index is a NO-OP, and this is safety-critical.** Escrow
+resolution runs in EndBlock (the timeout sweep), where a returned error
+propagates and halts the chain, so this path may never fail on absent data. It
+is also CORRECT rather than merely safe: x/session's genesis proto carries no
+receipts at all, so a genesis-imported escrow has no receipt to update and
+nothing is being skipped. That asymmetry is filed as **task 2.19**.
+
+**D7 — §6.3 check 3 REWRITTEN (option C1), not merely repaired.** See F-16.
+
+**D8 — both demos rewritten; §6a re-run live, §6b not.** Stated as a limit in
+`scripts/exit_demo_ibc.sh` and EXIT_DEMO's §6b table rather than inherited
+silently from §6a's green.
+
+### FINDING F-16 — the mitigation D-087 traded the fix away for was INERT
+
+D-087 chose disposition (b), defer-with-teeth, on the argument that
+7683_SURFACE §6.3 check 3 — *accept only unconditioned coin legs* — made the
+v1 fill-back rail **safe by construction with zero node changes**. It did not.
+
+`validateConditionedMatch` admits exactly one conditioned shape: ONE
+conditioned DataGrant leg seller→buyer, plus coin payment legs buyer→seller,
+across two sigils. A conditioned coin leg is rejected on-chain
+(`ErrConditionUnsupportedMatch`). So **in every chain-valid conditioned match,
+every coin leg carries a nil condition** — and those are exactly the legs
+`openConditionedEscrows` routes INTO escrow. The clause therefore:
+
+- could never REJECT anything a chain-valid `Match` contains; and
+- ACCEPTED, in full, an escrowed payment to the order's recipient.
+
+**The harm needs no collusion.** An order says "pay N to sigil S"; a resolver
+fills it by buying S's conditioned data; the payment escrows; the condition
+times out; the funds **refund to the resolver**, which the origin settler has
+already reimbursed. S is never paid.
+
+**Severity: D-087's class — external-verifier integrity, no current consumer,
+the bridge unbuilt and in a separate repo — but WORSE IN KIND, because it was
+the accepted substitute for fixing this.** A mitigation taken in place of a fix
+should meet the bar the fix would have; this one was never tested against the
+artifact until 2.9 looked.
+
+**The fix (C1) and the field are the same decision.** Check 3 is now two
+conjuncts: (a) some leg pays the recipient its minimum, AND (b)
+`condition_outcome ∈ {NONE, RELEASED}`. `NONE` provably means nothing was
+escrowed (an unconditioned DataGrant escrows a zero amount and its coin legs
+settle directly through `applyLeg`); `RELEASED` means the escrow paid the
+payee. Both are terminal and the outcome is monotone, so an admissible reading
+can never be contradicted later. **This also OPENS conditioned-delivery
+fill-back**, which §6.4 had declared out of scope "until task 2.9".
+
+### FINDING F-17 — one mandated rule, ~~two~~ **THREE** implementations, already drifted
+
+**Filed as two, corrected to three while fixing it (Rule 8 — the correction
+stays visible).** The stop-time write-up named
+`app/erc7683_surface_conformance_test.go` (testing `leg.Condition == nil` on a
+**coin** leg) and `cmd/conclave-demo/exit_demo.go` (testing it on a **DataGrant**
+leg). Sweeping for the RULE rather than for the two known sites found a
+**third**: `cmd/conclave-demo/erc7683_check.go`, the live-node sweep, carrying
+its own hand-rolled copy — whose negative asserted only that a mismatched order
+"unexpectedly satisfied" the check, never naming which conjunct should have
+refused it. All three now call `fillback`, and that negative now asserts
+`ErrNoPayingLeg` specifically.
+
+**That the count was wrong is the finding's own best evidence, and the two
+searches are not equivalent.** Searching the KNOWN SITES is structurally blind
+to the unknown one — it can only confirm what the defect already pointed at.
+Searching for THE RULE finds all three. The third copy was the least visible and
+the worst: its negative asserted only that a mismatched order "unexpectedly
+satisfied" the check, naming no conjunct at all, so it could not have
+distinguished a leg failure from an outcome failure even after the rule changed
+under it. **This is a sharper argument for C1's one-implementation requirement
+than the two-site version would have been**: with two copies you can imagine
+keeping them in step; with an unknown number you cannot, because the maintenance
+task is not "synchronise them" but "find them", and that search has no
+terminating condition short of collapsing them. D-085's shape at a contract
+boundary rather than inside consensus.
+
+**The generalisable form: a rule a document MANDATES to an external implementer
+needs ONE in-tree statement of it.** Otherwise the in-tree demonstrations drift,
+each one "proves" a different rule, and *the number of them is itself unknown*.
+
+### The gate — measured, not assumed, and the measurement is the interesting part
+
+**Predicted before building**, with its mechanism, in the plan: no movement,
+because the sim's intent generator never sets `IntentLeg.condition` or
+`IntentPayload.condition`, so no match is conditioned, no non-NONE escrow is
+created, the write-back is unreachable, and every receipt stamps `NONE` exactly
+as before. **The one design choice that WOULD have moved it was named in
+advance:** writing the 0x0C index for every escrow rather than for conditioned
+legs only. Conditioned-only was chosen because a NONE escrow has no transitions
+and its index entry would never be read — and that reasoning is recorded here
+because it was recorded BEFORE the result, which is the only time such
+reasoning is worth anything.
+
+**Measured at HEAD with stderr-only probes** (the 2.17 pattern), five seeds:
+
+| seed | settlements | receipts written | escrows | conditioned | terminal transitions | disputes |
+|---|---|---|---|---|---|---|
+| 1 | 77 | 231 | 77 | 0 | 0 | 0 |
+| 2 | 5 | 15 | 5 | 0 | 0 | 0 |
+| 7 | 108 | 324 | 108 | 0 | 0 | 0 |
+| 12 | 210 | 630 | 210 | 0 | 0 | 0 |
+| 42 | 108 | 324 | 108 | 0 | 0 | 0 |
+| **Σ** | **508** | **1524** | **508** | **0** | **0** | **0** |
+
+The instrumented run reproduced D-098's five hashes byte for byte, which is
+what proves the probes inert.
+
+**The Category-1 statement is therefore SHARPER than "the vector misses this",
+and the sharpening is the point.** The generator reaches the receipt path
+*richly* — 1,524 receipts through 508 settlements — and every one of the 508
+escrows is class NONE. So the vector exercises `condition_outcome` only in its
+NONE branch, while the conditioned half of the field, the write-back and the
+0x0C index are structurally unreachable. **"The receipt path is unreached
+entirely" would have been the wrong statement, and the plan floated it as a
+live possibility.** Measuring turned a guess into a fact that says something
+different — and something stronger, because "the gate settles 508 times and
+still cannot see this" is a sharper indictment of the generator than "the gate
+never gets there".
+
+**And it tells a future generator-widening task WHAT to widen, which the vaguer
+statement could not.** "The path is unreached" points at making the sim settle;
+the measurement points at making it settle **CONDITIONED** — the sim already
+settles abundantly and creates 508 escrows, every one of them class NONE. The
+fix is therefore in the INTENT GENERATOR (`x/veil/simulation/operations.go`
+builds `coinLeg`/`dataLeg`/`svcLeg` and sets neither `IntentLeg.condition` nor
+`IntentPayload.condition`), not in the session or matcher plumbing. Written into
+**3.5**'s criteria, not merely recorded here.
+
+**Result: byte-identical, no re-baseline.** D-098's five hashes stand:
+
+| seed | hash (unchanged from D-098) |
+|---|---|
+| 1 | `E9C4A6827487B65283A9A91CD5147AAE28C416E0B9255D33914685D92C74BD0F` |
+| 2 | `C1EE3B5F577EFE934AF35B867E306E0D93CC5B9EE857A0AE0BB493BDA615B576` |
+| 7 | `DA743B6A0B72642CA231CE40C95035C71A2817ACFC229CDBBACA41E3D17BE0EE` |
+| 12 | `B183307D1FD9A2BF4EAA5ED48746589B060B87638F87555B245ED0EC1CE383AA` |
+| 42 | `36661093B93AB53254FD3B751304AAE8E57CB825CDAB904A4DDE49918A03D819` |
+
+**Named covering gates (Rule 7 step 5), since the vector covers none of it:**
+`app/receipt_condition_outcome_test.go` (the app-level proof-surface gate),
+`x/escrow/keeper/receipt_outcome_hook_test.go` (all eight transition events
+across all three classes), and `scripts/exit_demo.sh` stage 6 on a live node.
+
+### Watched red (Rule 3) — four sabotages, dosed ×5, and ONE PREDICTION WAS WRONG
+
+| sabotage | predicted | observed |
+|---|---|---|
+| A: no write-back from `commitTerminal` | 6 named tests | **exactly those 6** |
+| B: no write-back from `RaiseDispute` | `DisputedIsReportedAndIsNotTerminal` only | **exactly that** |
+| C: CONCLUDE stamps NONE unconditionally | the PENDING assertions + `TracksTheOutcome`, **and** `ReleasedIsAdmissible` | 6 red — but **`ReleasedIsAdmissible` stayed GREEN** |
+| D: no 0x0C index write | same as A | **same as A** |
+
+**C's miss is the informative one and is kept visible.** With the stamp
+reverted the receipt reads `NONE`; `NONE` is terminal, so the write-back skips;
+and `OutcomeAdmits(NONE)` returns admissible — so
+`TestFillbackAdmissibility_ReleasedIsAdmissible` passes **for the wrong
+reason**, which is precisely the pre-2.9 hole reproducing itself inside the
+test suite. The test that actually catches F-16 is `TracksTheOutcome`, the one
+that walks a conditioned settlement all the way to REFUNDED. Had the prediction
+not been written down first, the two would have looked interchangeable.
+
+**Stated plainly, because it is the reusable part:
+`TestFillbackAdmissibility_ReleasedIsAdmissible` ALONE WOULD HAVE BEEN A
+VACUOUS GUARD.** It asserts that an admissible thing is admitted — a positive
+that the defect satisfies just as well as the fix does, since the pre-2.9 field
+also reads a terminal-looking value. Only `TracksTheOutcome`, which walks the
+SAME settlement to a REFUNDED state and demands it be refused, can separate the
+two worlds. **This is the `err != nil` / `code != 0` family one abstraction
+up:** the negative-assertion rule says a test must name the specific error it
+expects; this says a test must name the specific WORLD it excludes. A guard
+whose assertion is satisfied by the bug it was written to catch is vacuous
+whatever its error text says, and the only reliable detector is the one used
+here — predict which test reds, remove the guard, and check the prediction
+against what actually reds.
+
+**The harness refused two non-compiling sabotages** — "SABOTAGE DID NOT COMPILE
+— result is meaningless" — on the first pass, rather than reporting them as "no
+failures". That is F-14(c), the amendment task **2.18** owns, earning its place
+with a live instance in the same session; 2.18's row now records it.
+
+### Migration — the explicit answer
+
+**None required, and the reasoning is recorded rather than assumed.** No live
+network exists; `x/session`'s genesis proto carries no receipts, so nothing
+stored can need rewriting; no upgrade handler exists (3.6 owns that). The code
+change alone rewrites nothing — `NONE` stays `NONE`, and only new conditioned
+settlements take `PENDING`. Byte-stability of already-issued proofs is
+preserved by height-binding, and that is turned from an argument into evidence
+by `TestConditionOutcome_PendingThenReleased`, which re-verifies the
+pre-resolution proof against its own root after the receipt's bytes changed —
+and shows it failing against the later root.
+
+### D-090's condition: DISCHARGED, with what remains stated
+
+The §6 exit demo's receipt now reads `condition_outcome = RELEASED` on a live
+node, so the prerequisite D-090 named for external-facing use of the §6
+evidence is met. What still gates external use is the VERIFIER side and is not
+a node property: a Conclave light client per origin chain (§6.3 check 1), the
+check-4 dedup ledger, and — the one worth saying out loud — the **dev**
+verifying key behind ZK release until task 3.2.
+
+### New task
+
+- **2.19 — receipts do not survive genesis export/import.** `x/session`'s
+  `GenesisState` carries params, solvers, sessions, next_session_id and
+  twap_records — **not receipts**, and now not the 0x0C escrow→receipt index
+  either. An exported chain silently loses every ICS-23-provable settlement
+  record, and an imported escrow resolves against no receipt (D6's no-op, which
+  is correct precisely because of this gap). Pre-existing, surfaced by 2.9.
+  Adjacent to 3.6 (upgrade/migration infrastructure) but distinct: this is
+  genesis-export COMPLETENESS, not an upgrade path. Acceptance criteria are
+  written into 2.19's own ledger row (Rule 6 sub-rule 6), not only here.
+
+### FINDING F-18 — `make inventory-rederive` has been RED since 3.3a closed, and the false positive is 3.3a's own remediation text
+
+**Observed at 2.9's boundary check, and 2.9 did not cause it** (both flagged
+files have an empty `git status`). `scripts/inventory_rederive.sh` reads a
+15-line window around each `CONCLAVE-TODO` marker, extracts EVERY `task N.N`
+token in it, and fails if any names a task CLAUDE.md has check-marked. Two
+markers trip it:
+
+- `x/mandate/ante/fee_abstraction.go:76`
+- `app/unordered/sigverify.go:16`
+
+Both are correctly owned — they name **3.3b**, which is open. What trips the
+check is the PROVENANCE sentence 3.3a wrote into them when it re-pointed them:
+*"RE-POINTED from task 3.3 at task 3.3a (D-099)"*. The checker cannot tell an
+ownership reference from a historical mention, so **it flags the record of the
+fix as though it were the defect** — and D-099's F-13 row reports the check
+built and its "both failing branches proven live" without noting that it exits
+non-zero on the tree it shipped.
+
+**It is F-13's OWN file-vs-block scope bug recurring in the deployed version.**
+D-099 records that three defects were found in this check before its output was
+trusted, and the first was exactly this class: *file-vs-block scope* — the
+checker looking at the wrong span of text around a marker. It was narrowed from
+a whole file to a 15-line window, and the same mistake survives inside that
+window, because a 15-line window around a well-documented re-point still
+contains sentences that are ABOUT the marker rather than declarations OF it.
+Narrowing the span was the right direction and an insufficient fix: the real
+distinction is not how much text you read but which SENTENCE ROLE you are
+reading. A checker over prose needs to know that difference or it will keep
+mistaking history for state.
+
+Two halves, and the second is the durable one:
+
+1. **Retire the two markers' stale mentions** (or accept them) — 3.3b's work,
+   since 3.3b is what they name and what will resolve them.
+2. **Teach the checker the difference.** An owner reference and a provenance
+   mention are different things, and every future re-point will reproduce this
+   exactly, because writing down *what a marker used to say* is the correct
+   behaviour the rule asks for. A check that punishes the discipline it exists
+   to enforce will be routed around.
+
+**Owner: 3.3b**, written into its acceptance criteria rather than only here.
+The 21 uncited commits the same run reports are **3.16**'s known backfill
+(D-099), unchanged and already owned.
+
+**Recorded rather than fixed inline** because a defect gets its own task, and
+because fixing a boundary CHECK inside the task it is checking is how a check
+loses its independence.
+
+### Close-out evidence
+
+**Green suite**, on the shipping tree:
+
+```
+LINT_RC=0   GUARDS_RC=0   TEST_RC=0
+```
+
+**Determinism gate**, run FOUR times across the task — instrumented HEAD, the
+source change in isolation, the full source tree, and the close-out — all five
+seeds byte-identical to D-098 every time, two independent processes per run.
+
+**Tree fingerprints (Rule 9 step 4), and a harness fix worth naming.** The first
+close-out gate fingerprinted with plain `git diff`, which is **blind to
+untracked files** — and this task adds five of them (`fillback/fillback.go`,
+`x/session/keeper/receipt_outcome.go`, two app/keeper test files, and the
+7683 conformance rewrite's sibling). That is exactly the defect **task 2.18
+item (d)** carries, and 2.17 had to fall back on comparing mtimes because of it.
+Rather than reason around it, the gate was re-run with `git add -N .` before
+fingerprinting — one flag, and the claim becomes evidence:
+
+| | before the gate | after the gate |
+|---|---|---|
+| FULL diff (incl. untracked) | `e77051efe5673aad834aab4639a1a6ff532ff96cb468a9f1a2fed73d474603a5` | **identical** |
+| SOURCE-only (excl. `*.md`) | `dd94e40aa4f913dcb029161901d398a0b4702f62f1bfa8c3da7a9b248cb20453` | **identical** |
+
+The documentation edited after that gate is Markdown only, so the shipping
+tree's SOURCE-ONLY hash must still read `dd94e40a…` at commit — which is the
+two-fingerprint standard's whole point: a post-gate documentation edit
+JUSTIFIED rather than confessed.
+
+**Live gate:** `scripts/exit_demo.sh` (§6a) re-run end to end on a localnet,
+**PASSED**, with stage 6 asserting the new semantics —
+`receipt.condition_outcome = RELEASED`, §6.3 check 3 admitting it, and the same
+evidence reading PENDING/DISPUTED/REFUNDED refused by name. §6b was NOT re-run
+(two chains + a live relayer); stated as a limit in EXIT_DEMO and in
+`scripts/exit_demo_ibc.sh` rather than inherited from §6a's green.

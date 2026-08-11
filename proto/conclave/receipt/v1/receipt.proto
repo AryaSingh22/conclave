@@ -7,26 +7,49 @@ import "gogoproto/gogo.proto";
 
 option go_package = "github.com/AryaSingh22/conclave/x/receipt/types";
 
-// ConditionOutcome records how a conditioned leg resolved (SPEC §6.6).
+// ConditionOutcome records how a settlement's delivery condition stands
+// (SPEC §6.6). It is a faithful projection of the leg's x/escrow lifecycle:
+// stamped at CONCLUDE and rewritten in place whenever the escrow moves
+// (task 2.9, D-100). Before 2.9 only NONE was ever written, unconditionally,
+// so a conditioned settlement's receipt asserted it carried no condition
+// (D-087).
 enum ConditionOutcome {
   option (gogoproto.goproto_enum_prefix) = false;
 
   // CONDITION_OUTCOME_UNSPECIFIED is the zero value and never stored.
   CONDITION_OUTCOME_UNSPECIFIED = 0;
-  // CONDITION_OUTCOME_NONE: the settlement carried no delivery condition
-  // (all Phase-0 receipts).
+  // CONDITION_OUTCOME_NONE: the settlement carried no delivery condition, so
+  // nothing was escrowed and every leg settled outright. TERMINAL.
   CONDITION_OUTCOME_NONE = 1;
-  // CONDITION_OUTCOME_RELEASED: the escrow released to the payee.
+  // CONDITION_OUTCOME_RELEASED: the escrow released to the payee. TERMINAL.
   CONDITION_OUTCOME_RELEASED = 2;
-  // CONDITION_OUTCOME_REFUNDED: the escrow refunded to the payer.
+  // CONDITION_OUTCOME_REFUNDED: the escrow refunded to the payer. TERMINAL.
   CONDITION_OUTCOME_REFUNDED = 3;
-  // CONDITION_OUTCOME_DISPUTED: resolved via dispute.
+  // CONDITION_OUTCOME_DISPUTED: an OPTIMISTIC dispute is OPEN.
+  // NOT TERMINAL — corrected at task 2.9, where this value got its first
+  // writer. The escrow's DISPUTED state resolves onward to RELEASED (the
+  // seller reveals) or REFUNDED (the resolution sweep), and the receipt
+  // follows it there, so a reader must not treat DISPUTED as an outcome.
   CONDITION_OUTCOME_DISPUTED = 4;
+  // CONDITION_OUTCOME_PENDING: the settlement carried a delivery condition
+  // and its escrow is still ACTIVE. NOT TERMINAL — the funds are escrowed and
+  // may still refund, so receipt existence is not delivery completion.
+  // Appended (not renumbered) at task 2.9: proto3 enum addition leaves every
+  // existing encoded value byte-identical.
+  CONDITION_OUTCOME_PENDING = 5;
 }
 
 // Receipt is a light-client-provable record of a settled intent, written by
 // x/session and queried via x/receipt (SPEC §6.6 — field list per spec).
 // Receipts live in IAVL state so ICS-23 existence proofs come free.
+//
+// EVERY FIELD IS FIXED AT SETTLEMENT EXCEPT condition_outcome, which is
+// rewritten in place when the leg's escrow resolves (task 2.9, D-100). The
+// rewrite is monotone — PENDING → [DISPUTED] → {RELEASED, REFUNDED}, terminal
+// absorbing — and it does not invalidate any proof already issued: an ICS-23
+// proof is bound to its ProofHeight and proves the value AT that version.
+// A verifier must re-fetch before acting on a NON-terminal outcome
+// (docs/edge/7683_SURFACE.md §6.2).
 message Receipt {
   // id is the unique receipt identifier.
   string id = 1;

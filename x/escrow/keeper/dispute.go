@@ -46,6 +46,12 @@ func (k Keeper) RaiseDispute(ctx sdk.Context, esc types.Escrow) error {
 	if err := store.Set(types.SweepIdxKey(esc.TimeoutHeight, idBz), []byte{}); err != nil {
 		return err
 	}
+	// An open dispute is reported on the §6.6 receipts too (task 2.9). It is NOT
+	// a resolution: the receipt reads DISPUTED only until the seller's reveal or
+	// the resolution sweep moves it to a terminal outcome.
+	if err := k.writeBackReceiptOutcome(ctx, esc, to); err != nil {
+		return err
+	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeEscrowDisputed,

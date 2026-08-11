@@ -1111,6 +1111,23 @@ sufficient — §2.3's limits); both crypto pins re-validated in one ADR (the §
 escape-hatch discipline, executed); sigverify fork retired-or-re-recorded; vector
 re-baselined by recorded ADR; localnet4 green end-to-end (real DKG → encrypted
 reveal); CGO/libwasmvm packaging proven.
+
+**ACCEPTED FROM 2.9 (D-100 finding F-18), written in rather than pointed at.**
+`make inventory-rederive` **exits non-zero at HEAD and has since 3.3a closed** —
+so a boundary check the plan relies on is currently red, and 2.9 did not cause
+it. Both offending markers are the ones 3.3b already owns
+(`x/mandate/ante/fee_abstraction.go:76`, `app/unordered/sigverify.go:16`), and
+they are **correctly owned**: what trips the checker is the PROVENANCE sentence
+3.3a wrote into them when re-pointing (*"RE-POINTED from task 3.3 at task
+3.3a"*). The script extracts every `task N.N` token in a marker's 15-line
+window and fails on any the ledger has check-marked, so it **flags the record of
+the fix as though it were the defect**. Two obligations, and the second is the
+durable one: **(i)** retire or accept the stale mentions when these markers are
+resolved; **(ii)** teach `scripts/inventory_rederive.sh` to distinguish an
+OWNERSHIP reference from a HISTORICAL one — every future re-point reproduces
+this, because writing down what a marker used to say is the behaviour Rule 6
+asks for, and a check that punishes the discipline it enforces gets routed
+around. Do not close 3.3b with the check still red.
 **Plan-stop decisions.** Named above; plus whether the 3.3 migration itself
 becomes the first 3.6 upgrade rehearsal (a chain that has never upgraded
 should not debut upgrades on a public testnet).
@@ -1173,6 +1190,22 @@ primary gate here, and this is the named fixture."**
 | **3. `0xFF`-prefixed ids** | **D-088** | a live 1-in-256 consensus bug passed 5 seeds | forced-`0xFF` fixture is the primary gate — **ratify explicitly** |
 | **4. Matcher rich paths** | **D-089** | `limit`/`allow_partial` never set; one leg per side; one coin give-asset | widen the generator **or** ratify fixtures — record which |
 | **5. Consent/condition paths** | **D-094** | conditioned legs, per-class buyer relations, the fallback attacher | name the covering fixtures; the vector is backstop only |
+| **5′. `condition_outcome` + the escrow write-back** | **D-100** | the conditioned half of the §6.6 field, the escrow→receipt write-back, the 0x0C index | reach it by widening the generator (see the MEASUREMENT below), or ratify `app/receipt_condition_outcome_test.go` + `x/escrow/keeper/receipt_outcome_hook_test.go` as the permanent primary gate |
+
+> **ACCEPTED FROM 2.9 (D-100), written in rather than pointed at — and it names
+> WHAT to widen, which no other shadow row does.** Task 2.9 measured the
+> generator's reach with stderr-only probes proven inert against D-098's hashes:
+> over the five seeds the sim **settles 508 times and writes 1,524 receipts**,
+> creating **508 escrows of which ZERO are conditioned**. So shadow 5/5′ is not
+> "the vector never gets there" — **the gate gets there 508 times and still
+> cannot see this**, which is a categorically stronger statement and a different
+> instruction. The fix is **make the sim settle CONDITIONED, not make it
+> settle**: the gap is in the INTENT GENERATOR
+> (`x/veil/simulation/operations.go` builds `coinLeg`/`dataLeg`/`svcLeg` and
+> sets neither `IntentLeg.condition` nor `IntentPayload.condition`), not in the
+> session or matcher plumbing, and a widening that adds volume rather than
+> condition-signing intents would move nothing. **Do not re-derive this by
+> measurement; it is measured. Re-measure only to confirm a widening worked.**
 
 Plus: posture ADRs recorded (wasm); new fuzz targets in `make test` or a named CI
 lane. **The generator-widening sub-item (§5.1) is decided HERE, once, for all five
@@ -1409,10 +1442,14 @@ plan-stop can hard-require it.
 | **2.12 multi-asset in-kind skim + in-kind solver payout** *(added D-095)* | D-089 | **Phase-2 tail. SEQUENCED AFTER 3.9 BY DECISION (D-095) — it is NOT blocked, and the distinction is the point.** No document gates 2.12 on anything: its row calls it a fee-MODEL question in the sense of **D-050/D-051** (Conclave ADRs, already decided), and its plan-stop question — *is an authorized `svc/{schema}` mint or a quantity-less `data/{hash}` grant skimmable at all* — is answerable from **D-048**'s asset-class split with no tokenomics model. It is sequenced after **3.9** because that question is an economics question 3.9 ratifies, and this row is where that sequencing decision is written down. **Recording it as "blocked on D6" would be a floating phrase asserting a dependency no document creates** — precisely the failure that produced audit finding F-3, and precisely what this table exists to prevent |
 | Localnet contract smoke | D-079 | ✅ **DISCHARGED in §6a** (`65376ab`, D-091) — a purpose-built CVM-schema contract, uploaded through a passing gov proposal, released a real ZK escrow with a real groth16 proof |
 | **Live relayer USDC demo** *(added D-090)* | D-082 | ✅ **DISCHARGED in §6b** (`1aecfbf`, D-092) — real ICS-20 uusdc over a live `cosmos/relayer` v2.6.0 process; **D-082 DISCHARGED**; re-run green at HEAD by 2.16 |
-| **§6 exit demo itself** *(added D-090)* | SPEC §10 | ✅ **DONE — the trigger FIRED.** §6a (`65376ab`, D-091) + §6b (`1aecfbf`, D-092) asserted the criterion; **re-run green at HEAD by task 2.16** after 2.7's semantic inversion, which converted the assertion from inference to evidence. The hard condition STANDS: if its output is ever used as EXTERNAL-FACING evidence, task **2.9** is a prerequisite (D-087's `condition_outcome` reads NONE for the conditioned ZK buy), and 2.7 widened it by making conditioned settlements more common |
+| **§6 exit demo itself** *(added D-090)* | SPEC §10 | ✅ **DONE — the trigger FIRED.** §6a (`65376ab`, D-091) + §6b (`1aecfbf`, D-092) asserted the criterion; **re-run green at HEAD by task 2.16** after 2.7's semantic inversion, which converted the assertion from inference to evidence. ~~The hard condition STANDS: if its output is ever used as EXTERNAL-FACING evidence, task **2.9** is a prerequisite~~ — **DISCHARGED at task 2.9 (D-100):** the receipt reads `RELEASED` and §6a was re-run live to prove it. What remains gating external use is verifier-side and was never what this condition named — a Conclave light client per origin chain (§6.3 check 1), the check-4 dedup ledger, and the **dev** verifying key behind ZK release until **3.2**. §6b was NOT re-run at 2.9 (two chains + a live relayer); stated as a limit in EXIT_DEMO rather than inherited from §6a's green |
 | **THE PHASE-2 TAIL — six open tasks, one uniform rule** *(added D-095, task 2.16)* | CLAUDE.md ledger | **Phase 2 EXITED with these open; none is exit-blocking**, established by re-deriving the test from SPEC §10's text rather than inheriting each row's claim. They keep their `2.x` numbers (identifiers, not a schedule — renumbering breaks ~15 `DECISIONS.md` cross-references and the in-tree markers). **Rows written at 2.16, BEFORE 3.0's pass, because a row-by-row re-verification structurally cannot surface a MISSING row** — F-8's mechanism in the receiving document. Individually dispositioned below; 3.0 sequences them against the Phase-3 critical path |
 | **2.8 submit-charge structural fork + timeouts→params** *(added D-095)* | D-085, D-090 | **Phase-2 tail.** The G2 SECURITY hole is already CLOSED (2.3's `SubmitIntentPrevalidationDecorator`, verified in the ante chain at `app/ante.go:125`); 2.8 owns only the DESIGN question (keep ante-prevalidation, or a v0.50 mode-split charge) plus the timeouts→params promotion, of which it is the **single** owner (Rev 3 resolved the double-ownership). No blocker; opens with its own plan-stop |
-| **2.9 receipt condition-outcome integrity** *(added D-095)* | D-087, D-094 | **Phase-2 tail, HIGHEST PRIORITY of the six.** Not exit-blocking — SPEC §10 asks the receipt be *verified* on a second chain (ICS-23 check 1 passes); §6.3 check 3 is a 7683-rail admissibility rule, not the SPEC's criterion. **But it is the hard prerequisite for any external-facing use of the §6 evidence**, and 2.7 made conditioned settlements strictly more common, so the unconditional `NONE` stamp is now wrong more often. Proto + cross-module consensus work; vector re-baseline expected |
+| **2.9 receipt condition-outcome integrity** *(added D-095)* | D-087, D-094 | ✅ **CLOSED by task 2.9 (D-100).** The field is truthful across all three condition classes and both terminal outcomes, gated at APP level through the ICS-23 proof surface — a keeper test could not have proven the app WIRES the seam, that both store keys move together, or that a proof issued before resolution still verifies afterwards. **The expected vector re-baseline did NOT happen, and the reason was MEASURED rather than assumed:** across the five seeds the sim settles 508 times and writes 1,524 receipts while creating **zero** conditioned escrows, so the field is exercised only in its NONE branch. That is a Category-1 shadow *sharper* than "the gate never gets there" — the gate gets there 508 times and still cannot see this. **This row's own framing was half wrong:** §6.3 check 3 was not merely "a 7683-rail admissibility rule" that could wait — it was **INERT** (finding F-16), so the mitigation D-087 accepted in place of the fix protected nothing for three tasks. D-090's external-facing condition **DISCHARGED**; spawned **2.19** |
+| **F-16 the D-087 mitigation was INERT** *(added D-100)* | 2.9 | ✅ **CLOSED IN-TASK**, and recorded at weight because of what it says about deferral. §6.3 check 3 tested `leg.Condition == nil` on a coin leg; `validateConditionedMatch` guarantees a conditioned match's coin legs ALWAYS carry a nil condition, so the clause could never reject the escrowed payment it existed to reject — and the escrow-timeout-refunds-the-resolver path passed it in full, no collusion needed. Rewritten to two conjuncts (pays-the-recipient AND `condition_outcome ∈ {NONE, RELEASED}`), which also OPENS conditioned fill-back. **The transferable rule: a mitigation accepted INSTEAD of a fix inherits the fix's burden of proof.** "Safe by construction" is a claim about code; this one had no test |
+| **F-17 one mandated rule, THREE implementations** *(added D-100)* | 2.9 | ✅ **CLOSED IN-TASK — and FILED AS TWO, corrected to three while fixing it.** The conformance suite, the §6 exit demo and the live-node `7683-check` sweep each implemented §6.3 check 3 separately and had already drifted: coin leg vs DataGrant leg vs a third copy whose negative named no specific conjunct at all. All three now call package `fillback`. **The miscount is the finding's own best evidence** — two were found by reading the code the defect pointed at; the third only by asking *where else is this rule STATED*, which is exactly the question a drifted rule makes hard to answer, because every copy looks locally correct. D-085's collapse-the-paths discipline at a *contract* boundary: a rule a document MANDATES to an external implementer needs exactly ONE in-tree statement, or each demonstration proves a different rule and their number is unknown |
+| **F-18 `make inventory-rederive` is RED at HEAD** *(added D-100)* | 2.9 boundary check | → **3.3b** (written into its acceptance criteria, not merely pointed at). The check has exited non-zero since **3.3a** closed, and 2.9 did not cause it: the two flagged markers name **3.3b** and are correctly owned; what trips the script is the PROVENANCE sentence 3.3a wrote into them when re-pointing them. It extracts every `task N.N` token in a marker's window and fails on any the ledger check-marks, so **it flags the record of the fix as though it were the defect**. Two halves — retire/accept the stale mentions, AND teach the checker to tell an ownership reference from a historical one, since every future re-point reproduces it. **A check that punishes the discipline it exists to enforce gets routed around.** The 21 uncited commits the same run reports are 3.16's known backfill, unchanged |
+| **2.19 receipts do not survive genesis export/import** *(added D-100)* | 2.9 | **Phase-2 tail — NEW.** `x/session`'s `GenesisState` carries no receipts, and now no 0x0C escrow→receipt index either, so an exported chain loses every ICS-23-provable settlement record it ever wrote. Pre-existing; surfaced because 2.9's write-back must treat a missing index as a NO-OP (safety-critical: it runs in EndBlock, where an error halts the chain), which makes the gap load-bearing for a design decision rather than merely latent. **Adjacent to 3.6 but distinct** — 3.6 moves a LIVE chain across a version boundary; this is genesis-export COMPLETENESS, which bites the first time anyone exports state for any reason. Acceptance criteria live in its CLAUDE.md row |
 | **2.14 reference solver-side condition attachment** *(added D-095)* | D-093, D-094, **D-097** | ✅ **CLOSED.** `solver.Solve` attaches the signed condition and self-checks every candidate against the chain's own `CheckConditionBinding` + `CheckConditionedMatchShape`, so it drops what the chain would reject instead of proposing it. Placement decided at a STOP: **in `solver/`** (an import-graph-preserving boundary was *established* impossible, and cmd/-side would leave `Solve` itself broken). Vector run in isolation TWICE — byte-identical to D-082 both times. Deliverable `docs/edge/SOLVER_SURFACE.md`; its load-bearing limit is §6.1, **no in-tree LIVE path reaches HASHLOCK or OPTIMISTIC**. Spawned rows **2.17** and **2.18** below |
 | **2.17 solver bond slashes do not persist on the tx path** *(added D-097)* | D-097 F-1 | ✅ **CLOSED by task 2.17 (D-098).** The slashes are applied in the ANTE (`ProposeSolutionSlashDecorator`) — established at the artifact as the only cosmos-sdk v0.50 store branch that outlives a failing message (ante branch written at `baseapp.go:933` before messages run; message branch at `:989` only on success; postHandler on a context derived from the message branch at `:972`, which is why D-085 found a postHandler refund impossible). ONE evaluator serves the ante's price and the msg server's rejection, so D-093's wire identities are untouched. **The model was chosen, not defaulted into:** gas-only deterrence was rejected because it picks an *unvalidated* deterrent — G-2 below records that nothing prices the authored surface's consensus cost — over a *specified* one. New `ErrProposalNotSole` (1430) makes the ante's and the msg server's verdicts provably identical. **Determinism vector RE-BASELINED**, first movement since D-082, predicted before the build from an instrumented measurement (126 equivocation hits, 0 invalid-solution hits across the five seeds). **The filed finding was OVER-BROAD and is corrected in the record:** the conclude-time slash was never broken, and that is now verified through a real block. *The row as filed, retained:* ~~**Phase-2 tail — NEW, and the highest-severity item in it.** SPEC §6.4 / D-024 price an invalid solution at 5% and equivocation at 20%~~ (**`D-024` is a mis-citation corrected at 2.17 — the bps are **D-007**'s invented params; D-024 is "§1.3 steps 2–3 demonstrated in two phases"**) ~~; `solution.go` calls `slashSolver` for both **and then returns an error**, so baseapp reverts the failing message's cache context and the slash goes with it. A rejected proposal costs a solver **gas only** — the economic assumption the untrusted-solver model rests on. **Verified on both paths** (`1412`, `1410`) through real txs; green until now because every in-tree assertion calls the keeper on a raw, un-cache-wrapped context (`solution_test.go:53`) — Rule 4 step 5, the D-093 shape. Pinned by two boundary tests that instruct their own replacement. Not exit-blocking; **sequence with or just before 2.8**~~ — *the sequencing question was answered SEQUENCE-not-fold at 2.17's plan-stop; see §5.3* |
 | **2.18 METHODOLOGY amendment backlog** *(added D-097)* | F-14, D-095, D-097 | **Phase-2 tail — NEW, docs-only.** **F-14 IS NOT DISCHARGED**, and this row exists because 3.0 assigned it to *"the session that commits D-096"* — a session reference, not a task number — so it went unowned the moment that session ended. Neither amendment is in `docs/METHODOLOGY.md` (grep: zero hits for both). **This is the F-3 floating-owner failure recurring inside the document that catalogues it**, which is the strongest available evidence for the rule it violates. Carries F-14's (a) Rule-8 enumerate-the-consumers sub-rule and (b) Rule-9 "a FLAG is a CLAIM", plus (c) NEW from 2.14: **a watched-red harness must fail loudly when the sabotage does not COMPILE** — 2.14's harness reported a non-building sabotage as "no failures" and nearly recorded a load-bearing guard as inert |
@@ -1462,9 +1499,11 @@ Recorded here so the Phase-2 sessions inherit them without re-research:
 
 ~~The tail is **2.8, 2.9, 2.10, 2.12, 2.14, 2.15**~~ — ~~**updated at task 2.14
 (D-097): 2.14 is CLOSED and produced two new rows, so the tail is 2.8, 2.9,
-2.10, 2.12, 2.15, 2.17, 2.18**~~ — **updated again at task 2.17 (D-098): 2.17 is
+2.10, 2.12, 2.15, 2.17, 2.18**~~ — ~~**updated again at task 2.17 (D-098): 2.17 is
 CLOSED and produced NO new rows, so the tail is 2.8, 2.9, 2.10, 2.12, 2.15,
-2.18** — none exit-blocking (2.16 re-derived that from
+2.18**~~ — **updated again at task 2.9 (D-100): 2.9 is CLOSED and produced ONE
+new row, so the tail is 2.8, 2.10, 2.12, 2.15, 2.18, 2.19** — none
+exit-blocking (2.16 re-derived that from
 SPEC §10's text, and the same test applied to 2.17/2.18 confirms it: SPEC §10's
 Phase-2 paragraph can be truthfully asserted without either). Rev 1 places them
 against the Phase-3 critical path. **One uniform rule, and the ordering is
@@ -1481,24 +1520,46 @@ anything.**
 > defect it found needed its own task. Two layers of live defect — 2.14's
 > reference-solver downgrade, 2.17's absent deterrent — and the third dig came
 > up empty, which is the first evidence the tail is bottoming out rather than
-> receding. The tail is now **2.8, 2.9, 2.10, 2.12, 2.15, 2.18**, and the next
+> receding. ~~The tail is now **2.8, 2.9, 2.10, 2.12, 2.15, 2.18**~~, and the next
 > item, **3.3a**, is platform work rather than a defect.
+>
+> **The rule produced one more head, of a DIFFERENT kind (D-100).** 2.9 closed
+> and spawned **2.19** — but 2.19 is not another layer of the same live defect;
+> it is a genesis-export completeness gap that 2.9 merely *walked past* while
+> deciding what a missing index should do. So the "executing the head produces a
+> new head" pattern has stopped applying in the sense that mattered: 2.14→2.17
+> were the same defect one layer down, whereas 2.9→2.19 is an unrelated gap
+> found by proximity. **The tail is now 2.8, 2.10, 2.12, 2.15, 2.18, 2.19**, and
+> the next item is **3.3b**.
 
 | Order | Task | Placement | Why |
 |---|---|---|---|
 | ~~**1**~~ | ~~**2.14**~~ | ✅ **DONE** (D-097) | ~~The **only** tail item with a **live functional defect**~~ — closed. It ran ahead of 3.3a as planned and the reasoning held. **It also invalidated its own parenthetical:** the "slashable (5%)" price did not exist, because the slash was reverted with the failing tx — that became **2.17**, which inherited this row's "fix a live defect first" argument and **has since CLOSED it (D-098): the price exists now** |
 | ~~**1′**~~ | ~~**2.17**~~ | ✅ **DONE** (D-098) | ~~Inherits 2.14's slot.~~ Closed ahead of 3.3a as placed. **The 2.8 coupling was decided at 2.17's plan-stop: SEQUENCE, not fold** — this row proposed folding, and the discriminator that overruled it generalises: *fold when neither problem constrains the other first; sequence when one does.* 2.17 had to establish what survives a failing tx before 2.8's charging question could be answered on anything but intuition. Folding would also have repeated the shape that nearly overloaded 2.7 (two hard things arriving together because they are RELATED, which is not CHEAP TOGETHER), and would have fused two vector causes into one unattributable hash movement — 2.17's re-baseline is attributable precisely because 2.8's params work was not stacked on it. **2.17's answer is written INTO 2.8's acceptance criteria** (CLAUDE.md), five inherited findings, so 2.8 opens by ratifying or superseding, never re-deriving |
-| **2** | **3.3a** | next | The security-patch vehicle (see §3.3's Rev-1 decision block) |
-| **3** | **2.9** | after 3.3a, before any external use of §6 evidence | Highest-priority of the remaining five and a **hard prerequisite** for external-facing use of the exit-demo evidence; 2.7 made conditioned settlements strictly more common, so the unconditional `NONE` stamp is wrong more often. Proto + cross-module consensus work ⇒ vector re-baseline expected ⇒ **do it before 3.3b re-baselines the vector anyway**, so the two re-baselines stay attributable (Rule 7 step 2) |
+| ~~**2**~~ | ~~**3.3a**~~ | ✅ **DONE** (D-099) | The security-patch vehicle (see §3.3's Rev-1 decision block) |
+| ~~**3**~~ | ~~**2.9**~~ | ✅ **DONE** (D-100) | ~~Highest-priority of the remaining five and a **hard prerequisite** for external-facing use of the exit-demo evidence~~ — closed, and the prerequisite DISCHARGED. Ran after 3.3a as placed. **Its stated reason for this slot did not survive contact:** the row expected a re-baseline and got **byte-identical**, because the sim creates zero conditioned escrows (measured, not assumed — see §5.1). So the "do it before 3.3b so the two re-baselines stay attributable" argument was sound *ex ante* and moot *ex post*, which is the honest way to record a sequencing decision that cost nothing and bought an option. **3.3b now inherits a clean, single-cause re-baseline** — which is what the ordering was for |
+| **NEXT** | **3.3b** | now | Inherits the slot. The platform re-baseline, with the vector still on D-098's five hashes |
 | **4** | **2.8, 2.15, 2.10** | after **3.3b** | All three are consensus-surface work that would be **built twice** if done against the old platform — the exact reason 3.4/3.5 sequence after 3.3b. 2.8 is a design question with no blocker; 2.15 and 2.10 are matcher/attribution surface whose primary gate is hand-built fixtures either way |
 | **5** | **2.12** | after **3.9** | Unchanged and re-affirmed: **"sequenced after 3.9 BY DECISION", never "blocked on D6"** — no document creates that gate, and recording a dependency no document creates is the floating phrase that produced audit finding F-3 |
 
-**Note on 2.9 vs 3.3b ordering (the non-obvious one).** Both re-baseline the
-determinism vector. Rule 7 step 2 says sequence risky changes so the gate runs
+**Note on 2.9 vs 3.3b ordering (the non-obvious one).** ~~Both re-baseline the
+determinism vector.~~ Rule 7 step 2 says sequence risky changes so the gate runs
 BETWEEN causes. Doing 2.9 first means one re-baseline attributable to a **proto
 change** and a later one attributable to a **platform change**; doing them in the
 other order, or together, would fuse two causes into one unexplainable hash
 movement.
+
+> **RESOLVED (D-100), and the resolution is worth keeping.** 2.9 did NOT
+> re-baseline — the vector came back byte-identical, because the sim's generator
+> creates no conditioned escrows at all (508 settlements, 1,524 receipts, zero
+> conditioned; measured with probes proven inert against D-098's hashes). The
+> premise of this note was therefore false, and the sequencing bought an option
+> that was never exercised. **That is not an argument against having sequenced
+> it.** The cost of ordering two tasks correctly is zero; the cost of discovering
+> after the fact that one hash movement had two causes is a bisection. A
+> precaution that turns out unnecessary is the expected outcome of a cheap
+> precaution — the mistake would be concluding from this that the next one can
+> be skipped.
 
 ---
 

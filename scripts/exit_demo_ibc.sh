@@ -14,10 +14,16 @@
 #            D-082's obligation is explicitly a LIVE relayer, not the
 #            in-process ibctesting harness task 2.5 used.
 #
-# INTERNAL ACCEPTANCE RUN (D-090). The settlement is conditioned, so its receipt
-# reads condition_outcome = NONE (D-087). The demo asserts that boundary rather
-# than avoiding it. Task 2.9 is a PREREQUISITE before this output may be used as
-# external-facing evidence.
+# CONDITION_OUTCOME IS TRUE SINCE TASK 2.9 (D-100). The settlement is
+# conditioned and its receipt now reports the escrow's real outcome, so D-090's
+# condition on external-facing use is DISCHARGED for this field. ~~Task 2.9 is a
+# PREREQUISITE before this output may be used as external-facing evidence~~ —
+# what remains is the VERIFIER side (a Conclave light client per origin chain,
+# and the check-4 dedup ledger), a bridge obligation and not a node one.
+#
+# HONEST LIMIT (task 2.9): §6b was NOT re-run at 2.9 — it needs two chains and a
+# live relayer, and the only 2.9 change reaching it is this banner plus the
+# shared stage-6 assertion, which §6a DID re-run. Stated rather than implied.
 #
 # Dev tooling — not part of `make test`.
 set -euo pipefail

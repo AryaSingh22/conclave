@@ -163,19 +163,29 @@ func (k Keeper) applyLeg(ctx sdk.Context, sessionID uint64, leg types.SettleLeg,
 	}
 }
 
-// buildEscrowRecord derives the deterministic escrow id and assembles the
-// x/escrow record for a DataGrant leg. The id derivation (domainEscrow over
-// session_id ‖ content_hash ‖ from‖to) is unchanged from the Phase-0 stub so
-// ids are stable across the D-073 ownership handoff. payer = the data
-// RECIPIENT (buyer, leg.ToSigil) who funds the escrow; payee = the data GIVER
-// (seller, leg.FromSigil) who is paid on release — the conditioned-delivery
-// direction (corrected from the pre-handoff stub, which had no funds so the
-// assignment was inert).
-func (k Keeper) buildEscrowRecord(sessionID uint64, leg types.SettleLeg, amount sdk.Coins) escrowtypes.Escrow {
+// escrowIDForLeg derives a DataGrant leg's deterministic escrow id
+// (domainEscrow over session_id ‖ content_hash ‖ from‖to) — unchanged from the
+// Phase-0 stub so ids are stable across the D-073 ownership handoff.
+//
+// It is a SEPARATE function with TWO callers on purpose (task 2.9):
+// buildEscrowRecord below, and writeMatchReceipts, which needs the same id to
+// key the 0x0C escrow→receipt index. Two derivations of one id that must agree
+// forever is precisely the drift D-085 was closed by collapsing — the id is
+// derived ONCE and both sites read it.
+func escrowIDForLeg(sessionID uint64, leg types.SettleLeg) string {
 	data := leg.GetData()
 	idPayload := append(append([]byte{}, u64be(sessionID)...), data.ContentHash...)
 	idPayload = append(idPayload, []byte(leg.FromSigil+leg.ToSigil)...)
-	escrowID := deriveID(domainEscrow, phase0Chamber, idPayload)
+	return deriveID(domainEscrow, phase0Chamber, idPayload)
+}
+
+// buildEscrowRecord assembles the x/escrow record for a DataGrant leg. payer =
+// the data RECIPIENT (buyer, leg.ToSigil) who funds the escrow; payee = the
+// data GIVER (seller, leg.FromSigil) who is paid on release — the
+// conditioned-delivery direction (corrected from the pre-handoff stub, which
+// had no funds so the assignment was inert).
+func (k Keeper) buildEscrowRecord(sessionID uint64, leg types.SettleLeg, amount sdk.Coins) escrowtypes.Escrow {
+	escrowID := escrowIDForLeg(sessionID, leg)
 
 	cond := escrowtypes.DeliveryCondition{} // NONE oneof
 	if leg.Condition != nil {

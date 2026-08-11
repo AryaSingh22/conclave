@@ -311,7 +311,7 @@ pool (no mint/burn). The contract:
 | `conclave.session.v1.Query/Session` | `{id}` → `Session` | session an intent sealed into |
 | `conclave.session.v1.Query/Twap` | `{base, quote}` → `{twap, rate, …}` (Dec strings; zero = cold) | uusdc↔uclv gas quoting; price sanity |
 | `conclave.receipt.v1.Query/Receipts` | `{sigil_id, pagination}` → `[Receipt]` | enumerate settlements for the principal's sigil |
-| `conclave.receipt.v1.Query/Receipt` | `{id}` → `Receipt{id, session_id, intent_id, sigil_id, counterparty_sigils, terms_hash, clearing_prices, condition_outcome, height}` | settlement confirmation payload. ⚠️ `condition_outcome` is currently ALWAYS `NONE` — never written for escrow outcomes, even on conditioned settlements; a receipt proves CONCLUDE, not delivery completion (D-087; fix owned by task 2.9 — see [7683_SURFACE.md](7683_SURFACE.md) §6.4) |
+| `conclave.receipt.v1.Query/Receipt` | `{id}` → `Receipt{id, session_id, intent_id, sigil_id, counterparty_sigils, terms_hash, clearing_prices, condition_outcome, height}` | settlement confirmation payload. `condition_outcome` is TRUE since task 2.9 (D-100): `NONE` = unconditioned, `PENDING`/`DISPUTED` = escrowed and may still refund, `RELEASED`/`REFUNDED` = resolved. ~~⚠️ currently ALWAYS `NONE` — never written for escrow outcomes, even on conditioned settlements (D-087; fix owned by task 2.9)~~. It is the receipt's ONLY mutable field — see [7683_SURFACE.md](7683_SURFACE.md) §6.1/§6.2 |
 | `conclave.receipt.v1.Query/ReceiptProof` | `{id}` → `{receipt, proof (ICS-23 ProofOps), proof_height}` | the verifiable settlement evidence for `X-PAYMENT-RESPONSE` (verifiable against a Conclave consensus root by any IBC counterparty) |
 | `conclave.mandate.v1.Query/MandateByGrantee` | `{grantee}` → `Mandate{…ceilings, window_spent, window_start_height, expiry_height, revoked, fee_denoms…}` | the gateway reads its own remaining headroom before quoting |
 | `conclave.sigil.v1.Query/SigilByAddress` | `{addr}` → sigil | verify a key's binding (its own, or a counterparty's) |
@@ -348,14 +348,23 @@ refunded on-chain, x402 payment refunded by the gateway; `INVALID` → 50%
 bond slash is a **gateway defect** (it authored the payload) and must never
 be passed to the payer.
 
-**Conditioned purchases (D-087 caveat):** for a buy whose settlement leg
+**Conditioned purchases (task 2.9, D-100):** for a buy whose settlement leg
 carried a delivery condition (e.g. the ZK data path), the receipt at step 5
-proves the escrow was OPENED, not that delivery completed — and its
-`condition_outcome` field reads `NONE` regardless (never updated on escrow
-resolution; task 2.9). A gateway confirming conditioned purchases must
-watch the `x/escrow` record to its terminal state before treating the
-payment as delivered. Unconditioned coin/service settlements are final at
-the receipt.
+proves the escrow was OPENED — and **its `condition_outcome` says so**:
+`PENDING` until the escrow resolves, then `RELEASED` or `REFUNDED`. A gateway
+confirming a conditioned purchase should treat the payment as delivered only
+on `RELEASED`, and it can now do that from **the receipt itself** rather than
+by separately tracking the escrow record; the `receipt_condition_outcome`
+event fires on each change, so polling the proof surface is unnecessary.
+Because the field is the receipt's one mutable field, a cached non-terminal
+reading must be re-fetched (7683_SURFACE §6.2). Unconditioned coin/service
+settlements are final at the receipt and read `NONE`.
+
+~~**Conditioned purchases (D-087 caveat):** the receipt proves the escrow was
+OPENED, not that delivery completed — and its `condition_outcome` field reads
+`NONE` regardless (never updated on escrow resolution; task 2.9). A gateway
+confirming conditioned purchases must watch the `x/escrow` record to its
+terminal state before treating the payment as delivered.~~
 
 ---
 

@@ -16,10 +16,14 @@
 # The fourth leg (real IBC USDC over a live relayer + receipt verification
 # against a second chain's light client) is §6b's.
 #
-# INTERNAL ACCEPTANCE RUN (D-090). The settlement is conditioned, so its receipt
-# reads condition_outcome = NONE (D-087). The demo asserts that boundary rather
-# than avoiding it. Task 2.9 is a PREREQUISITE before this output may be used as
-# external-facing evidence.
+# CONDITION_OUTCOME IS TRUE SINCE TASK 2.9 (D-100). The settlement is
+# conditioned and its receipt now reports the escrow's real outcome (RELEASED,
+# after stage 5), so D-090's condition on external-facing use is DISCHARGED for
+# this field. Stage 6 asserts the new semantics and shows the admissibility
+# conjunct load-bearing. ~~Task 2.9 is a PREREQUISITE before this output may be
+# used as external-facing evidence~~ — what remains is the VERIFIER side (a
+# Conclave light client per origin chain, and the check-4 dedup ledger), which
+# is a bridge obligation and not a node one.
 #
 # Dev tooling — not part of `make test`.
 set -euo pipefail

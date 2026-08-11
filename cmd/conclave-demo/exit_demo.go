@@ -87,6 +87,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,6 +111,7 @@ import (
 
 	"github.com/AryaSingh22/conclave/crypto/zkdelivery"
 	"github.com/AryaSingh22/conclave/crypto/zkdelivery/zktest"
+	"github.com/AryaSingh22/conclave/fillback"
 	escrowtypes "github.com/AryaSingh22/conclave/x/escrow/types"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
@@ -158,9 +160,12 @@ type exitState struct {
 
 func (c *cli) exitDemo() error {
 	fmt.Println("=== Conclave Phase-2 §6 EXIT DEMO — part A (§6a) ===")
-	fmt.Println("=== INTERNAL ACCEPTANCE RUN (D-090): the settlement is CONDITIONED, so its")
-	fmt.Println("=== receipt reads condition_outcome=NONE (D-087). Task 2.9 is a PREREQUISITE")
-	fmt.Println("=== if this output is ever repurposed as external-facing evidence.")
+	fmt.Println("=== The settlement is CONDITIONED, and since task 2.9 (D-100) its receipt")
+	fmt.Println("=== reports the escrow's real outcome — so D-090's condition on")
+	fmt.Println("=== external-facing use of this output is DISCHARGED for condition_outcome.")
+	fmt.Println("=== What still gates external use is the verifier side: a Conclave light")
+	fmt.Println("=== client per origin chain (§6.3 check 1) and the §6.3 check-4 dedup ledger,")
+	fmt.Println("=== both bridge obligations this demo cannot supply.")
 	fmt.Println()
 
 	s := &exitState{settleDenom: uusdc}
@@ -806,7 +811,7 @@ func (c *cli) exitStageEvidence(s *exitState) error {
 	}
 	fmt.Printf("receipt %s + ICS-23 proof at height %d; terms_hash recomputes from the queried winning Solution ✓\n",
 		short1(ev.receipt.Id), ev.proof.ProofHeight)
-	return c.exitAssertConditionBoundary(s, ev)
+	return c.exitAssertConditionOutcome(s, ev)
 }
 
 // exitEvidence is the fill-back evidence bundle an origin settler is handed
@@ -882,36 +887,62 @@ func (c *cli) gatherExitEvidence(s *exitState) (*exitEvidence, error) {
 	return &exitEvidence{receipt: receipt, proof: proof, match: &winning.Matches[0], matchBz: matchBz}, nil
 }
 
-// exitAssertConditionBoundary demonstrates the D-087 boundary rather than
-// avoiding it, and is shared by both halves of the demo.
-func (c *cli) exitAssertConditionBoundary(s *exitState, ev *exitEvidence) error {
+// exitAssertConditionOutcome asserts the task-2.9 receipt semantics on the LIVE
+// path, and is shared by both halves of the demo.
+//
+// IT REPLACES exitAssertConditionBoundary, WHICH ASSERTED THE OPPOSITE. That
+// function demonstrated the D-087 boundary: it REQUIRED this conditioned
+// settlement's receipt to read condition_outcome=NONE, and it was written to
+// fail by name — "D-087 has been fixed; update this demo and 2.9's status" —
+// the moment the field became truthful. Task 2.9 landed and it fired. That is
+// the tripwire working exactly as docs/EXIT_DEMO.md promised, and the demo now
+// holds the new semantics to the same standard it held the old ones.
+func (c *cli) exitAssertConditionOutcome(s *exitState, ev *exitEvidence) error {
 	ctx := context.Background()
 	receipt, winningMatch := ev.receipt, ev.match
-	// This settlement IS conditioned, so:
-	//   (i)  its receipt still reads condition_outcome=NONE — the field is
-	//        decorative until task 2.9;
-	//   (ii) 7683_SURFACE §6.3 check 3 requires an UNCONDITIONED leg, so this
-	//        receipt is correctly NOT admissible as delivery evidence on the v1
-	//        fill-back rail. The demo asserts the check REJECTS it.
-	// Delivery is proven by the escrow's terminal state instead.
-	if receipt.ConditionOutcome != receipttypes.CONDITION_OUTCOME_NONE {
-		return fmt.Errorf("condition_outcome is %s — D-087 has been fixed; update this demo and 2.9's status",
-			receipt.ConditionOutcome)
+
+	// (i) the receipt REPORTS its escrow. Stage 5 released it, so RELEASED is
+	// the only truthful reading: NONE would be the D-087 falsehood returning,
+	// and PENDING would mean the write-back never reached this path.
+	if receipt.ConditionOutcome != receipttypes.CONDITION_OUTCOME_RELEASED {
+		return fmt.Errorf("receipt %s reads condition_outcome=%s: this settlement IS conditioned and stage 5 released its escrow, so the receipt must say RELEASED (task 2.9)",
+			short1(receipt.Id), receipt.ConditionOutcome)
 	}
-	admissible := false
-	for i := range winningMatch.Legs {
-		leg := &winningMatch.Legs[i]
-		if leg.ToSigil == s.sigilP && leg.Condition == nil && leg.GetData() != nil {
-			admissible = true
+
+	// (ii) 7683_SURFACE §6.3 check 3, from the ONE shared implementation both
+	// in-tree consumers call. Before task 2.9 this stage and
+	// app/erc7683_surface_conformance_test.go implemented the same mandated
+	// rule SEPARATELY and had already drifted — this one tested the DataGrant
+	// leg's condition, the suite tested a coin leg's (finding F-17).
+	order := fillback.Order{
+		ID: "exit-demo-order", RecipientSigil: s.sigilS,
+		Denom: s.settleDenom, MinReceived: math.NewInt(exitPrice),
+	}
+	if err := fillback.Admissible(*receipt, *winningMatch, order); err != nil {
+		return fmt.Errorf("§6.3 check 3 rejected a RELEASED conditioned settlement: %w", err)
+	}
+
+	// (iii) and the conjunct that admitted it is LOAD-BEARING — shown, not
+	// claimed. The same evidence reading a non-terminal or refunded outcome is
+	// refused BY NAME. The Match is byte-identical in all four cases, which is
+	// exactly why the pre-2.9 rule — which read only the legs — could not tell
+	// a delivered fill from a refunded one (finding F-16).
+	for _, bad := range []receipttypes.ConditionOutcome{
+		receipttypes.CONDITION_OUTCOME_PENDING,
+		receipttypes.CONDITION_OUTCOME_DISPUTED,
+		receipttypes.CONDITION_OUTCOME_REFUNDED,
+	} {
+		probe := *receipt
+		probe.ConditionOutcome = bad
+		if err := fillback.Admissible(probe, *winningMatch, order); !errors.Is(err, fillback.ErrOutcomeNotFinal) {
+			return fmt.Errorf("§6.3 check 3 must refuse a %s receipt with ErrOutcomeNotFinal, got %v", bad, err)
 		}
 	}
-	if admissible {
-		return fmt.Errorf("§6.3(3) admitted a conditioned delivery leg — the bridge rule is not being enforced")
-	}
-	fmt.Println("D-087 boundary shown, not avoided:")
-	fmt.Println("  · receipt.condition_outcome = NONE even though this settlement IS conditioned (task 2.9)")
-	fmt.Println("  · §6.3 check 3 REJECTS the conditioned delivery leg — this receipt is correctly")
-	fmt.Println("    inadmissible as delivery evidence on the v1 fill-back rail")
+
+	fmt.Println("task 2.9 semantics, from the live path:")
+	fmt.Println("  · receipt.condition_outcome = RELEASED — the receipt reports its own escrow")
+	fmt.Println("  · §6.3 check 3 ADMITS it: the coin leg pays the seller AND the escrow released")
+	fmt.Println("  · the same evidence reading PENDING / DISPUTED / REFUNDED is refused by name")
 
 	escrowc := escrowtypes.NewQueryClient(c.conn)
 	eres, err := escrowc.Escrow(ctx, &escrowtypes.QueryEscrowRequest{Id: s.escrowID})
@@ -921,7 +952,7 @@ func (c *cli) exitAssertConditionBoundary(s *exitState, ev *exitEvidence) error 
 	if eres.Escrow.State != escrowtypes.ESCROW_STATE_RELEASED {
 		return fmt.Errorf("escrow %s is %s", short1(s.escrowID), eres.Escrow.State)
 	}
-	fmt.Printf("  · delivery IS proven — by escrow %s in terminal state RELEASED ✓\n", short1(s.escrowID))
+	fmt.Printf("  · corroborated independently — escrow %s is in terminal state RELEASED ✓\n", short1(s.escrowID))
 	return nil
 }
 

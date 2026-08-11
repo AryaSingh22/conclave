@@ -41,6 +41,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -61,6 +62,8 @@ import (
 	commitmenttypes "github.com/cosmos/ibc-go/v8/modules/core/23-commitment/types"
 	ibctmtypes "github.com/cosmos/ibc-go/v8/modules/light-clients/07-tendermint"
 
+	"github.com/AryaSingh22/conclave/fillback"
+	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
 )
 
@@ -94,9 +97,11 @@ type ibcLeg struct {
 func (c *cli) exitDemoIBC(b *cli) error {
 	fmt.Println("=== Conclave Phase-2 §6 EXIT DEMO — part B (§6b) ===")
 	fmt.Println("=== THE SPEC §10 EXIT CRITERION IS ASSERTED HERE.")
-	fmt.Println("=== INTERNAL ACCEPTANCE RUN (D-090): the settlement is CONDITIONED, so its")
-	fmt.Println("=== receipt reads condition_outcome=NONE (D-087). Task 2.9 is a PREREQUISITE")
-	fmt.Println("=== if this output is ever repurposed as external-facing evidence.")
+	fmt.Println("=== The settlement is CONDITIONED, and since task 2.9 (D-100) its receipt")
+	fmt.Println("=== reports the escrow's real outcome — so D-090's condition on")
+	fmt.Println("=== external-facing use of this output is DISCHARGED for condition_outcome.")
+	fmt.Println("=== What still gates external use is the verifier side: a Conclave light")
+	fmt.Println("=== client per origin chain (§6.3 check 1) and the §6.3 check-4 dedup ledger.")
 	fmt.Printf("=== chain A = %s (settlement)   chain B = %s (USDC source + light client of A)\n",
 		c.chainID, b.chainID)
 	fmt.Println()
@@ -139,7 +144,8 @@ func (c *cli) exitDemoIBC(b *cli) error {
 	fmt.Println("   · A→B was verified in THIS DRIVER against chain B's light-client")
 	fmt.Println("     root — the settler is separate-repo scope (7683_SURFACE §6.3).")
 	fmt.Println("     NOT claimed: chain B's state machine verified the receipt.")
-	fmt.Println("   · INTERNAL run: condition_outcome=NONE stands until task 2.9.")
+	fmt.Println("   · condition_outcome is TRUE since task 2.9 — this receipt reads")
+	fmt.Println("     RELEASED; what still gates external use is verifier-side.")
 	fmt.Println("   · Chain A is single-node, so the Veil is in its epoch-0 plaintext")
 	fmt.Println("     bootstrap window (D-070 owns the encrypted reveal).")
 	fmt.Println("   · A signed delivery condition is a REQUIREMENT, not a permission")
@@ -508,22 +514,33 @@ func (c *cli) exitStageSecondChainVerify(s *exitState) error {
 	fmt.Printf("negative: the off-by-one (proof at version %d vs the root for height %d) fails the root check specifically ✓\n",
 		chosen.RevisionHeight, chosen.RevisionHeight)
 
-	// §6.3 check 3 — and it must REJECT this settlement's conditioned leg.
-	if err := c.exitAssertConditionBoundary(s, ev); err != nil {
+	// §6.3 check 3 — and since task 2.9 it must ADMIT this settlement, because
+	// its escrow RELEASED. (It used to assert the opposite; see D-100.)
+	if err := c.exitAssertConditionOutcome(s, ev); err != nil {
 		return err
 	}
-	// ... and the skip-variant, which is what proves check 3 is load-bearing
-	// rather than decorative (7683_SURFACE §7).
-	admittedWithoutCheck := false
-	for i := range ev.match.Legs {
-		if l := &ev.match.Legs[i]; l.ToSigil == s.sigilP && l.GetData() != nil {
-			admittedWithoutCheck = true // NOTE: no l.Condition == nil test
-		}
+	// ... and the skip-variant, which is what proves check 3's OUTCOME conjunct
+	// is load-bearing rather than decorative (7683_SURFACE §7). Task 2.9
+	// re-pointed it: the old variant dropped the leg's condition test, which
+	// finding F-16 showed could never have rejected anything anyway. The
+	// variant that matters now drops conjunct (b) — i.e. runs `PaysOrder`
+	// alone, exactly what the pre-2.9 rule reduced to — against a receipt whose
+	// escrow REFUNDED. The Match is byte-identical to the delivered case, so if
+	// this is admitted, the rule cannot tell a delivered fill from an undone one.
+	order := fillback.Order{
+		ID: "exit-demo-order", RecipientSigil: s.sigilS,
+		Denom: s.settleDenom, MinReceived: math.NewInt(exitPrice),
 	}
-	if !admittedWithoutCheck {
-		return fmt.Errorf("the §6.3(3) skip-variant admitted nothing — the demonstration is vacuous")
+	refunded := *ev.receipt
+	refunded.ConditionOutcome = receipttypes.CONDITION_OUTCOME_REFUNDED
+	if err := fillback.PaysOrder(*ev.match, order); err != nil {
+		return fmt.Errorf("the §6.3(3) skip-variant admitted nothing — the demonstration is vacuous: %w", err)
 	}
-	fmt.Println("  · with check 3 SKIPPED the same conditioned leg IS admitted — the check is load-bearing ✓")
+	if err := fillback.Admissible(refunded, *ev.match, order); !errors.Is(err, fillback.ErrOutcomeNotFinal) {
+		return fmt.Errorf("check 3 must refuse a REFUNDED receipt with ErrOutcomeNotFinal, got %v", err)
+	}
+	fmt.Println("  · with conjunct (b) SKIPPED a REFUNDED fill IS admitted on an identical Match —")
+	fmt.Println("    the outcome check is what distinguishes them, and it is load-bearing ✓")
 
 	// §6.3 check 4 — first-claim uniqueness. A bridge obligation, not a node
 	// property (the proof is a fact and replays verbatim), so the settler-side

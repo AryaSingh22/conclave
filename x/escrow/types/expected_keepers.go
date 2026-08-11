@@ -25,3 +25,19 @@ type SigilKeeper interface {
 	// authored in task 0.3 for "x/escrow dispute resolution (Phase 2)").
 	PenalizeLostDispute(ctx sdk.Context, chamberID uint32, sigilID string) error
 }
+
+// ReceiptOutcomeWriter carries an escrow's resolution back onto the SPEC §6.6
+// receipts the settlement that created it wrote (task 2.9, D-100). x/session
+// implements it; the app wires it in with the same set-before-capture contract
+// as SetVeilKeeper, because x/session is constructed AFTER x/escrow (CONCLUDE
+// writes escrows through it) and the dependency therefore runs both ways.
+//
+// IT IS TYPED IN THIS MODULE'S OWN VOCABULARY — EscrowState, never the
+// receipt's ConditionOutcome — because naming receipttypes here would close a
+// cycle: x/escrow/types → x/receipt/types → x/session/types → x/escrow/types.
+// The projection from one to the other lives in x/session, which owns what a
+// receipt means. The signature is the awkward one on purpose; the pretty one
+// does not compile.
+type ReceiptOutcomeWriter interface {
+	SetReceiptOutcomeForEscrow(ctx sdk.Context, escrowID string, state EscrowState) error
+}

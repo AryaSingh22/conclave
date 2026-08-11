@@ -12,9 +12,14 @@ const (
 	EventTypeMatchSettled     = "match_settled"
 	EventTypeEscrowOpened     = "escrow_opened"
 	EventTypeReceiptEmitted   = "receipt_emitted"
-	EventTypeSkimTaken        = "skim_taken"
-	EventTypeSolverPaid       = "solver_paid"
-	EventTypeIntentRolled     = "intent_rolled"
+	// EventTypeReceiptOutcome fires when an escrow resolution rewrites a
+	// receipt's §6.6 condition_outcome (task 2.9). It is the cheap way for an
+	// off-chain consumer to learn that a receipt it already holds has moved,
+	// without polling the proof surface.
+	EventTypeReceiptOutcome = "receipt_condition_outcome"
+	EventTypeSkimTaken      = "skim_taken"
+	EventTypeSolverPaid     = "solver_paid"
+	EventTypeIntentRolled   = "intent_rolled"
 
 	AttributeKeySolver       = "solver"
 	AttributeKeyBond         = "bond"
@@ -29,4 +34,6 @@ const (
 	AttributeKeySigilID      = "sigil_id"
 	AttributeKeyAmount       = "amount"
 	AttributeKeyScore        = "score"
+
+	AttributeKeyConditionOutcome = "condition_outcome"
 )

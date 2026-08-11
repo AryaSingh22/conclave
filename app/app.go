@@ -373,6 +373,13 @@ func NewConclaveApp(
 	// wire the veil↔session cycle now that both keepers exist (Guard 1): must
 	// run before any block, which app construction guarantees.
 	app.SessionKeeper.SetVeilKeeper(app.VeilKeeper)
+	// wire the escrow↔session cycle the same way (task 2.9, D-100): x/session
+	// writes escrows at CONCLUDE, and x/escrow writes back onto the §6.6
+	// receipts when one resolves, so the dependency runs both ways and the
+	// second direction has to be a setter. Set BEFORE the escrow keeper value
+	// is captured by RegisterModules and cvm.QueryPlugins below — the same
+	// set-before-capture contract as SetLiveExposureFn.
+	app.EscrowKeeper.SetReceiptOutcomeWriter(app.SessionKeeper)
 	// wire the veil↔mandate cycle the same way (D-064): IssueMandate adopts a
 	// root->mandated key's live intent exposure at FRESH issuance via this x/veil
 	// scan, so the §1.1-goal-3 bound attaches from issuance. Set BEFORE the

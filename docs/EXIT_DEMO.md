@@ -28,18 +28,42 @@ relayer, and receipt verification against a second chain's light client.
 
 ---
 
-## Run classification: INTERNAL ACCEPTANCE RUN
+## Run classification: D-090's condition, and its VERDICT (task 2.9)
 
-The demo's buy is a **conditioned** ZK purchase, so its receipt reads
-`condition_outcome = NONE` for a conditioned settlement (**D-087**). Both edge
-contracts disclose the true semantics, so no consumer is misled, and that makes
-this acceptable as an internal acceptance run (D-090).
+~~**INTERNAL ACCEPTANCE RUN.** The demo's buy is a conditioned ZK purchase, so
+its receipt reads `condition_outcome = NONE` for a conditioned settlement
+(D-087). Both edge contracts disclose the true semantics, so no consumer is
+misled, and that makes this acceptable as an internal acceptance run (D-090).
+**If this output is ever repurposed as EXTERNAL-FACING evidence, task 2.9
+(truthful `condition_outcome`) is a PREREQUISITE.**~~
 
-> **If this output is ever repurposed as EXTERNAL-FACING evidence, task 2.9
-> (truthful `condition_outcome`) is a PREREQUISITE.** This is a condition, not a
-> caveat. The demo prints it in its own banner.
+**VERDICT (task 2.9, D-100): the D-090 condition is DISCHARGED.** The demo's
+buy is still a conditioned ZK purchase, and its receipt now reads
+`condition_outcome = RELEASED` — verified on a live node in the §6a re-run
+below. The named prerequisite has been met, so the output's own truthfulness no
+longer bars external-facing use.
 
-The demo does not route around the boundary — it **demonstrates** it. See stage 6.
+**What still would, stated so the discharge is not read as more than it is.**
+These are VERIFIER-side obligations, not node ones, and no amount of node work
+retires them:
+
+1. **A Conclave light client per origin chain** (7683_SURFACE §6.3 check 1).
+   The demo verifies against a root it already trusts; a real settler must
+   obtain that root from a light client it runs. §6b demonstrates the shape of
+   this against a second chain, which is evidence the rail works — not a
+   substitute for the settler having one.
+2. **The check-4 dedup ledger** — one claim per `receipt_id`, a settler-side
+   property the chain cannot provide.
+3. **The audit and the ceremony** (PHASE3_PLAN §6): the ZK release path rests
+   on a **dev** verifying key until 3.2, so a proof-gated release is not
+   externally trustworthy yet regardless of what the receipt says.
+
+Items 1 and 2 were always true and were never what D-090 was about; item 3 is
+the one worth saying out loud, because it means "external-facing" remains
+gated in practice even though the specific defect D-090 named is closed.
+
+The demo no longer demonstrates a boundary — it asserts the semantics that
+replaced it, and shows the new admissibility conjunct load-bearing. See stage 6.
 
 ---
 
@@ -121,18 +145,34 @@ Negative (a) runs **before** the positive on purpose: after release the escrow i
 terminal, so a wrong-instance proof would fail as `ErrTerminalState` and prove
 nothing about instance binding.
 
-**Stage 6 — the evidence, and its limits.** The receipt + ICS-23 proof are
-fetched and `terms_hash` is recomputed from the *queried* winning Solution
-(7683_SURFACE §6.3 check 2). Then the D-087 boundary is **demonstrated**:
+**Stage 6 — the evidence.** The receipt + ICS-23 proof are fetched and
+`terms_hash` is recomputed from the *queried* winning Solution (7683_SURFACE
+§6.3 check 2). Then the **task-2.9 semantics** are asserted:
 
-- `condition_outcome` reads `NONE` even though this settlement is conditioned;
-- §6.3 **check 3 REJECTS** the conditioned delivery leg, so this receipt is
-  correctly **inadmissible** as delivery evidence on the v1 fill-back rail;
-- delivery is proven instead by the **escrow's terminal `RELEASED` state**.
+- `condition_outcome` reads **`RELEASED`** — the receipt reports its own escrow;
+- §6.3 **check 3 ADMITS** it: the coin leg pays the seller AND the escrow
+  released, so this receipt IS delivery evidence on the fill-back rail;
+- the same evidence reading `PENDING` / `DISPUTED` / `REFUNDED` is **refused by
+  name** (`ErrOutcomeNotFinal`) — the `Match` is byte-identical in all four
+  cases, which is exactly why the pre-2.9 rule could not tell them apart;
+- and the escrow's terminal `RELEASED` state corroborates it independently.
 
-A demo that exercises a documented boundary correctly is worth more than one that
-avoids it. If `condition_outcome` ever stops reading `NONE`, stage 6 fails by
-name and tells you to update task 2.9's status.
+~~Then the D-087 boundary is demonstrated: `condition_outcome` reads `NONE` even
+though this settlement is conditioned; §6.3 check 3 REJECTS the conditioned
+delivery leg, so this receipt is correctly inadmissible; delivery is proven
+instead by the escrow's terminal `RELEASED` state. A demo that exercises a
+documented boundary correctly is worth more than one that avoids it. **If
+`condition_outcome` ever stops reading `NONE`, stage 6 fails by name and tells
+you to update task 2.9's status.**~~
+
+> **THE TRIPWIRE FIRED, AND THAT IS THE POINT.** The struck-through assertion
+> was written to break the moment the field became truthful, and at task 2.9 it
+> did — `exit_demo.go` returned "D-087 has been fixed; update this demo and
+> 2.9's status" on the first run. A disclosure that can only be retired by
+> someone remembering it is a disclosure that rots; one that FAILS A RUN cannot
+> be forgotten. This is the cheapest instance in the repo of a doc-debt that
+> enforced its own retirement, and it is worth copying wherever a document
+> promises a future fix.
 
 **Stage 7 — the consent gate from the live path.** The demo driver is the first
 live-network writer of `SettleLeg.Condition` (see below), so the Rule-4 question
@@ -310,8 +350,17 @@ Then 7683_SURFACE §6.3's four checks run, exactly as an origin settler would:
 |---|---|
 | 1 — root authenticity | ICS-23 membership **verified against chain B's stored root** (e.g. `BD261E27FE2D5AF4…` at height 93, proof taken at version 92) |
 | 2 — terms authenticity | `terms_hash` recomputed from the *queried* winning Solution; `receipt.intent_id ∈ match.intent_ids` |
-| 3 — order ↔ fill | **REJECTS** the conditioned delivery leg (D-087 boundary, as in §6a); delivery proven instead by the escrow's terminal `RELEASED` |
+| 3 — order ↔ fill | ~~REJECTS the conditioned delivery leg (D-087 boundary)~~ → **ADMITS** it since task 2.9: the coin leg pays the seller AND `condition_outcome = RELEASED`. **NOT re-run at 2.9** — see the note below the table |
 | 4 — first-claim uniqueness | settler-side ledger; the verbatim replay is refused |
+
+> **HONEST LIMIT — §6b was NOT re-run at task 2.9.** It needs two chains and a
+> live `cosmos/relayer` process, and the only 2.9 changes reaching it are its
+> banner and the stage-6 assertion it SHARES with §6a — which §6a **did** re-run
+> live and green (`condition_outcome = RELEASED`, check 3 admitting, the three
+> negatives refusing by name). So the row above is an inference from a shared
+> code path, not a fresh observation, and it is marked as one rather than
+> quietly inheriting §6a's green. The last full §6b run remains the task-2.16
+> re-verification.
 
 **Four negatives, each asserting its SPECIFIC failure** — never merely "an
 error", which is the §6a F-3 lesson:
@@ -321,7 +370,7 @@ error", which is the §6a F-3 lesson:
 | one byte of the receipt flipped | `chained membership proof failed to verify membership of value` |
 | the **nearest other** root chain B holds (not a distant one — a far root rejects trivially) | `proof did not commit to expected root` |
 | **the off-by-one itself**: proof taken at version `H` instead of `H−1`, checked against the root for `H` | `proof did not commit to expected root` |
-| check 3 skipped | the conditioned leg **is** admitted — which is what proves check 3 load-bearing |
+| check 3 skipped | the wrong settlement **is** admitted — which is what proves check 3 load-bearing |
 
 The first two negatives fail with **different** messages, which is what proves
 they test different things rather than each other.

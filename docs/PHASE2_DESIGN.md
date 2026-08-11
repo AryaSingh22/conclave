@@ -63,12 +63,12 @@ load-bearing and recorded (§4).
 | 2.2 | wasmd + CVM bindings (read-only CONCLUDE + escrow allowlist) | **DONE** — wasmd v0.54.9 wired, bindings + forge-prevention e2e green; localnet contract smoke deferred to the §6 exit demo (needs a CVM-schema contract binary) | `9722912`, D-077 + D-079 |
 | 2.5 | IBC USDC + session-TWAP fee (swaps `window.go:138`); owned the NEXT v0.53 checkpoint | **DONE** — stay ibc-go v8.8.0 (posture under P3-B); session-TWAP index + fee seam live, vector re-baselined; two-chain ICS-20 e2e; v0.53 checkpoint re-failed on (a); live relayer demo = §6 exit demo | `dccd607`, D-081 + D-082 |
 | 2.3 | x402 gateway — in-repo deliverable = node-side surface contract | **DONE** — node surface verdict ALREADY COMPLETE (no new gRPC); contract + app conformance + live sweep shipped; G1 rebind hole FIXED, G2 strand hole MITIGATED | `8756575`, D-083/084/085 · artifact: `docs/edge/X402_SURFACE.md` |
-| 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | **DONE** — surface complete after ONE gap the conformance test found (fallback clearings now persist their winning Solution); G1(2.4) `condition_outcome` disclosed + neutralized | `c830e55`, D-086/087 · artifact: `docs/edge/7683_SURFACE.md` |
+| 2.4 | 7683 resolver — in-repo deliverable = surface + proof contract | **DONE** — surface complete after ONE gap the conformance test found (fallback clearings now persist their winning Solution); G1(2.4) `condition_outcome` disclosed + ~~neutralized~~ (**the neutralization was INERT — finding F-16, task 2.9/D-100**) | `c830e55`, D-086/087 · artifact: `docs/edge/7683_SURFACE.md` |
 | 2.11 | Store-iterator range-end correctness (x/mandate, x/sigil) | **DONE** — split out of 2.6 at a STOP and landed FIRST; 8 sites, 2 LIVE-broken (one on the §6.4 rule-5 consensus path); vector byte-identical | `d34ede0`, D-088 |
 | 2.6 | Matcher-richness hardening (3 of the 5 matcher TODOs closed; 2 split out) | **DONE** — §5.1 limit RATE honored (closes D-049/F-7), partial-fill cycles + alternate anchoring, 2-party partial-fill fallback; all three strictly ADDITIVE, vector byte-identical three times | `aa21274`, D-089 |
 | 2.7 | Escrow consent completeness (FW-1 + FW-2 + the D-089 re-points + the DOWNGRADE row) | **DONE** — a signed condition is now a **REQUIREMENT**: `signed ⇒ attached` enforced at both chokepoints (the fix is the LOOP BOUND, proven by reverting each bound alone), the in-consensus **fallback made an ATTACHER** so the rule ships with a live path that meets it, FW-1(a)+(b) landed as ONE per-class relation (HASHLOCK ceiling vs OPTIMISTIC floor — opposite directions, disjoint watched reds), FW-2's `IntentLeg.condition` landed with a real reader, D-074 kept (collision dissolved as orthogonal), both D-089 re-points explicitly re-deferred to NEW **2.15**; vector byte-identical twice, exit demo green unedited | `7283b11`, D-094 (updating D-078, D-089, D-093) |
 | 2.8 | Submit-charge STRUCTURAL fork (design question only — the G2 security hole is CLOSED in 2.3) + the timeouts→params promotion | **open** | D-085 |
-| 2.9 | Receipt condition-outcome integrity (`CONDITION_OUTCOME_PENDING` + escrow write-back) | **open** | D-087 |
+| 2.9 | Receipt condition-outcome integrity (`CONDITION_OUTCOME_PENDING` + escrow write-back) | **DONE** — the field is truthful across all three condition classes and both terminal outcomes, proven at APP level through the ICS-23 proof surface; §6.3 check 3 REWRITTEN after finding **F-16** (D-087's mitigation was INERT on the case it was written for); the receipt gains one mutable, monotone field and needs **no migration**; vector byte-identical, no re-baseline; §6a re-run live; spawned task **2.19** | D-087 → **D-100** |
 | 2.10 | In-consensus cycle-aware fallback (the second half of `fallback.go:35`) | **open** | D-089 |
 | 2.12 | Multi-asset in-kind skim + in-kind solver payout (`skim.go:37`) | **open** | D-089 |
 | 2.13 | Solver-side condition attachment + the F-1 registered-error-code loss | **DONE** — (b) the registered code now reaches the wire (`session`/`1412` via shape S1; §6a's stage-7 pin watched RED on a live node, then replaced by (codespace, code) assertions); (a) verdict = **GAP** — a signed condition is a PERMISSION CEILING, never a requirement, and the IN-CONSENSUS FALLBACK performs the downgrade, so it is a protocol property rather than a tooling gap. Closure split: enforcement → 2.7's new DOWNGRADE row, reference → new 2.14 | `0d7f167`, D-093 |
@@ -96,8 +96,10 @@ load-bearing and recorded (§4).
 >
 > **The Phase-2 tail — a uniform rule, not six exceptions.** ~~Six tasks remain
 > open and none is exit-blocking: **2.8, 2.9, 2.10, 2.12, 2.14, 2.15**.~~
-> **UPDATED at task 2.14 (D-097): 2.14 is CLOSED and produced two new rows, so
-> the tail is now 2.8, 2.9, 2.10, 2.12, 2.15, 2.17, 2.18** — still none
+> ~~**UPDATED at task 2.14 (D-097): 2.14 is CLOSED and produced two new rows, so
+> the tail is now 2.8, 2.9, 2.10, 2.12, 2.15, 2.17, 2.18**~~ — **UPDATED again
+> at task 2.9 (D-100): 2.17 and 2.9 are CLOSED and 2.9 produced one new row, so
+> the tail is 2.8, 2.10, 2.12, 2.15, 2.18, 2.19** — still none
 > exit-blocking. They
 > keep their `2.x` numbers, which are IDENTIFIERS, not a schedule —
 > renumbering would break roughly fifteen cross-references in `DECISIONS.md`
@@ -120,9 +122,12 @@ load-bearing and recorded (§4).
 > **(a) is CLOSED by task 2.14 (D-097)** — `solver.Solve` attaches, and the
 > chain's own predicate drops anything it would reject; see §2.14 and
 > `docs/edge/SOLVER_SURFACE.md`.
-> (b) **2.9** — the run is **INTERNAL**; 2.9 remains a hard prerequisite
+> ~~(b) **2.9** — the run is **INTERNAL**; 2.9 remains a hard prerequisite
 > before any external-facing use of this evidence, and 2.7 made conditioned
-> settlements strictly more common, widening it.
+> settlements strictly more common, widening it.~~ **(b) is CLOSED by task 2.9
+> (D-100): the receipt reads `RELEASED`, re-verified live in the §6a run, and
+> the task additionally found F-16 — the mitigation accepted in place of the fix
+> never worked.**
 >
 > **(c) NEW, found while closing (a) — task 2.17 (D-097), CLOSED by D-098.** The
 > "slashable (5%)" phrasing struck through above was itself wrong about the
@@ -162,6 +167,11 @@ acceptable for an **internal acceptance run**, because §6.4 of
 semantics, so no consumer is misled. **If the demo output is ever repurposed as
 EXTERNAL-FACING evidence, task 2.9 becomes a prerequisite** — that is a hard
 condition at the demo's plan-stop, not a caveat to weigh.
+**DISCHARGED at task 2.9 (D-100):** the demo's receipt now reads
+`condition_outcome = RELEASED`, verified on a live node in the §6a re-run. What
+still gates external use is verifier-side (a Conclave light client per origin
+chain, the check-4 dedup ledger) and the **dev** verifying key behind ZK release
+until 3.2 — none of which this condition named, and all of which remain.
 
 ---
 
@@ -525,10 +535,28 @@ decorative: the only writer stamps `NONE` unconditionally, including for
 settlements whose legs carried conditions, and nothing updates a receipt when
 its escrow later resolves. No funds at risk and no current consumer, so the
 disposition **neutralizes rather than ships the falsehood** — three-place
-disclosure plus the mandated unconditioned-leg check makes the v1 coin-fill rail
-safe by construction with zero node changes. **The fix is task 2.9**, and it is
-a **hard prerequisite** if the §6 demo's output is ever used as external-facing
-evidence (§0).
+disclosure plus the mandated unconditioned-leg check ~~makes the v1 coin-fill
+rail safe by construction with zero node changes~~. **The fix is task 2.9**, and
+it is a **hard prerequisite** if the §6 demo's output is ever used as
+external-facing evidence (§0).
+
+> **CLOSED by task 2.9 (D-100) — and the struck clause above is finding F-16.**
+> The mitigation this disposition accepted IN PLACE OF the fix did not do what
+> it claimed. `validateConditionedMatch` guarantees that a conditioned match's
+> coin legs always carry a nil condition, so the "mandated unconditioned-leg
+> check" could never reject the escrowed payment it existed to reject; a
+> resolver reimbursed on the origin chain could watch the condition time out and
+> take its funds back, with no collusion. Check 3 is rewritten (pays-the-
+> recipient AND `condition_outcome ∈ {NONE, RELEASED}`), which closes it and
+> also OPENS conditioned fill-back. Two further corrections to the text above:
+> the disclosure was **nine** statements across six files, not three; and the
+> §6 demo prerequisite is now **DISCHARGED** (D-090's condition), with what
+> remains stated as verifier-side.
+>
+> **The transferable lesson, and the reason this block was not simply deleted:**
+> a mitigation accepted INSTEAD of a fix inherits the fix's burden of proof, and
+> this one was never tested against the artifact. "Safe by construction" is a
+> claim about the code, and it had no test.
 
 **Vector:** run in ISOLATION on the fallback-Solution change — byte-identical,
 no re-baseline, with the honest coverage note that the sim generates no
@@ -1059,12 +1087,13 @@ contract is `docs/edge/SOLVER_SURFACE.md`. **"The chain now requires it" is not
 > marked because a struck block without a forward pointer still reads as
 > current to a skimmer.
 
-**Hard condition at the demo's plan-stop (D-090).** The x402 leg is the
-conditioned ZK buy, so its receipt reads `condition_outcome = NONE` for a
-conditioned settlement (D-087). Acceptable for an **internal acceptance run** —
-both edge contracts disclose the true semantics, so no consumer is misled. **If
-the demo output is ever repurposed as EXTERNAL-FACING evidence, task 2.9 is a
-prerequisite.** This is a condition, not a note.
+**Hard condition at the demo's plan-stop (D-090) — ✅ DISCHARGED at 2.9.**
+~~The x402 leg is the conditioned ZK buy, so its receipt reads
+`condition_outcome = NONE` for a conditioned settlement (D-087) … **If the demo
+output is ever repurposed as EXTERNAL-FACING evidence, task 2.9 is a
+prerequisite.**~~ The receipt reads `RELEASED` since task 2.9 (D-100), verified
+live in the §6a re-run. The residue is verifier-side (a Conclave light client
+per origin chain, the check-4 dedup ledger) plus the dev VK until 3.2.
 
 **2.4 stays deliberately off this exit path** (the parallel inbound rail,
 proven by its own repo's integration). 2.6/2.7/2.11/2.13 and the six-task tail

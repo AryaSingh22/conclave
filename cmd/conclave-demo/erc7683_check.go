@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 
 	cmtservice "github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
@@ -26,6 +27,7 @@ import (
 
 	"cosmossdk.io/math"
 
+	"github.com/AryaSingh22/conclave/fillback"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
 	sessiontypes "github.com/AryaSingh22/conclave/x/session/types"
@@ -244,31 +246,26 @@ func (c *cli) erc7683Check() error {
 	if err := match.Unmarshal(matchBz); err != nil {
 		return err
 	}
-	// (3) the leg check: order = {recipient userSigil, 100 uusdc, unconditioned}.
-	legOK := false
-	for i := range match.Legs {
-		leg := &match.Legs[i]
-		coin := leg.GetCoin()
-		if leg.ToSigil == userSigil && coin != nil && coin.Denom == uusdc &&
-			coin.Amount.GTE(math.NewInt(100*usdc)) && leg.Condition == nil {
-			legOK = true
-		}
+	// (3) check 3, BOTH conjuncts, from the ONE shared implementation (package
+	// fillback — task 2.9, finding F-17). This sweep used to carry a THIRD
+	// hand-rolled copy of the rule, testing `leg.Condition == nil` on a coin
+	// leg — a clause that can never fire, because a conditioned match's coin
+	// legs always carry a nil condition (finding F-16).
+	order := fillback.Order{
+		ID: "7683-check-order", RecipientSigil: userSigil,
+		Denom: uusdc, MinReceived: math.NewInt(100 * usdc),
 	}
-	if !legOK {
-		return fmt.Errorf("§6.3(3) no unconditioned leg pays the order recipient")
+	if err := fillback.Admissible(proof.Receipt, match, order); err != nil {
+		return fmt.Errorf("§6.3(3) genuine fill rejected: %w", err)
 	}
-	// (3-negative) a mismatched order MUST fail the same check.
-	wrongOK := false
-	for i := range match.Legs {
-		leg := &match.Legs[i]
-		coin := leg.GetCoin()
-		if leg.ToSigil == opSigil && coin != nil && coin.Denom == uusdc &&
-			coin.Amount.GTE(math.NewInt(500*usdc)) {
-			wrongOK = true
-		}
+	// (3-negative) a mismatched order MUST fail the same check, and must fail
+	// on the LEG conjunct SPECIFICALLY — never merely "an error".
+	wrong := fillback.Order{
+		ID: "7683-check-wrong-order", RecipientSigil: opSigil,
+		Denom: uusdc, MinReceived: math.NewInt(500 * usdc),
 	}
-	if wrongOK {
-		return fmt.Errorf("§6.3(3) mismatched order unexpectedly satisfied")
+	if err := fillback.Admissible(proof.Receipt, match, wrong); !errors.Is(err, fillback.ErrNoPayingLeg) {
+		return fmt.Errorf("§6.3(3) mismatched order must fail with ErrNoPayingLeg, got %v", err)
 	}
 	// (4) dedup: the first claim consumes the receipt id; presenting the
 	// same (still-valid) evidence again is refused by the mark alone.

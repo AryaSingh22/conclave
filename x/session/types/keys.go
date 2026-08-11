@@ -39,6 +39,7 @@ const (
 //	0x09 | chamber(4) | escrow_id(32)                     → Escrow stub (DataGrant legs)
 //	0x0A                                                  → next_session_id (genesis bookkeeping)
 //	0x0B | base_len(2) | base | quote                     → TwapRecord (task 2.5 price index)
+//	0x0C | escrow_id(32) | receipt_id(32)                 → {} escrow→receipt index (task 2.9)
 //
 // The §6.6 receipt layout (0x07 primary `chamber|sigil_id|height|receipt_id`,
 // 0x08 secondary `receipt_id`) is pinned here exactly even though receipts are
@@ -76,6 +77,19 @@ var (
 	// (denoms, data/{schema}, svc/{schema}) may contain any byte, so
 	// base|quote alone would be ambiguous.
 	TwapKeyPrefix = []byte{0x0B}
+	// EscrowReceiptIdxPrefix maps a conditioned leg's escrow to the receipts
+	// that settlement wrote, so x/escrow can carry a resolution back onto them
+	// (task 2.9, D-100). It exists because the escrow record CANNOT locate its
+	// receipts on its own: Escrow.intent_id is never populated (conclude.go's
+	// buildEscrowRecord sets id/session/payer/payee/amount/condition/chamber
+	// and nothing else), and a conditioned settlement has TWO receipts anyway —
+	// one per party — which no single field could carry.
+	//
+	// Written ONLY for conditioned legs, inside the same atomic CONCLUDE cache
+	// as the receipts and the escrow, so an entry can never exist without both.
+	// A NONE-condition DataGrant opens a record-only escrow that has no
+	// transitions at all, so indexing it would be a key that is never read.
+	EscrowReceiptIdxPrefix = []byte{0x0C}
 )
 
 // twapMaxAssetKeyLen bounds each asset key in a TWAP store key. sdk denoms
@@ -231,6 +245,23 @@ func ReceiptBySigilPrefix(chamberID uint32, sigilIDBz []byte) []byte {
 	key = append(key, ReceiptKeyPrefix...)
 	key = append(key, chamberBytes(chamberID)...)
 	return append(key, sigilIDBz...)
+}
+
+// EscrowReceiptIdxKey returns 0x0C | escrow_id(32) | receipt_id(32).
+func EscrowReceiptIdxKey(escrowIDBz, receiptIDBz []byte) []byte {
+	key := make([]byte, 0, 1+IDLength+IDLength)
+	key = append(key, EscrowReceiptIdxPrefix...)
+	key = append(key, escrowIDBz...)
+	return append(key, receiptIDBz...)
+}
+
+// EscrowReceiptIdxPrefixFor returns 0x0C | escrow_id(32) — scans one escrow's
+// receipts in ascending receipt-id order. Iterate it against PrefixEnd, never
+// against prefix‖0xFF (D-088).
+func EscrowReceiptIdxPrefixFor(escrowIDBz []byte) []byte {
+	key := make([]byte, 0, 1+IDLength)
+	key = append(key, EscrowReceiptIdxPrefix...)
+	return append(key, escrowIDBz...)
 }
 
 // PrefixEnd returns the exclusive upper bound for iterating a key prefix.

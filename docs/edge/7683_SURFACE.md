@@ -281,10 +281,21 @@ terms_hash, clearing_prices, condition_outcome, height, chamber_id }`
   recomputes to each party's `receipt.terms_hash` for that shape too, so the
   `Session → winning_solution_id → Solutions → Match` chain needs no special
   case. Pinned by `TestFallbackPartialFill_PreImageUniformity` (§7).
-- ⚠️ **`condition_outcome` is currently decorative — never read it**
-  (D-087, task 2.9): the only writer stamps `CONDITION_OUTCOME_NONE`
-  unconditionally, including for settlements whose legs DID carry
-  conditions; `RELEASED/REFUNDED/DISPUTED` are never written. §6.4.
+- **`condition_outcome` is TRUE, and it is half of check 3** (task 2.9,
+  D-100). It reads `NONE` only when the settlement carried no delivery
+  condition at all, `PENDING` from CONCLUDE until the leg's escrow
+  resolves, `DISPUTED` while an OPTIMISTIC dispute is open, and
+  `RELEASED`/`REFUNDED` once it has resolved. ~~⚠️ `condition_outcome` is
+  currently decorative — never read it (D-087): the only writer stamps
+  `CONDITION_OUTCOME_NONE` unconditionally~~ — retired; see §6.4 for what
+  that disclosure cost.
+- **THE RECEIPT IS NOT WRITE-ONCE, and `condition_outcome` is the only
+  exception.** Every other field is fixed at settlement; this one is
+  rewritten in place under both receipt keys when the escrow moves. It is
+  **MONOTONE** — `PENDING → [DISPUTED] → {RELEASED, REFUNDED}`, terminal
+  absorbing, enforced in the node rather than merely observed — so a
+  terminal reading can never be contradicted later. §6.2 says what that
+  means for a proof you already hold.
 
 ### 6.2 Height semantics (normative for the bridge)
 
@@ -300,6 +311,19 @@ terms_hash, clearing_prices, condition_outcome, height, chamber_id }`
   node; since receipts persist, re-fetching a *fresh* proof at the current
   tip is always available and is the recommended posture when the origin
   light client has advanced.
+- **A proof is a statement about ITS height — which is exactly what makes
+  the one mutable field safe** (task 2.9). A receipt whose
+  `condition_outcome` changes at height `H+k` does not invalidate a proof
+  taken at `H`: ICS-23 proves the value AT `ProofHeight`, so the older
+  proof remains a true statement that the settlement was, say, `PENDING`
+  then. No proof already issued was invalidated by task 2.9, and no stored
+  receipt needed migration. **NORMATIVE: fetch at the tip, and RE-FETCH
+  before acting on a non-terminal outcome** (`PENDING`, `DISPUTED`). A
+  terminal outcome (`NONE`, `RELEASED`, `REFUNDED`) never needs
+  re-fetching — that is what monotonicity buys the verifier. Pinned by
+  `TestConditionOutcome_PendingThenReleased` (§7), which re-verifies the
+  pre-resolution proof against its own root after the receipt's bytes have
+  changed, and shows it failing against the later root.
 
 ### 6.3 What the proof does NOT prove — and the MANDATED bridge checks
 
@@ -319,12 +343,38 @@ the forged/replayed claim is **accepted when the check is skipped** (§7).
    `sha256(match_bytes) == receipt.terms_hash`, and check
    `receipt.intent_id ∈ match.intent_ids`.
 3. **Order ↔ fill correspondence — the binding lives HERE, not on
-   chain (§1.2).** Some leg of the verified `Match` must pay the order's
-   recipient sigil at least the order's `minReceived` of the order's denom,
-   **with `condition` unset** — a conditioned leg's funds are escrowed and
-   may refund (§6.4), so it is not delivery. Without this check, **any
-   genuine receipt claims any order** (conformance: the wrong-settlement
-   claim is accepted with the leg check skipped).
+   chain (§1.2) — AND the fill must not be undoable.** TWO conjuncts, both
+   mandatory:
+   **(a)** some leg of the verified `Match` pays the order's recipient
+   sigil at least the order's `minReceived` of the order's denom; **and**
+   **(b)** `receipt.condition_outcome ∈ {NONE, RELEASED}` — `NONE` means
+   nothing was ever escrowed, `RELEASED` means the escrow paid the payee.
+   `PENDING` and `DISPUTED` are live escrows whose funds may still refund;
+   `REFUNDED` is a fill that has already been undone.
+   Without (a), **any genuine receipt claims any order**; without (b), a
+   fill whose funds later returned to the resolver is reimbursed anyway.
+   (Conformance: the wrong-settlement claim is accepted with (a) skipped;
+   and (b) is shown load-bearing by running check 3 MINUS (b) across a
+   conditioned settlement's whole life — it accepts `PENDING`, `DISPUTED`
+   and `REFUNDED` alike, because the `Match` is byte-identical in all
+   three.)
+
+   > **(b) REPLACES the pre-2.9 clause "with `condition` unset", which was
+   > INERT — finding F-16 (D-100), and it is why D-087's disposition (b)
+   > was not the safe trade it appeared to be.** The old rule tested a
+   > *leg's* condition. But `validateConditionedMatch` admits exactly one
+   > conditioned shape — one conditioned DataGrant leg seller→buyer plus
+   > coin payment legs buyer→seller — so **in a conditioned match every
+   > coin leg necessarily carries a nil condition**, and it is precisely
+   > those coin legs that `openConditionedEscrows` routes INTO escrow. The
+   > clause could therefore never reject anything a chain-valid `Match`
+   > contains, while an **escrowed** payment to the order's recipient
+   > satisfied it in full. Concretely, and with no collusion required: an
+   > order says "pay N to sigil S"; a resolver fills it by buying S's
+   > conditioned data; the condition times out; the funds **refund to the
+   > resolver**, which the origin settler has already reimbursed. S is
+   > never paid. The correct discriminator was never the leg — it is the
+   > settlement outcome, and task 2.9 is what made that readable.
 4. **First-claim uniqueness.** The proof is a fact, replayable verbatim.
    The settler MUST enforce **one-claim-per-`receipt_id`**. Without it, one
    fill reimburses unboundedly many identical orders (conformance: the
@@ -332,24 +382,53 @@ the forged/replayed claim is **accepted when the check is skipped** (§7).
    a node property — the node's tx dedup (X402_SURFACE.md §3.2) is
    unrelated.
 
-### 6.4 `condition_outcome` — the D-087 disclosure (read this)
+### 6.4 `condition_outcome` — what it means now, and the record of what it cost
 
-`Receipt.condition_outcome` documents escrow outcomes
-(`RELEASED/REFUNDED/DISPUTED`) but **no code path has ever written any
-value except `CONDITION_OUTCOME_NONE`** — including for settlements whose
-legs carried HASHLOCK/OPTIMISTIC/ZK conditions (real since task 2.1), and
-nothing updates a receipt when its escrow later resolves. Consequences:
+**Current semantics (task 2.9, D-100).** The field is a faithful projection
+of the conditioned leg's `x/escrow` lifecycle, stamped at CONCLUDE and
+rewritten when the escrow moves:
 
-- A receipt is evidence that **CONCLUDE happened**, not that delivery
-  completed. For a conditioned leg, the funds sit in `x/escrow` and may
-  REFUND after the receipt exists, with the receipt unchanged.
-- A bridge that reads `condition_outcome == NONE` as "unconditional final
-  settlement" will reimburse fills whose funds later refunded.
-- **v1 rail rule:** accept only fills whose relevant legs are
-  **unconditioned coin legs**, checked from the terms pre-image the bridge
-  already verifies (§6.3 check 3). Conditioned-delivery fill-back (via the
-  escrow query surface or a fixed `condition_outcome`) is out of scope
-  until **task 2.9** wires the receipt's outcome to escrow resolution.
+| value | meaning | terminal? |
+|---|---|---|
+| `NONE` | the settlement carried no delivery condition; nothing was escrowed | yes |
+| `PENDING` | conditioned, escrow still ACTIVE — funds may still refund | no |
+| `DISPUTED` | an OPTIMISTIC dispute is OPEN — not a resolution | no |
+| `RELEASED` | the escrow paid the payee | yes |
+| `REFUNDED` | the escrow returned the funds to the payer | yes |
+
+- A receipt with a **non-terminal** outcome is evidence that CONCLUDE
+  happened, not that delivery completed. A receipt reading `RELEASED` *is*
+  delivery evidence, and **conditioned-delivery fill-back is now in scope**
+  — it was out of scope "until task 2.9" precisely because of this field.
+- The outcome is monotone and terminal-absorbing (§6.1), and mutation does
+  not invalidate older proofs (§6.2).
+
+**The retired disclosure, kept visible (D-087).** ~~`Receipt.condition_outcome`
+documents escrow outcomes but no code path has ever written any value except
+`CONDITION_OUTCOME_NONE` — including for settlements whose legs carried
+HASHLOCK/OPTIMISTIC/ZK conditions — and nothing updates a receipt when its
+escrow later resolves. v1 rail rule: accept only fills whose relevant legs are
+unconditioned coin legs, which makes the rail safe by construction with zero
+node changes.~~
+
+**Why that record stays here rather than being deleted — finding F-16.** The
+struck-through rule was not merely superseded; **it never worked**. It was
+accepted in place of fixing the field, on the argument that it made the v1
+rail safe *by construction* — and §6.3 check 3 now records why it could not:
+a conditioned match's coin legs always carry a nil condition, so the clause
+was inert on the exact case it was written for, and the escrowed payment it
+was meant to exclude passed it. A mitigation traded for a fix deserves the
+same scrutiny as the fix; this one never received it until 2.9 looked.
+
+**Finding F-17, the quieter one.** The same mandated rule had **three** in-tree
+implementations that had already drifted: the conformance suite tested a coin
+leg's condition, the §6 exit demo tested a DataGrant leg's, and the live-node
+`7683-check` sweep carried a third copy whose negative named no conjunct. All
+three now call one function — package `fillback` — the D-085 discipline
+(collapse the paths, don't synchronise them) applied at a contract boundary. It
+was FILED as two and corrected to three while being fixed, and the miscount is
+the point: **a rule this document mandates to an external implementer needs one
+in-tree statement, or the number of them is itself unknown.**
 
 ### 6.5 The fill flow mapped to this surface (informative)
 
@@ -397,6 +476,25 @@ nothing updates a receipt when its escrow later resolves. Consequences:
     under-declared fill passes the ante, INVALID at the Reveal, 50% bond
     slash, no receipt, window charge retained (watched RED with the Reveal
     cross-check bypassed; run recorded in D-086).
+- **`fillback/fillback.go`** — the ONE implementation of §6.3 check 3
+  (task 2.9). Both in-tree consumers call it: the conformance suite and
+  the §6 exit demo. A bridge implementing this contract can read it as
+  reference, but the rule is normative here, not there.
+- **`app/receipt_condition_outcome_test.go`** (in `make test`) — task
+  2.9's gate, at app level through real blocks and the PROOF surface:
+  `PENDING → RELEASED` with the pre-resolution proof re-verified against
+  its own root afterwards (the mutability contract, §6.2); the refund and
+  dispute paths; both store views agreeing; terminal-absorbing
+  monotonicity; and check 3 across a conditioned settlement's whole life,
+  showing `PaysOrder` alone — the pre-2.9 rule — accepting `PENDING`,
+  `DISPUTED` and `REFUNDED`. Each of the four guards was watched RED
+  (write-back removed at either call site; the stamp reverted to
+  unconditional `NONE`; the 0x0C index write removed), dosed ×5.
+- **`x/escrow/keeper/receipt_outcome_hook_test.go`** (in `make test`) —
+  the path enumeration: all EIGHT transition events across all three
+  condition classes report to the receipt, `NONE`-class never does, and a
+  write-back failure aborts the transition rather than resolving an escrow
+  whose receipt disagrees.
 - **`x/session/keeper/partial_fill_test.go`** (in `make test`) —
   `TestFallbackPartialFill_PreImageUniformity` pins §6.1's uniformity claim for
   the **partial** shape: it queries the persisted fallback Solution, asserts the
@@ -421,5 +519,11 @@ nothing updates a receipt when its escrow later resolves. Consequences:
 *Authored task 2.4 (D-086 surface + fallback-solution persistence; D-087
 condition_outcome disclosure). Updated at PHASE2_DESIGN Rev 3 (D-090) with the
 task-2.6 matcher changes §3.2 — the update task 2.6 owed this document and did
-not make. The resolver repo pins the commit of this document it builds against;
-changes land here first.*
+not make. **Updated at task 2.9 (D-100): §6.1 and §6.2 for the now-truthful,
+mutable, monotone `condition_outcome`; §6.3 check 3 REWRITTEN to two conjuncts
+after finding F-16 established that its old condition clause was inert; §6.4
+rewritten from disclosure to semantics + the F-16/F-17 record; §7 extended.
+CHECK 3 IS A NORMATIVE CHANGE — a bridge built against an earlier commit of
+this document implements a rule that does not do what it claims.* The resolver
+repo pins the commit of this document it builds against; changes land here
+first.*

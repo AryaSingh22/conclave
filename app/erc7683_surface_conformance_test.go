@@ -27,6 +27,7 @@ import (
 	commitmenttypes "github.com/cosmos/ibc-go/v8/modules/core/23-commitment/types"
 
 	"github.com/AryaSingh22/conclave/app"
+	"github.com/AryaSingh22/conclave/fillback"
 	mandatetypes "github.com/AryaSingh22/conclave/x/mandate/types"
 	receiptkeeper "github.com/AryaSingh22/conclave/x/receipt/keeper"
 	receipttypes "github.com/AryaSingh22/conclave/x/receipt/types"
@@ -364,8 +365,16 @@ type erc7683Evidence struct {
 // permanently and in-tree, that the corresponding check is load-bearing —
 // i.e. that the ICS-23 proof ALONE does not provide the property
 // (7683_SURFACE.md §6 "what the proof does NOT prove").
+// There is deliberately NO skipOutcome switch for check 3(b). Every fill in
+// THIS suite is unconditioned, so its receipts read NONE and a skip variant
+// here would demonstrate nothing — an option no case can exercise is exactly
+// the decoration Rule 4 rejects. 3(b)'s load-bearing demonstration lives where
+// a conditioned settlement exists: receipt_condition_outcome_test.go runs
+// check 3 MINUS 3(b) (i.e. fillback.PaysOrder alone, which is what the pre-2.9
+// rule reduced to) across PENDING, DISPUTED and REFUNDED and shows it accepts
+// all three.
 type erc7683BridgeOpts struct {
-	skipLegCheck bool // drop §6 check 3 (order↔fill binding)
+	skipLegCheck bool // drop §6 check 3(a) (order↔fill binding)
 	skipDedup    bool // drop §6 check 4 (one-claim-per-receipt)
 }
 
@@ -375,10 +384,15 @@ type erc7683BridgeOpts struct {
 //     against the trusted Conclave app root at proofHeight;
 //  2. sha256(matchBz) == receipt.terms_hash and the receipt's intent is in
 //     the match (the pre-image really is this settlement's terms);
-//  3. some match leg pays order.recipientSigil ≥ order.minReceived of
-//     order.denom, UNCONDITIONED (condition == nil — the D-087 rule: a
-//     conditioned leg's funds sit in escrow and may refund; receipt
-//     existence is NOT delivery completion);
+//  3. (a) some match leg pays order.recipientSigil ≥ order.minReceived of
+//     order.denom, AND (b) the receipt's condition_outcome admits the fill
+//     (NONE or RELEASED — the funds were never escrowed, or the escrow paid
+//     the payee). Both conjuncts come from package fillback, the ONE
+//     implementation of this rule (task 2.9, finding F-16);
+//     ~~UNCONDITIONED (condition == nil — the D-087 rule)~~ — that clause was
+//     INERT and is retired: a conditioned match's coin legs necessarily carry
+//     a nil condition, so it could never reject the escrowed payment it was
+//     written to reject. 7683_SURFACE §6.3/§6.4 carry the full record;
 //  4. receipt_id has not been claimed before (replay defense — a bridge
 //     obligation, not a node property).
 func erc7683BridgeVerify(
@@ -434,21 +448,20 @@ func erc7683BridgeVerify(
 
 	// (3) order↔fill binding — nothing on Conclave binds an intent to an
 	// origin-chain order (7683_SURFACE.md §1.3); THIS check is the binding.
+	// Both conjuncts route through package fillback so this suite and the §6
+	// exit demo cannot state the rule differently — which they did, until task
+	// 2.9 (finding F-17).
+	fbOrder := fillback.Order{
+		ID: order.id, RecipientSigil: order.recipientSigil,
+		Denom: order.denom, MinReceived: order.minReceived,
+	}
 	if !opts.skipLegCheck {
-		satisfied := false
-		for i := range match.Legs {
-			leg := &match.Legs[i]
-			coin := leg.GetCoin()
-			if leg.ToSigil == order.recipientSigil && coin != nil &&
-				coin.Denom == order.denom && coin.Amount.GTE(order.minReceived) &&
-				leg.Condition == nil {
-				satisfied = true
-				break
-			}
+		if err := fillback.PaysOrder(match, fbOrder); err != nil {
+			return err
 		}
-		if !satisfied {
-			return fmt.Errorf("no unconditioned leg pays order %s its %s%s", order.id, order.minReceived, order.denom)
-		}
+	}
+	if err := fillback.OutcomeAdmits(ev.receipt); err != nil {
+		return err
 	}
 
 	// (4) one-claim-per-receipt — the ONLY replay defense.
@@ -615,7 +628,7 @@ func TestERC7683SurfaceConformance(t *testing.T) {
 	// is the in-tree red proving the check is load-bearing. ---
 	require.ErrorContains(t,
 		erc7683BridgeVerify(orderA, root, ev2, storeKey, map[string]bool{}, erc7683BridgeOpts{}),
-		"no unconditioned leg pays order",
+		"no leg pays the order's recipient its minimum",
 		"wrong settlement's evidence must fail the LEG CHECK specifically (its proof is genuine)")
 	require.NoError(t,
 		erc7683BridgeVerify(orderA, root, ev2, storeKey, map[string]bool{}, erc7683BridgeOpts{skipLegCheck: true}),

@@ -393,9 +393,16 @@ the time (D-088).
       `Receipt.condition_outcome` is decorative — always NONE, never
       updated on escrow resolution; receipt ≠ delivery completion for
       conditioned legs. Disposition (b): three-place disclosure + the
-      mandated unconditioned-leg check makes the v1 coin-fill rail safe by
-      construction; the fix is task 2.9. X402_SURFACE.md got the same
-      disclosure (its ZK exit-demo buy hits it). Resolver itself = separate
+      mandated unconditioned-leg check ~~makes the v1 coin-fill rail safe by
+      construction~~; the fix is task 2.9. X402_SURFACE.md got the same
+      disclosure (its ZK exit-demo buy hits it).
+      **CLOSED by task 2.9 (D-100) — and the disposition's premise was WRONG.**
+      The "safe by construction" claim above is finding F-16: the mandated
+      leg-condition check was INERT (a conditioned match's coin legs always
+      carry a nil condition, so it could never reject the escrowed payment it
+      existed to reject). The disclosure was also not three-place but NINE
+      statements across six files, two of them executable tripwires. Both are
+      retired; check 3 is rewritten. Resolver itself = separate
       repo `conclave-7683-resolver`, NOT in `make test`. Vector: run in
       ISOLATION on the fallback-Solution change — **byte-identical**, no
       re-baseline (the sim generates no fillable pair; the conformance test
@@ -606,29 +613,48 @@ the time (D-088).
       say how it closes it — the sole-message rule is one answer, not the only one.
       **(e) The vector re-baselined at 2.17** (D-098). 2.8 must run in isolation
       against the NEW baseline, not D-082's.
-- [ ] 2.9 Receipt condition-outcome integrity (NEW in 2.4, G1/D-087) — the §6.6
-      receipt's `condition_outcome` is stamped NONE unconditionally and never
-      updated when the escrow resolves, so an ICS-23-provable receipt asserts
-      "no condition" for conditioned settlements and receipt-existence gets
-      misread as delivery-completion (funds may still REFUND). 2.4's edge
-      contracts disclose + neutralize (the bridge-side unconditioned-leg
-      rule); 2.9 makes the field TRUE: additive `CONDITION_OUTCOME_PENDING`,
-      faithful stamp at CONCLUDE, escrow-resolution write-back
-      (RELEASED/REFUNDED/DISPUTED). Proto + cross-module consensus work: own
-      session, plan-stop first, determinism vector re-baseline expected,
-      Rule-3 watched-red on the write-back. Acceptance: a conditioned
-      settlement's receipt reflects its escrow terminal state; unconditioned
-      receipts unchanged. Off the exit path.
-      **ACCEPTED FROM 2.7 (D-094), written in rather than pointed at.** 2.7 made a
-      signed condition a REQUIREMENT and made the in-consensus fallback attach
-      one, so **conditioned settlements are now strictly MORE common than when
-      D-087 was filed** — including on the fallback path, which is the default
-      whenever no solver wins. The unconditional `condition_outcome = NONE` stamp
-      is therefore wrong MORE often, and the misreading it enables (receipt
-      existence read as delivery completion, while the funds may still refund)
-      has a wider blast radius than 2.4 measured. This does not change 2.9's
-      shape, but it raises its priority and it is why the §6 demo's
-      external-facing prerequisite (§0) still stands.
+- [x] 2.9 Receipt condition-outcome integrity — `<COMMIT>`, **(D-100).** The §6.6
+      field is TRUE: `CONDITION_OUTCOME_PENDING = 5` appended, the CONCLUDE stamp
+      made conditional (NONE only when NONE is true), and escrow resolution
+      written back onto BOTH parties' receipts through a new `0x0C |
+      escrow_id | receipt_id` index — necessary, not convenient, because
+      `Escrow.intent_id` is never populated and one escrow governs two receipts.
+      `DISPUTED` gets its first writer and its comment CORRECTED (it is **not**
+      terminal). The receipt stops being write-once in exactly one field;
+      mutability is bounded by ENFORCED monotonicity (terminal absorbing), and
+      no already-issued proof is invalidated because ICS-23 proves the value at
+      its ProofHeight — so **no migration**. Seam typed in escrow's vocabulary
+      to dodge a real import cycle; a missing index is a NO-OP because the
+      write-back runs in EndBlock where an error halts the chain.
+      **FINDING F-16 — the headline.** The mitigation D-087 traded the fix away
+      for was **INERT**: §6.3 check 3 tested `leg.Condition == nil` on a coin
+      leg, but `validateConditionedMatch` guarantees conditioned matches only
+      ever have nil-condition coin legs — so the clause could never reject
+      anything a chain-valid Match contains, and the escrow-timeout-refunds-the-
+      resolver path passed it in full, no collusion needed. Check 3 REWRITTEN
+      (C1): pays-the-recipient AND `condition_outcome ∈ {NONE, RELEASED}`,
+      which also OPENS conditioned fill-back. **FINDING F-17:** the same rule
+      had THREE in-tree implementations that had already drifted (conformance
+      test: coin leg; exit demo: DataGrant leg; the live `7683-check` sweep: a
+      third copy whose negative named no conjunct) — all now call package
+      `fillback`. **Filed as two and corrected to three while fixing it:** the
+      third was found only by asking where else the rule is STATED, which is the
+      question a drifted rule makes hard to answer.
+      Gates: `app/receipt_condition_outcome_test.go` (app level, through the
+      ICS-23 proof surface, incl. the pre-resolution proof re-verified after the
+      bytes changed), `x/escrow/keeper/receipt_outcome_hook_test.go` (all EIGHT
+      transition events × three classes), `scripts/exit_demo.sh` stage 6 re-run
+      LIVE and green. Four sabotages watched RED ×5; one prediction was wrong
+      and the correction is recorded. **Vector: byte-identical, NO re-baseline**
+      — D-098's five hashes stand — with the reach MEASURED first: 508
+      settlements and 1,524 receipts across the five seeds, **zero** conditioned
+      escrows, so the field is exercised only in its NONE branch. D-090's
+      external-facing condition **DISCHARGED**; what remains is verifier-side
+      (light client, dedup ledger) plus the dev VK until 3.2. New task 2.19.
+      ~~*(as filed)* the receipt's `condition_outcome` is stamped NONE
+      unconditionally and never updated when the escrow resolves … 2.4's edge
+      contracts disclose + neutralize (the bridge-side unconditioned-leg rule)~~
+      — the neutralization is what F-16 disproved.
 - [ ] 2.10 In-consensus cycle-aware fallback (NEW in 2.6, D-089) — the second half of the
       old `fallback.go:35` TODO. 2.6/6a shipped 2-party partial fills; an N-party CYCLE in
       the in-consensus matcher is a materially larger determinism surface (cycle
@@ -940,7 +966,15 @@ the time (D-088).
       test failures reports a non-building sabotage as "no failures", making
       silence and success indistinguishable. In 2.14 that nearly recorded a
       load-bearing guard as not load-bearing — about the very decision that
-      task's STOP turned on. Acceptance: all three land in METHODOLOGY with their
+      task's STOP turned on. **CONFIRMED LIVE at task 2.9 (D-100), which is why
+      (c) should land verbatim rather than as advice:** 2.9's harness was built
+      WITH the compile check, and two of its four sabotages failed to build
+      (an unused variable after deleting the code that read it). It printed
+      "SABOTAGE DID NOT COMPILE — result is meaningless" and refused to score
+      them. Without that check both would have been recorded as "no failures",
+      i.e. as two load-bearing guards proven inert — the exact inversion. The
+      failure mode is not rare; it is what deleting a guard NORMALLY does to a
+      compiled language. Acceptance: all three land in METHODOLOGY with their
       instances; F-14's row updated to point here; no amendment left owned by a
       session reference. Docs-only. Off the exit path.
       **ACCEPTED FROM 2.17 (D-098), written in rather than pointed at — three
@@ -1009,6 +1043,30 @@ the time (D-088).
       D-089/D-094's Category-1 shadow), with the vector as regression backstop;
       proto change ⇒ vector run in isolation. Off the exit path.
 
+- [ ] **2.19 Receipts do not survive genesis export/import (NEW in 2.9, D-100)** —
+      `x/session`'s `GenesisState` carries params, solvers, sessions,
+      `next_session_id` and `twap_records`. It does **not** carry RECEIPTS — the
+      §6.6 records that exist to be ICS-23-proven to external verifiers — and
+      since 2.9 it does not carry the `0x0C` escrow→receipt index either. An
+      exported chain therefore loses every settlement record it ever wrote, and
+      an imported escrow resolves against no receipt at all. **Surfaced by 2.9,
+      not caused by it:** 2.9's write-back treats a missing index as a NO-OP,
+      which is correct *because* of this gap (and is safety-critical anyway —
+      the write-back runs in EndBlock, where an error halts the chain), so the
+      gap is now load-bearing for a design decision rather than merely latent.
+      **Adjacent to 3.6 (upgrade/migration infrastructure) but distinct, and the
+      distinction is the reason it is its own row:** 3.6 owns moving a LIVE chain
+      across a version boundary; this is genesis-export COMPLETENESS, which
+      matters the first time anyone exports state for any reason — a testnet
+      restart, a fixture, a forensic replay. Check the same question for
+      x/escrow's OPTIMISTIC commit side-record, which `InitGenesis` already
+      documents as not round-tripping (D-073). Acceptance: decide per record —
+      export it, or record WHY losing it is correct, with no third option; if
+      receipts are exported, the 0x0C index must be rebuilt at `InitGenesis` (or
+      derived) and an export→import→resolve round trip must land the right
+      `condition_outcome`; proto change to a genesis message ⇒ vector run in
+      isolation. Off the exit path.
+
 - [x] **§6a EXIT DEMO part A — x402 ingress + ZK escrow + CVM release, LIVE** —
       `65376ab`, D-091. Split from the exit demo at the approved plan-stop (D1); the exit
       *criterion* is asserted at §6b, only the build is split. **D-079 DISCHARGED:**
@@ -1028,7 +1086,12 @@ the time (D-088).
       in the demo's own banner; stage 6 DEMONSTRATES the D-087 boundary rather than
       avoiding it (receipt reads `condition_outcome=NONE`, §6.3 check 3 correctly
       REJECTS the conditioned leg as delivery evidence, delivery proven instead by
-      the escrow's terminal state). Record: `docs/EXIT_DEMO.md`. `make lint test`
+      the escrow's terminal state). **UPDATED at 2.9 (D-100): stage 6 no longer
+      demonstrates that boundary — it asserts what replaced it.** The receipt
+      reads `RELEASED`, check 3 ADMITS it, and the same evidence reading
+      PENDING/DISPUTED/REFUNDED is refused by name. §6a was re-run live and
+      green. The old assertion was a deliberate TRIPWIRE and it fired on 2.9's
+      first run, which is the mechanism working. Record: `docs/EXIT_DEMO.md`. `make lint test`
       green; determinism vector byte-identical to the D-082 baseline (covering gate
       named separately: the vector covers nothing here — `scripts/exit_demo.sh` is
       the gate). Findings F-2 (Rust ≥1.82 `reference-types` vs wasmvm 2.2.8) and F-3
@@ -1058,8 +1121,12 @@ the time (D-088).
       stated everywhere:** B→A is verified IN CONSENSUS by chain A's
       `MsgRecvPacket`; A→B is verified IN THE DRIVER against chain B's root (the
       settler is separate-repo scope) — it is NOT claimed that chain B's state
-      machine verified the receipt. Run stays **INTERNAL** (2.9 still a prerequisite
-      for external use). Finding F-1: §6a's D-076 wrong-instance negative asserted
+      machine verified the receipt. ~~Run stays **INTERNAL** (2.9 still a prerequisite
+      for external use)~~ — **2.9 CLOSED it (D-100): the receipt now reads
+      RELEASED and D-090's condition is DISCHARGED.** What still gates external
+      use is verifier-side (a Conclave light client per origin chain, the
+      check-4 dedup ledger) plus the dev VK until 3.2. §6b itself was NOT re-run
+      at 2.9 — stated as a limit, not inherited from §6a's green. Finding F-1: §6a's D-076 wrong-instance negative asserted
       only `code != 0` — tightened in-task to `ErrInvalidProof`. The predicted
       injected-`Txs[0]` relayer-compat risk did NOT fire (recorded as a negative
       result). Record: `docs/EXIT_DEMO.md`. `make lint test` green; determinism
@@ -1136,9 +1203,11 @@ contains zero reads of `Condition`, so the reference solver would propose a
 **slashable (5%)** solution the first time it meets a condition-signing intent;
 the only remaining item with a live functional defect, and why it sequences
 first.~~ **(a) is CLOSED by 2.14 (D-097): `solver.Solve` attaches, and drops any
-candidate the chain would reject rather than proposing it.** (b) **2.9** — the §6
+candidate the chain would reject rather than proposing it.** ~~(b) **2.9** — the §6
 run stays **INTERNAL**; 2.9 is a hard prerequisite for any external-facing use of
-that evidence, and 2.7 widened it.
+that evidence, and 2.7 widened it.~~ **(b) is CLOSED by 2.9 (D-100): the field is
+truthful, the §6a run re-verified it live, and D-090's condition is DISCHARGED —
+and the task found F-16, that the mitigation accepted in its place was inert.**
 
 ~~**A THIRD live consequence, discovered while closing (a) — task 2.17
 (D-097).**~~ **CLOSED by task 2.17 (D-098) — the text below is the finding as

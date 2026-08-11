@@ -79,15 +79,27 @@ func (k Keeper) deleteSweepIdx(ctx sdk.Context, esc types.Escrow) error {
 	return k.storeService.OpenKVStore(ctx).Delete(types.SweepIdxKey(esc.TimeoutHeight, idBz))
 }
 
-// commitTerminal writes the terminal state, clears the sweep-index entry, and
-// emits the terminal event. The record and participant index are retained so
-// the escrow stays queryable (spirit of D-017).
+// commitTerminal writes the terminal state, clears the sweep-index entry,
+// reports the outcome to the §6.6 receipts, and emits the terminal event. The
+// record and participant index are retained so the escrow stays queryable
+// (spirit of D-017).
+//
+// THIS IS THE SINGLE FUNNEL FOR EVERY TERMINAL TRANSITION, which is why the
+// task-2.9 write-back needs exactly one call site for both terminal outcomes
+// across all three condition classes: finalizeRelease and finalizeRefund are
+// its only callers, and between them they carry the HASHLOCK release, the
+// OPTIMISTIC dispute-reveal, the ZK proof release, and all four sweep branches
+// — plus the CVM release binding, which reaches the same keeper methods.
+// Enumerating those paths is the Rule-4 check that one hook covers them all.
 func (k Keeper) commitTerminal(ctx sdk.Context, esc types.Escrow, to types.EscrowState, eventType string) error {
 	if err := k.deleteSweepIdx(ctx, esc); err != nil {
 		return err
 	}
 	esc.State = to
 	if err := k.setEscrow(ctx, esc); err != nil {
+		return err
+	}
+	if err := k.writeBackReceiptOutcome(ctx, esc, to); err != nil {
 		return err
 	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent(

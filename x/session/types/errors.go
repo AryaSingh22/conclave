@@ -39,6 +39,7 @@ var (
 	ErrLimitRateUnsupported      = errorsmod.Register(ModuleName, 1428, "a leg's signed §5.1 limit RATE cannot be evaluated for this match shape (no single counter-asset, a malformed/negative limit, or operands beyond exact comparison) — the match is rejected rather than settled against an unhonored limit")
 	ErrConditionNotHonored       = errorsmod.Register(ModuleName, 1429, "settlement DROPS a delivery condition a party signed: a signed condition is a REQUIREMENT, not a permission ceiling — the DataGrant leg must carry one satisfying it, or the match must not clear")
 	ErrProposalNotSole           = errorsmod.Register(ModuleName, 1430, "MsgProposeSolution must be the SOLE top-level message of its transaction, never nested in a wrapper: the SPEC §6.4 bond slash is applied in the ante handler (the only v0.50 store branch that survives the failing message), so a sibling or wrapping message could move the state the slash was priced against")
+	ErrReceiptOutcomeUnmapped    = errorsmod.Register(ModuleName, 1431, "escrow state has no §6.6 receipt condition_outcome: only RELEASED, REFUNDED and DISPUTED are reported on a receipt, and the two write-back callers can produce nothing else — reaching this is an internal invariant break, never user input")
 )
 
 // InvalidSolution composes the registered ErrInvalidSolution sentinel with the

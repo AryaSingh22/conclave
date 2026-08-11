@@ -320,12 +320,22 @@ when 2.17 landed.
 
 ### 6.4 Conditioned settlements and `condition_outcome`
 
-All of [7683_SURFACE.md](7683_SURFACE.md) §6.4 applies: `Receipt.condition_outcome`
-is stamped `NONE` unconditionally and never updated when an escrow resolves
-(D-087; the fix is task 2.9). A receipt for a conditioned settlement is
-evidence that CONCLUDE happened, **not** that delivery completed. Since task 2.7
-made conditioned settlements more common, this affects more receipts than when
-it was filed.
+All of [7683_SURFACE.md](7683_SURFACE.md) §6.4 applies, and it now says
+something different: `Receipt.condition_outcome` REPORTS the leg's escrow
+(task 2.9, D-100) — `PENDING` at CONCLUDE, then `DISPUTED`/`RELEASED`/
+`REFUNDED` as the escrow moves, `NONE` only when the settlement carried no
+condition at all. A solver reading a receipt back for its own accounting can
+therefore tell a delivered conditioned settlement from a refunded one without
+querying `x/escrow`; the `receipt_condition_outcome` event fires on each
+change. Note the field is the receipt's ONLY mutable one, so a cached
+non-terminal reading must be re-fetched (§6.2 there).
+
+~~All of 7683_SURFACE.md §6.4 applies: `Receipt.condition_outcome` is stamped
+`NONE` unconditionally and never updated when an escrow resolves (D-087; the
+fix is task 2.9). A receipt for a conditioned settlement is evidence that
+CONCLUDE happened, **not** that delivery completed.~~ — retired at 2.9. What
+survives is narrower and still true: a receipt with a NON-terminal outcome is
+evidence of CONCLUDE, not of delivery.
 
 ### 6.5 Not covered by the determinism vector
 
