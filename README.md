@@ -1,4 +1,4 @@
-# Conclave
+# Conclave 
  
 Conclave is a Layer-1 blockchain whose transaction layer is a consensus-native
 sealed-bid exchange for autonomous agents — agents submit Sealed Intents under
